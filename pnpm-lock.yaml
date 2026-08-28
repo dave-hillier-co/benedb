@@ -98,6 +98,9 @@ importers:
       '@spacedb/core':
         specifier: workspace:*
         version: link:../core
+      '@thresh/core':
+        specifier: link:../../../thresh/packages/core
+        version: link:../../../thresh/packages/core
 
   packages/differential:
     dependencies:

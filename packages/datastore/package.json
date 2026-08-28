@@ -7,6 +7,7 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "@spacedb/core": "workspace:*"
+    "@spacedb/core": "workspace:*",
+    "@thresh/core": "link:../../../thresh/packages/core"
   }
 }

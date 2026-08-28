@@ -51,7 +51,6 @@ presence records the mapping, not completion — the gates in
 | S2    | `src/Spiceport.Datastore/DatastoreState.cs`                                          | `packages/datastore/src/datastore-state.ts`                                          |
 | S2    | `src/Spiceport.Datastore/IDatastore.cs`                                              | `packages/datastore/src/i-datastore.ts`                                              |
 | S2    | `src/Spiceport.Datastore/IGraphReader.cs`                                            | `packages/datastore/src/i-graph-reader.ts`                                           |
-| S2    | `src/Spiceport.Datastore/InternalsVisibleTo.cs`                                      | `packages/datastore/src/internals-visible-to.ts`                                     |
 | S2    | `src/Spiceport.Datastore/MvccReadWriteTransaction.cs`                                | `packages/datastore/src/mvcc-read-write-transaction.ts`                              |
 | S2    | `src/Spiceport.Datastore/MvccSnapshotReader.cs`                                      | `packages/datastore/src/mvcc-snapshot-reader.ts`                                     |
 | S2    | `src/Spiceport.Datastore/ReferenceDatastore.cs`                                      | `packages/datastore/src/reference-datastore.ts`                                      |
@@ -177,7 +176,6 @@ presence records the mapping, not completion — the gates in
 | S4    | `src/Spiceport.Server/Grains/ISchemaSource.cs`                                       | `packages/grains/src/i-schema-source.ts`                                             |
 | S4    | `src/Spiceport.Server/Grains/ISequencerMetrics.cs`                                   | `packages/grains/src/i-sequencer-metrics.ts`                                         |
 | S4    | `src/Spiceport.Server/Grains/ISnapshotScanner.cs`                                    | `packages/grains/src/i-snapshot-scanner.ts`                                          |
-| S4    | `src/Spiceport.Server/Grains/InternalsVisibleTo.cs`                                  | `packages/grains/src/internals-visible-to.ts`                                        |
 | S4    | `src/Spiceport.Server/Grains/JsonElementSurrogate.cs`                                | `packages/grains/src/json-element-surrogate.ts`                                      |
 | S4    | `src/Spiceport.Server/Grains/MembershipWalkGrain.cs`                                 | `packages/grains/src/membership-walk-grain.ts`                                       |
 | S4    | `src/Spiceport.Server/Grains/MembershipWalkKey.cs`                                   | `packages/grains/src/membership-walk-key.ts`                                         |
@@ -295,6 +293,16 @@ presence records the mapping, not completion — the gates in
 | S5    | `tests/Spiceport.Differential.Tests/SpiceDbGrpcClient.cs`                            | `packages/differential/src/spice-db-grpc-client.test.ts`                             |
 | S5    | `tests/Spiceport.Differential.Tests/SpiceDbReset.cs`                                 | `packages/differential/src/spice-db-reset.test.ts`                                   |
 | S5    | `tests/Spiceport.Differential.Tests/WriteSchemaWildcardTransitivityTests.cs`         | `packages/differential/src/write-schema-wildcard-transitivity-tests.test.ts`         |
+
+## Spiceport files with no SpaceDB target
+
+C# constructs that carry no code across. Listed so the ledger still accounts for every source
+file, rather than leaving them to look overlooked.
+
+| Spiceport                                           | Why                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/Spiceport.Datastore/InternalsVisibleTo.cs`     | An assembly-level `[InternalsVisibleTo]` directive. C# `internal` has no TypeScript counterpart: a module either exports a name or it does not, and there is no friend-assembly grant to reproduce. What it encodes — that the grain layer and the gate tests reach into the MVCC internals deliberately — is preserved by exporting those names normally and saying so at the site. |
+| `src/Spiceport.Server/Grains/InternalsVisibleTo.cs` | As above, for the grain layer.                                                                                                                                                                                                                                                                                                                                                       |
 
 ## Files with no Spiceport source
 

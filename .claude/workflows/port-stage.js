@@ -134,8 +134,27 @@ behaviour is wire-visible.`,
   { label: "order", schema: ORDER_SCHEMA, effort: "high" },
 );
 
-const totalFiles = plan.batches.reduce((n, b) => n + b.files.length, 0);
-log(`${stage}: ${totalFiles} files in ${plan.batches.length} batches`);
+const planned = plan.batches.flatMap((b) => b.files.map((f) => f.source));
+const totalFiles = planned.length;
+
+// Completeness guard. A file silently dropped from the plan would port nothing and pass
+// every gate downstream, because the gates only ever see what the plan produced -- it is
+// the one failure mode this pipeline cannot otherwise observe. Duplicates matter too: the
+// same file ported twice in different batches means the second port overwrites the first,
+// losing whatever the later batch's dependencies taught it.
+const missing = sources.filter((s) => !planned.includes(s));
+const duplicated = planned.filter((s, i) => planned.indexOf(s) !== i);
+const unknown = planned.filter((s) => !sources.includes(s));
+if (missing.length > 0 || duplicated.length > 0 || unknown.length > 0) {
+  throw new Error(
+    `port-stage ${stage}: the plan does not cover the inputs exactly once.\n` +
+      (missing.length > 0 ? `  missing (${missing.length}): ${missing.join(", ")}\n` : "") +
+      (duplicated.length > 0 ? `  duplicated: ${duplicated.join(", ")}\n` : "") +
+      (unknown.length > 0 ? `  not an input: ${unknown.join(", ")}\n` : ""),
+  );
+}
+
+log(`${stage}: ${totalFiles} files in ${plan.batches.length} batches, coverage verified`);
 
 // ── Tests, then port, then gate ────────────────────────────────────────────
 // Sequential over batches rather than a pipeline: each batch's port depends on the
