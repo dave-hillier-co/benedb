@@ -67,6 +67,7 @@ presence records the mapping, not completion — the gates in
 | S3    | `src/Spiceport.Server/Engine/CaveatCelEnvironment.cs`                                | `packages/engine/src/caveat-cel-environment.ts`                                      |
 | S3    | `src/Spiceport.Server/Engine/CaveatCompiler.cs`                                      | `packages/engine/src/caveat-compiler.ts`                                             |
 | S3    | `src/Spiceport.Server/Engine/CaveatEvaluator.cs`                                     | `packages/engine/src/caveat-evaluator.ts`                                            |
+| S3    | `src/Spiceport.Server/Engine/CaveatEvaluator.cs`                                     | `packages/engine/src/references-identifier.ts`                                       |
 | S3    | `src/Spiceport.Server/Engine/CaveatExpression.cs`                                    | `packages/engine/src/caveat-expression.ts`                                           |
 | S3    | `src/Spiceport.Server/Engine/CheckEngine.cs`                                         | `packages/engine/src/check-engine.ts`                                                |
 | S3    | `src/Spiceport.Server/Engine/Clock.cs`                                               | `packages/engine/src/clock.ts`                                                       |
@@ -88,9 +89,11 @@ presence records the mapping, not completion — the gates in
 | S3    | `src/Spiceport.Server/Engine/Reachability/ReachabilityGraph.cs`                      | `packages/engine/src/reachability-graph.ts`                                          |
 | S3    | `src/Spiceport.Server/Engine/Reachability/RelationReference.cs`                      | `packages/engine/src/relation-reference.ts`                                          |
 | S3    | `src/Spiceport.Server/Engine/Reachability/SchemaIntrospection.cs`                    | `packages/engine/src/schema-introspection.ts`                                        |
+| S3    | `src/Spiceport.Server/Engine/Reachability/SchemaIntrospection.cs`                    | `packages/engine/src/schema-introspection-exception.ts`                              |
 | S3    | `src/Spiceport.Server/Engine/SchemaHash.cs`                                          | `packages/engine/src/schema-hash.ts`                                                 |
 | S3    | `src/Spiceport.Server/Engine/SchemaTypeException.cs`                                 | `packages/engine/src/schema-type-exception.ts`                                       |
 | S3    | `src/Spiceport.Server/Engine/SchemaTypeValidator.cs`                                 | `packages/engine/src/schema-type-validator.ts`                                       |
+| S3    | `src/Spiceport.Server/MaxDepthExceededException.cs`                                  | `packages/core/src/max-depth-exceeded-exception.ts`                                  |
 | S3    | `tests/Spiceport.Conformance.Tests/ConformanceTests.cs`                              | `packages/conformance/src/conformance-tests.test.ts`                                 |
 | S3    | `tests/Spiceport.Conformance.Tests/Loading/RelationshipSchemaValidator.cs`           | `packages/conformance/src/relationship-schema-validator.test.ts`                     |
 | S3    | `tests/Spiceport.Conformance.Tests/Loading/ValidationFileLoader.cs`                  | `packages/conformance/src/validation-file-loader.test.ts`                            |
@@ -202,7 +205,6 @@ presence records the mapping, not completion — the gates in
 | S4    | `src/Spiceport.Server/Grains/SubjectFrontierKey.cs`                                  | `packages/grains/src/subject-frontier-key.ts`                                        |
 | S4    | `src/Spiceport.Server/Grains/SubjectFrontierMemoOptions.cs`                          | `packages/grains/src/subject-frontier-memo-options.ts`                               |
 | S4    | `src/Spiceport.Server/Grains/WireConvert.cs`                                         | `packages/grains/src/wire-convert.ts`                                                |
-| S4    | `src/Spiceport.Server/MaxDepthExceededException.cs`                                  | `packages/grains/src/max-depth-exceeded-exception.ts`                                |
 | S4    | `tests/Spiceport.Grains.Tests/ActivationMemoMeshTests.cs`                            | `packages/grains/src/activation-memo-mesh-tests.test.ts`                             |
 | S4    | `tests/Spiceport.Grains.Tests/AuthzedExperimentalV1ServiceTests.cs`                  | `packages/grains/src/authzed-experimental-v1-service-tests.test.ts`                  |
 | S4    | `tests/Spiceport.Grains.Tests/AuthzedPermissionsV1ServiceTests.cs`                   | `packages/grains/src/authzed-permissions-v1-service-tests.test.ts`                   |

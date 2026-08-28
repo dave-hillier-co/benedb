@@ -25,6 +25,8 @@ const targets = args?.targets ?? ["core"];
 const sources = args?.sources ?? [];
 const tests = args?.tests ?? [];
 const batchCount = args?.batchCount ?? 5;
+/** Stage-specific guidance appended to every agent's context. */
+const notes = args?.notes ?? "";
 
 if (sources.length === 0)
   throw new Error("port-stage: args.sources must list the C# files to port");
@@ -42,7 +44,7 @@ barrels, no emojis, kebab-case filenames, one primary export per file, classic s
 The Go original is at /Users/davehillier/repos/spicedb and Orleans itself at
 /Users/davehillier/repos/orleans. Consult them when Spiceport's intent is ambiguous; never
 guess at semantics that the conformance corpus will later assert.
-`;
+${notes ? `\nStage-specific guidance:\n${notes}\n` : ""}`;
 
 const FILE_SCHEMA = {
   type: "object",
