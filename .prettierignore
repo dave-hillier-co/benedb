@@ -1,0 +1,4 @@
+node_modules
+packages/protos/generated
+packages/conformance/corpus
+pnpm-lock.yaml

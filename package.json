@@ -1,0 +1,36 @@
+{
+  "name": "spacedb",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
+    "test:conformance": "vitest run --project conformance",
+    "test:differential": "vitest run --project differential",
+    "test:all": "vitest run",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write ."
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/node": "25.9.1"
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@swc/core": "^1.15.40",
+    "eslint": "^10.4.0",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.4",
+    "unplugin-swc": "^1.5.9",
+    "vite-node": "^6.0.0",
+    "vitest": "^4.1.7"
+  }
+}

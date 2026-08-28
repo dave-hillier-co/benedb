@@ -1,0 +1,21 @@
+{
+  "name": "@spacedb/grains",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@spacedb/core": "workspace:*",
+    "@spacedb/datastore": "workspace:*",
+    "@spacedb/engine": "workspace:*",
+    "@spacedb/schema": "workspace:*",
+    "@thresh/core": "link:../../../thresh/packages/core",
+    "@thresh/runtime": "link:../../../thresh/packages/runtime",
+    "@thresh/persistence": "link:../../../thresh/packages/persistence",
+    "@thresh/journaling": "link:../../../thresh/packages/journaling",
+    "@thresh/reminders": "link:../../../thresh/packages/reminders",
+    "@thresh/hosting": "link:../../../thresh/packages/hosting"
+  }
+}

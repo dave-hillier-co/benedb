@@ -1,0 +1,18 @@
+{
+  "name": "@spacedb/conformance",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@spacedb/core": "workspace:*",
+    "@spacedb/datastore": "workspace:*",
+    "@spacedb/engine": "workspace:*",
+    "@spacedb/grains": "workspace:*",
+    "@spacedb/schema": "workspace:*",
+    "yaml": "^2.8.1",
+    "@thresh/testing": "link:../../../thresh/packages/testing"
+  }
+}

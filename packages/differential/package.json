@@ -1,0 +1,17 @@
+{
+  "name": "@spacedb/differential",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@spacedb/api": "workspace:*",
+    "@spacedb/core": "workspace:*",
+    "@spacedb/grains": "workspace:*",
+    "@spacedb/protos": "workspace:*",
+    "@grpc/grpc-js": "^1.14.1",
+    "testcontainers": "^11.9.1"
+  }
+}

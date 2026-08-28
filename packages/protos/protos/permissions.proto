@@ -1,0 +1,472 @@
+syntax = "proto3";
+
+option csharp_namespace = "Spiceport.Protos";
+
+package spiceport.v0;
+
+import "google/protobuf/struct.proto";
+
+// Minimal, NOT authzed v1 byte-compatible yet. Full authzed.api.v1 compatibility is a later step.
+service PermissionsService {
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+
+  // Check a batch of items against ONE pinned revision. Items fan out over the shared dispatch mesh;
+  // sub-problems shared across items are computed once and reused, so a batch performs materially fewer
+  // underlying dispatches/datastore reads than the naive sum of independent checks. Mirrors SpiceDB's
+  // CheckBulkPermissions: one consistency for the whole batch, pairs index-aligned to the request, and
+  // a single checked_at ZedToken.
+  rpc BatchCheckPermission(BatchCheckPermissionRequest) returns (BatchCheckPermissionResponse);
+
+  // ---- Data plane ----
+  // Schema read/write and relationship read/write/delete. Unary; relationship reads page with an
+  // opaque cursor (same convention as the lookup ops). Tokens are opaque ZedTokens.
+  rpc WriteSchema(WriteSchemaRequest) returns (WriteSchemaResponse);
+  rpc ReadSchema(ReadSchemaRequest) returns (ReadSchemaResponse);
+  rpc WriteRelationships(WriteRelationshipsRequest) returns (WriteRelationshipsResponse);
+  rpc ReadRelationships(ReadRelationshipsRequest) returns (ReadRelationshipsResponse);
+  rpc DeleteRelationships(DeleteRelationshipsRequest) returns (DeleteRelationshipsResponse);
+
+  // Whole-resource / whole-subject traversals. Unary-with-cursor for this slice (a bounded
+  // materialized page plus an opaque continuation token) rather than server streaming: the engine
+  // ops already materialize their working sets, results are small for the fixtures exercised, and a
+  // unary page keeps the gRPC surface, the grain reply DTO and the in-process TestingHost test path
+  // identical. Server streaming can be layered on later without changing the grain seam.
+
+  // Expand the permission tree of a single resource (one unary call; no cursor — a tree is whole).
+  rpc ExpandPermissionTree(ExpandPermissionTreeRequest) returns (ExpandPermissionTreeResponse);
+
+  // Enumerate the subjects (of a requested type/subrelation) that hold a resource's permission.
+  rpc LookupSubjects(LookupSubjectsRequest) returns (LookupSubjectsResponse);
+
+  // Enumerate the resources (of a requested type) on which a subject holds a permission.
+  rpc LookupResources(LookupResourcesRequest) returns (LookupResourcesResponse);
+}
+
+// ---- Watch ----
+// Relationship + schema changefeed. A SEPARATE service from PermissionsService: a long-lived
+// server-streaming changefeed has a different lifecycle from the unary permission/data-plane RPCs, so
+// keeping it on its own service keeps the request/response surface clean and lets clients depend on
+// only what they use. Mirrors authzed.api.v1.WatchService.
+service WatchService {
+  // Server-streaming changefeed. Emits one WatchResponse per committed revision (strictly AFTER the
+  // start cursor), in increasing revision order, then tails live until the client disconnects.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+}
+
+// ---- Bulk import / export ----
+// Streaming bulk load and bulk dump of relationships. A SEPARATE service from PermissionsService for
+// the same reason WatchService is separate: the two streaming RPCs have a different lifecycle from the
+// unary data-plane calls (a client-streaming load and a long server-streaming dump), so keeping them on
+// their own service keeps the unary request/response surface clean and lets clients depend on only what
+// they use. Mirrors authzed.api.v1's ImportBulkRelationships / ExportBulkRelationships.
+service BulkService {
+  // Client-streaming bulk import. Each inbound message carries a batch of relationships; the server
+  // applies each batch as an efficient insert (create-or-overwrite, NO per-row already-exists check —
+  // matching SpiceDB ImportBulk's create-only/efficient-insert path) in its own datastore write
+  // transaction. Each batch is all-or-nothing; across the whole stream the load is additive. On the
+  // client's half-close the server returns the total number loaded and the ZedToken of the LAST batch
+  // committed.
+  rpc ImportBulkRelationships(stream ImportBulkRelationshipsRequest)
+      returns (ImportBulkRelationshipsResponse);
+
+  // Server-streaming bulk export. Pages through ALL relationships (optionally filtered) at a SINGLE
+  // consistency-resolved revision: the revision is resolved once, pinned, and encoded into every
+  // after_cursor so a resumed call reads the exact same snapshot and never observes writes committed
+  // after the export began. Emits fixed-size pages, each carrying its own after_cursor; resume by
+  // passing the last cursor back in optional_cursor.
+  rpc ExportBulkRelationships(ExportBulkRelationshipsRequest)
+      returns (stream ExportBulkRelationshipsResponse);
+}
+
+message ImportBulkRelationshipsRequest {
+  // One batch of relationships to load. The server applies the whole batch in one write transaction.
+  repeated Relationship relationships = 1;
+}
+
+message ImportBulkRelationshipsResponse {
+  // Total relationships loaded across every batch in the stream.
+  uint64 num_loaded = 1;
+  // The ZedToken of the last batch committed (empty if no relationships were sent).
+  ZedToken loaded_at = 2;
+}
+
+message ExportBulkRelationshipsRequest {
+  // Optional filter; empty fields place no constraint (export everything).
+  RelationshipFilter optional_filter = 1;
+  // Page size: the maximum relationships per emitted response. 0 = the server default page size.
+  uint32 optional_limit = 2;
+  // Resume cursor from a prior page. It encodes the pinned revision, so a resumed export reads the same
+  // snapshot. When set, the request's consistency is ignored (the cursor's revision wins).
+  string optional_cursor = 3;
+  // Optional consistency requirement used only on the FIRST page (no cursor); unset = minimize_latency.
+  Consistency consistency = 4;
+}
+
+message ExportBulkRelationshipsResponse {
+  // One page of relationships, ordered by canonical tuple string.
+  repeated Relationship relationships = 1;
+  // Opaque continuation cursor: pass back in optional_cursor to fetch the next page from the SAME
+  // pinned snapshot. Empty when the export is exhausted.
+  string after_cursor = 2;
+}
+
+message WatchRequest {
+  // Which kinds of change to receive. Empty = relationship updates only (the common case).
+  repeated WatchKind optional_update_kinds = 1;
+  // Resume cursor. If set, the stream replays every change committed strictly after this token's
+  // revision, then tails. If unset, the stream starts from the current head (future writes only).
+  // A token from a different datastore instance, or older than the retained GC window, is rejected.
+  ZedToken optional_start_cursor = 2;
+}
+
+enum WatchKind {
+  WATCH_KIND_UNSPECIFIED = 0; // treated as INCLUDE_RELATIONSHIP_UPDATES
+  WATCH_KIND_INCLUDE_RELATIONSHIP_UPDATES = 1;
+  WATCH_KIND_INCLUDE_SCHEMA_UPDATES = 2;
+}
+
+message WatchResponse {
+  // The relationship mutations committed at this revision (create/touch surface as TOUCH; removals as
+  // DELETE). Empty when this response carries only a schema-change signal.
+  repeated RelationshipUpdate updates = 1;
+  // The ZedToken for this revision. Pass it back as optional_start_cursor to resume exactly once after
+  // a disconnect (the next stream begins strictly after this revision).
+  ZedToken changes_through = 2;
+  // True if the unified schema was (re)written at this revision (no detailed diff for this slice).
+  bool schema_updated = 3;
+}
+
+// Shared partial-permission shape: caveated membership plus the unresolved caveat parameter names.
+message Permissionship {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_HAS_PERMISSION = 1;
+    KIND_CONDITIONAL_PERMISSION = 2; // caveated / undetermined
+  }
+  Kind kind = 1;
+  // Caveat parameter names missing from context when kind is CONDITIONAL.
+  repeated string partial_caveat_missing_fields = 2;
+}
+
+// ---- ExpandPermissionTree ----
+
+message ExpandPermissionTreeRequest {
+  ObjectReference resource = 1;
+  string permission = 2;
+  enum ExpandMode {
+    EXPAND_MODE_UNSPECIFIED = 0; // treated as SHALLOW
+    EXPAND_MODE_SHALLOW = 1;
+    EXPAND_MODE_RECURSIVE = 2;
+  }
+  ExpandMode mode = 3;
+  // Optional consistency requirement; unset = minimize_latency.
+  Consistency consistency = 4;
+}
+
+message ExpandPermissionTreeResponse {
+  PermissionTreeNode tree_root = 1;
+  // The ZedToken for the revision actually evaluated.
+  ZedToken expanded_at = 2;
+}
+
+// A node in the expanded permission tree. A leaf carries directly-written subjects; an intermediate
+// node carries a set operation over child nodes. Mirrors the engine's PermissionTreeNode.
+message PermissionTreeNode {
+  // The resource ONR this node expands: type/id from `expanded_object`, relation in `expanded_relation`.
+  ObjectReference expanded_object = 1;
+  string expanded_relation = 2;
+  // Optional caveat parameter names gating this whole node (a non-empty list = the node is caveated).
+  repeated string caveat_missing_fields = 3;
+
+  oneof node {
+    LeafNode leaf = 4;
+    SetOpNode set_op = 5;
+  }
+
+  message LeafNode {
+    repeated DirectSubject subjects = 1;
+  }
+
+  message SetOpNode {
+    enum Operation {
+      OPERATION_UNSPECIFIED = 0;
+      OPERATION_UNION = 1;
+      OPERATION_INTERSECTION = 2;
+      OPERATION_EXCLUSION = 3;
+    }
+    Operation operation = 1;
+    repeated PermissionTreeNode children = 2;
+  }
+
+  // A directly-written subject of a base relation (may be a wildcard or a non-terminal userset).
+  message DirectSubject {
+    SubjectReference subject = 1;
+    // True when the subject is the public wildcard "*".
+    bool is_wildcard = 2;
+    // Caveat parameter names gating this subject (non-empty = the subject is caveated).
+    repeated string caveat_missing_fields = 3;
+  }
+}
+
+// ---- LookupSubjects ----
+
+message LookupSubjectsRequest {
+  ObjectReference resource = 1;
+  string permission = 2;
+  // The requested subject namespace and optional subrelation (empty = ellipsis).
+  string subject_object_type = 3;
+  string optional_subject_relation = 4;
+  google.protobuf.Struct context = 5;
+  // Soft page size; 0 = engine default / unbounded for this slice.
+  uint32 optional_limit = 6;
+  // Opaque continuation token from a prior page; empty to start.
+  string optional_cursor = 7;
+  // Optional consistency requirement; unset = minimize_latency.
+  Consistency consistency = 8;
+}
+
+message LookupSubjectsResponse {
+  repeated FoundSubject subjects = 1;
+  // Opaque continuation token; empty when the enumeration is exhausted.
+  string after_result_cursor = 2;
+  // The ZedToken for the revision actually evaluated.
+  ZedToken looked_up_at = 3;
+}
+
+message FoundSubject {
+  string subject_object_id = 1; // "*" for a wildcard match
+  bool is_wildcard = 2;
+  Permissionship permissionship = 3;
+}
+
+// ---- LookupResources ----
+
+message LookupResourcesRequest {
+  string resource_object_type = 1;
+  string permission = 2;
+  SubjectReference subject = 3;
+  google.protobuf.Struct context = 4;
+  // Soft page size; 0 = engine default / unbounded for this slice.
+  uint32 optional_limit = 5;
+  // Opaque continuation token from a prior page; empty to start.
+  string optional_cursor = 6;
+  // Optional consistency requirement; unset = minimize_latency.
+  Consistency consistency = 7;
+}
+
+message LookupResourcesResponse {
+  repeated FoundResource resources = 1;
+  // Opaque continuation token; empty when the enumeration is exhausted.
+  string after_result_cursor = 2;
+  // The ZedToken for the revision actually evaluated.
+  ZedToken looked_up_at = 3;
+}
+
+message FoundResource {
+  string resource_object_id = 1;
+  Permissionship permissionship = 2;
+}
+
+message ObjectReference {
+  string object_type = 1;
+  string object_id = 2;
+}
+
+message SubjectReference {
+  ObjectReference object = 1;
+  // Optional subrelation; empty means the ellipsis "..." (direct subject).
+  string optional_relation = 2;
+}
+
+// The consistency a read request demands, mirroring authzed.api.v1.Consistency. An unset Consistency
+// (the whole message absent) is treated as minimize_latency, the server default.
+message Consistency {
+  oneof requirement {
+    // Read at the optimized (quantized, head-pinned) revision for best latency/cache hit rate.
+    bool minimize_latency = 1;
+    // Read at least as fresh as this token (read-your-writes); picks max(token, optimized).
+    ZedToken at_least_as_fresh = 2;
+    // Read at the freshest committed (head) revision.
+    bool fully_consistent = 3;
+    // Read exactly at the snapshot encoded by this token.
+    ZedToken at_exact_snapshot = 4;
+  }
+}
+
+message CheckPermissionRequest {
+  ObjectReference resource = 1;
+  string permission = 2;
+  SubjectReference subject = 3;
+  // Request-time caveat context (overrides relationship context).
+  google.protobuf.Struct context = 4;
+  // Optional consistency requirement; unset = minimize_latency.
+  Consistency consistency = 5;
+}
+
+message CheckPermissionResponse {
+  enum Permissionship {
+    PERMISSIONSHIP_UNSPECIFIED = 0;
+    PERMISSIONSHIP_NO_PERMISSION = 1;
+    PERMISSIONSHIP_HAS_PERMISSION = 2;
+    PERMISSIONSHIP_CONDITIONAL_PERMISSION = 3; // caveated / undetermined
+  }
+  Permissionship permissionship = 1;
+  // Caveat parameter names missing from context when permissionship is CONDITIONAL.
+  repeated string partial_caveat_missing_fields = 2;
+  // The ZedToken for the revision the check actually evaluated against (chain into at_least_as_fresh).
+  ZedToken checked_at = 3;
+}
+
+// ---- BatchCheckPermission ----
+
+// One item of a batch check: a resource/permission/subject triple with its OWN caveat context. There is
+// deliberately NO per-item consistency — the whole batch pins one revision.
+message BatchCheckPermissionRequestItem {
+  ObjectReference resource = 1;
+  string permission = 2;
+  SubjectReference subject = 3;
+  // Per-item request-time caveat context (overrides relationship context).
+  google.protobuf.Struct context = 4;
+}
+
+message BatchCheckPermissionRequest {
+  repeated BatchCheckPermissionRequestItem items = 1;
+  // ONE consistency requirement for the whole batch; unset = minimize_latency.
+  Consistency consistency = 2;
+}
+
+// One item's per-item verdict. The evaluated revision/token live ONCE on the response (checked_at).
+message BatchCheckPermissionResponseItem {
+  CheckPermissionResponse.Permissionship permissionship = 1;
+  // Caveat parameter names missing from this item's context when permissionship is CONDITIONAL.
+  repeated string partial_caveat_missing_fields = 2;
+}
+
+// A request/response pair, index-aligned to the request items. The `error` arm is reserved for forward
+// compatibility (per-item errors); this slice surfaces batch-level errors as a single RPC status.
+message BatchCheckPermissionPair {
+  BatchCheckPermissionRequestItem request = 1;
+  oneof response {
+    BatchCheckPermissionResponseItem item = 2;
+  }
+}
+
+message BatchCheckPermissionResponse {
+  // Pairs index-aligned to the request items.
+  repeated BatchCheckPermissionPair pairs = 1;
+  // The SINGLE ZedToken for the revision the whole batch evaluated against.
+  ZedToken checked_at = 2;
+}
+
+// ---- Data plane: schema ----
+
+// An opaque consistency token (revision + optional schema hash + datastore id), round-trippable.
+message ZedToken {
+  string token = 1;
+}
+
+message WriteSchemaRequest {
+  string schema = 1;
+}
+
+message WriteSchemaResponse {
+  ZedToken written_at = 1;
+}
+
+message ReadSchemaRequest {}
+
+message ReadSchemaResponse {
+  string schema_text = 1;
+  ZedToken read_at = 2;
+}
+
+// ---- Data plane: relationships ----
+
+message ContextualizedCaveat {
+  string caveat_name = 1;
+  google.protobuf.Struct context = 2;
+}
+
+message Relationship {
+  ObjectReference resource = 1;
+  string resource_relation = 2;
+  SubjectReference subject = 3;
+  ContextualizedCaveat optional_caveat = 4;
+  // Unix seconds; 0 = no expiration.
+  int64 optional_expires_at_unix_seconds = 5;
+}
+
+message RelationshipUpdate {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0; // treated as TOUCH
+    OPERATION_CREATE = 1;
+    OPERATION_TOUCH = 2;
+    OPERATION_DELETE = 3;
+  }
+  Operation operation = 1;
+  Relationship relationship = 2;
+}
+
+// A condition checked atomically, inside the write transaction, against the same snapshot the writes
+// commit at. If any precondition fails the whole write is rejected (FailedPrecondition) and nothing
+// commits. Mirrors authzed.api.v1.Precondition.
+message Precondition {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    // The filter MUST match at least one relationship.
+    OPERATION_MUST_MATCH = 1;
+    // The filter MUST NOT match any relationship.
+    OPERATION_MUST_NOT_MATCH = 2;
+  }
+  Operation operation = 1;
+  RelationshipFilter filter = 2;
+}
+
+message WriteRelationshipsRequest {
+  repeated RelationshipUpdate updates = 1;
+  // Checked atomically before the updates apply; any failure rejects the whole write.
+  repeated Precondition optional_preconditions = 2;
+}
+
+message WriteRelationshipsResponse {
+  ZedToken written_at = 1;
+}
+
+// The subset of the relationships filter the data plane surfaces. Empty fields = no constraint.
+message RelationshipFilter {
+  string resource_type = 1;
+  string optional_resource_id_prefix = 2;
+  repeated string optional_resource_ids = 3;
+  string optional_resource_relation = 4;
+  string optional_subject_type = 5;
+  repeated string optional_subject_ids = 6;
+  string optional_subject_relation = 7;
+}
+
+message ReadRelationshipsRequest {
+  RelationshipFilter filter = 1;
+  uint32 optional_limit = 2;
+  string optional_cursor = 3;
+  // Optional consistency requirement; unset = minimize_latency.
+  Consistency consistency = 4;
+}
+
+message ReadRelationshipsResponse {
+  repeated Relationship relationships = 1;
+  // Opaque continuation token; empty when exhausted.
+  string after_result_cursor = 2;
+  ZedToken read_at = 3;
+}
+
+message DeleteRelationshipsRequest {
+  RelationshipFilter filter = 1;
+  uint32 optional_limit = 2;
+  // Checked atomically before the deletes apply; any failure rejects the whole delete.
+  repeated Precondition optional_preconditions = 3;
+}
+
+message DeleteRelationshipsResponse {
+  uint64 deleted_count = 1;
+  bool reached_limit = 2;
+  ZedToken deleted_at = 3;
+}

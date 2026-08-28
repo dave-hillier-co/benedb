@@ -1,0 +1,18 @@
+{
+  "name": "@spacedb/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@spacedb/core": "workspace:*",
+    "@spacedb/engine": "workspace:*",
+    "@spacedb/grains": "workspace:*",
+    "@spacedb/protos": "workspace:*",
+    "@grpc/grpc-js": "^1.14.1",
+    "@thresh/client": "link:../../../thresh/packages/client",
+    "@thresh/core": "link:../../../thresh/packages/core"
+  }
+}

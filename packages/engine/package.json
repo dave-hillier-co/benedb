@@ -1,0 +1,16 @@
+{
+  "name": "@spacedb/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@spacedb/core": "workspace:*",
+    "@spacedb/datastore": "workspace:*",
+    "@spacedb/schema": "workspace:*",
+    "@bufbuild/cel": "^0.2.0",
+    "@bufbuild/protobuf": "^2.10.1"
+  }
+}

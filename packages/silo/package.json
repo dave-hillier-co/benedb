@@ -1,0 +1,14 @@
+{
+  "name": "@spacedb/silo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@spacedb/grains": "workspace:*",
+    "@thresh/hosting": "link:../../../thresh/packages/hosting",
+    "@thresh/core": "link:../../../thresh/packages/core"
+  }
+}
