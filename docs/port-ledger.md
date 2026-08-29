@@ -7,6 +7,12 @@ Paths are relative to `../spiceport` and to this repository's root respectively.
 presence records the mapping, not completion — the gates in
 [`port-plan.md`](port-plan.md) decide that.
 
+`tests/Spiceport.Conformance.Tests/SteelThread/SteelThreadTests.cs` is listed under S4 rather
+than with the rest of the conformance suite: it drives `Spiceport.Grains.SchemaChangeValidator`,
+an S4 file, so pulling it forward would break the leaves-first ordering. It also needs its
+`SteelThread/TestData` and `SteelThread/Results` golden trees vendored, which the corpus under
+`packages/conformance/corpus` does not carry.
+
 | Stage | Spiceport                                                                            | SpaceDB                                                                              |
 | ----- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | S1    | `src/Spiceport.Core/CaveatEvaluationException.cs`                                    | `packages/core/src/caveat-evaluation-exception.ts`                                   |
@@ -95,14 +101,13 @@ presence records the mapping, not completion — the gates in
 | S3    | `src/Spiceport.Server/Engine/SchemaTypeValidator.cs`                                 | `packages/engine/src/schema-type-validator.ts`                                       |
 | S3    | `src/Spiceport.Server/MaxDepthExceededException.cs`                                  | `packages/core/src/max-depth-exceeded-exception.ts`                                  |
 | S3    | `tests/Spiceport.Conformance.Tests/ConformanceTests.cs`                              | `packages/conformance/src/conformance-tests.test.ts`                                 |
-| S3    | `tests/Spiceport.Conformance.Tests/Loading/RelationshipSchemaValidator.cs`           | `packages/conformance/src/relationship-schema-validator.test.ts`                     |
-| S3    | `tests/Spiceport.Conformance.Tests/Loading/ValidationFileLoader.cs`                  | `packages/conformance/src/validation-file-loader.test.ts`                            |
-| S3    | `tests/Spiceport.Conformance.Tests/Loading/ValidationFileLoaderTests.cs`             | `packages/conformance/src/validation-file-loader-tests.test.ts`                      |
-| S3    | `tests/Spiceport.Conformance.Tests/Loading/ValidationLoaderSuiteTests.cs`            | `packages/conformance/src/validation-loader-suite-tests.test.ts`                     |
-| S3    | `tests/Spiceport.Conformance.Tests/Loading/ValidationModel.cs`                       | `packages/conformance/src/validation-model.test.ts`                                  |
+| S3    | `tests/Spiceport.Conformance.Tests/Loading/RelationshipSchemaValidator.cs`           | `packages/conformance/src/relationship-schema-validator.ts`                          |
+| S3    | `tests/Spiceport.Conformance.Tests/Loading/ValidationFileLoader.cs`                  | `packages/conformance/src/validation-file-loader.ts`                                 |
+| S3    | `tests/Spiceport.Conformance.Tests/Loading/ValidationFileLoaderTests.cs`             | `packages/conformance/src/validation-file-loader.test.ts`                            |
+| S3    | `tests/Spiceport.Conformance.Tests/Loading/ValidationLoaderSuiteTests.cs`            | `packages/conformance/src/validation-loader-suite.test.ts`                           |
+| S3    | `tests/Spiceport.Conformance.Tests/Loading/ValidationModel.cs`                       | `packages/conformance/src/validation-model.ts`                                       |
 | S3    | `tests/Spiceport.Conformance.Tests/QuarantinedCorpusTests.cs`                        | `packages/conformance/src/quarantined-corpus-tests.test.ts`                          |
 | S3    | `tests/Spiceport.Conformance.Tests/ReverseConsistencyCrossCheckTests.cs`             | `packages/conformance/src/reverse-consistency-cross-check-tests.test.ts`             |
-| S3    | `tests/Spiceport.Conformance.Tests/SteelThread/SteelThreadTests.cs`                  | `packages/conformance/src/steel-thread-tests.test.ts`                                |
 | S3    | `tests/Spiceport.Conformance.Tests/ValidationBlockTests.cs`                          | `packages/conformance/src/validation-block-tests.test.ts`                            |
 | S3    | `tests/Spiceport.Engine.Tests/CaveatCheckTests.cs`                                   | `packages/engine/src/caveat-check-tests.test.ts`                                     |
 | S3    | `tests/Spiceport.Engine.Tests/CaveatCompletenessTests.cs`                            | `packages/engine/src/caveat-completeness-tests.test.ts`                              |
@@ -116,7 +121,7 @@ presence records the mapping, not completion — the gates in
 | S3    | `tests/Spiceport.Engine.Tests/MembershipCoverageTests.cs`                            | `packages/engine/src/membership-coverage-tests.test.ts`                              |
 | S3    | `tests/Spiceport.Engine.Tests/MembershipWalkTests.cs`                                | `packages/engine/src/membership-walk-tests.test.ts`                                  |
 | S3    | `tests/Spiceport.Engine.Tests/MetamorphicInvariantTests.cs`                          | `packages/engine/src/metamorphic-invariant-tests.test.ts`                            |
-| S3    | `tests/Spiceport.Engine.Tests/RandomAuthzWorlds.cs`                                  | `packages/engine/src/random-authz-worlds.test.ts`                                    |
+| S3    | `tests/Spiceport.Engine.Tests/RandomAuthzWorlds.cs`                                  | `packages/engine/src/random-authz-worlds.ts`                                         |
 | S3    | `tests/Spiceport.Engine.Tests/SchemaTypeValidatorTests.cs`                           | `packages/engine/src/schema-type-validator-tests.test.ts`                            |
 | S3    | `tests/Spiceport.Engine.Tests/Stage4MembershipWalkEquivalenceTests.cs`               | `packages/engine/src/stage4-membership-walk-equivalence-tests.test.ts`               |
 | S3    | `tests/Spiceport.Engine.Tests/VisitKeyTests.cs`                                      | `packages/engine/src/visit-key-tests.test.ts`                                        |
@@ -205,6 +210,7 @@ presence records the mapping, not completion — the gates in
 | S4    | `src/Spiceport.Server/Grains/SubjectFrontierKey.cs`                                  | `packages/grains/src/subject-frontier-key.ts`                                        |
 | S4    | `src/Spiceport.Server/Grains/SubjectFrontierMemoOptions.cs`                          | `packages/grains/src/subject-frontier-memo-options.ts`                               |
 | S4    | `src/Spiceport.Server/Grains/WireConvert.cs`                                         | `packages/grains/src/wire-convert.ts`                                                |
+| S4    | `tests/Spiceport.Conformance.Tests/SteelThread/SteelThreadTests.cs`                  | `packages/conformance/src/steel-thread-tests.test.ts`                                |
 | S4    | `tests/Spiceport.Grains.Tests/ActivationMemoMeshTests.cs`                            | `packages/grains/src/activation-memo-mesh-tests.test.ts`                             |
 | S4    | `tests/Spiceport.Grains.Tests/AuthzedExperimentalV1ServiceTests.cs`                  | `packages/grains/src/authzed-experimental-v1-service-tests.test.ts`                  |
 | S4    | `tests/Spiceport.Grains.Tests/AuthzedPermissionsV1ServiceTests.cs`                   | `packages/grains/src/authzed-permissions-v1-service-tests.test.ts`                   |
@@ -315,3 +321,5 @@ counterpart, so they have no row above.
 | --------------------------------------------- | --------------------------------------------- |
 | `packages/core/src/invalid-argument-error.ts` | `ArgumentException` / `ArgumentNullException` |
 | `packages/core/src/format-error.ts`           | `FormatException`                             |
+| `packages/engine/src/cel-context-value.ts`    | Cel.NET's absent-map-key semantics            |
+| `packages/engine/src/seeded-random.ts`        | `System.Random(int seed)`                     |

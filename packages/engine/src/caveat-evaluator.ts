@@ -4,6 +4,7 @@ import { CaveatEvaluationException } from "@spacedb/core/caveat-evaluation-excep
 import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
 
 import { buildCaveatCelEnvironment } from "./caveat-cel-environment";
+import { toCelContextValue } from "./cel-context-value";
 import type { CaveatExpression } from "./caveat-expression";
 import { referencesIdentifier } from "./references-identifier";
 
@@ -40,6 +41,11 @@ import { referencesIdentifier } from "./references-identifier";
  *     passes `vars` per call. A `CelEnv` instead holds its variables in mutable `data`, so a shared
  *     instance would leak one evaluation's context into the next and turn a `caveated` into a
  *     definite verdict. A fresh environment is built per evaluation.
+ *
+ *   * MAP CARRIER. Context values go through {@link toCelContextValue} on the way into the
+ *     environment. `@bufbuild/cel` throws, rather than reporting a CEL "no such key" error, when an
+ *     expression reads an absent key off a `Map`-carried map; see that module for why the carrier
+ *     stays a `Map` and what the wrapper restores.
  *
  *   * NUMERIC WIDTHS. `int` is a `bigint`, `uint` is a `CelUint` and `double` is a `number`. The C#
  *     returns `ulong` for `uint` specifically so that a value above `long.MaxValue` is not narrowed
@@ -161,7 +167,7 @@ export class CaveatEvaluator {
     // this evaluation's variables into the next.
     const env = buildCaveatCelEnvironment();
     for (const [name, value] of vars) {
-      env.set(name, value);
+      env.set(name, toCelContextValue(value));
     }
 
     const result = env.run(expression);
