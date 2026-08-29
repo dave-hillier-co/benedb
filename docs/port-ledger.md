@@ -323,3 +323,4 @@ counterpart, so they have no row above.
 | `packages/core/src/format-error.ts`           | `FormatException`                             |
 | `packages/engine/src/cel-context-value.ts`    | Cel.NET's absent-map-key semantics            |
 | `packages/engine/src/seeded-random.ts`        | `System.Random(int seed)`                     |
+| `packages/grains/src/convert-base64.ts`       | `Convert.ToBase64String` / `FromBase64String` |
