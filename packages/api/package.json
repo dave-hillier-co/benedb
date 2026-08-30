@@ -7,12 +7,17 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.1",
     "@spacedb/core": "workspace:*",
+    "@spacedb/datastore": "workspace:*",
     "@spacedb/engine": "workspace:*",
     "@spacedb/grains": "workspace:*",
     "@spacedb/protos": "workspace:*",
-    "@grpc/grpc-js": "^1.14.1",
+    "@spacedb/schema": "workspace:*",
+    "@spacedb/silo": "workspace:*",
     "@thresh/client": "link:../../../thresh/packages/client",
-    "@thresh/core": "link:../../../thresh/packages/core"
+    "@thresh/core": "link:../../../thresh/packages/core",
+    "@thresh/hosting": "link:../../../thresh/packages/hosting",
+    "@thresh/messaging": "link:../../../thresh/packages/messaging"
   }
 }

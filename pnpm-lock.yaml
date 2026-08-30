@@ -47,6 +47,9 @@ importers:
       '@spacedb/core':
         specifier: workspace:*
         version: link:../core
+      '@spacedb/datastore':
+        specifier: workspace:*
+        version: link:../datastore
       '@spacedb/engine':
         specifier: workspace:*
         version: link:../engine
@@ -56,12 +59,24 @@ importers:
       '@spacedb/protos':
         specifier: workspace:*
         version: link:../protos
+      '@spacedb/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@spacedb/silo':
+        specifier: workspace:*
+        version: link:../silo
       '@thresh/client':
         specifier: link:../../../thresh/packages/client
         version: link:../../../thresh/packages/client
       '@thresh/core':
         specifier: link:../../../thresh/packages/core
         version: link:../../../thresh/packages/core
+      '@thresh/hosting':
+        specifier: link:../../../thresh/packages/hosting
+        version: link:../../../thresh/packages/hosting
+      '@thresh/messaging':
+        specifier: link:../../../thresh/packages/messaging
+        version: link:../../../thresh/packages/messaging
 
   packages/conformance:
     dependencies:
@@ -217,15 +232,36 @@ importers:
 
   packages/silo:
     dependencies:
+      '@spacedb/core':
+        specifier: workspace:*
+        version: link:../core
+      '@spacedb/datastore':
+        specifier: workspace:*
+        version: link:../datastore
       '@spacedb/grains':
         specifier: workspace:*
         version: link:../grains
+      '@spacedb/schema':
+        specifier: workspace:*
+        version: link:../schema
       '@thresh/core':
         specifier: link:../../../thresh/packages/core
         version: link:../../../thresh/packages/core
       '@thresh/hosting':
         specifier: link:../../../thresh/packages/hosting
         version: link:../../../thresh/packages/hosting
+      '@thresh/journaling':
+        specifier: link:../../../thresh/packages/journaling
+        version: link:../../../thresh/packages/journaling
+      '@thresh/messaging':
+        specifier: link:../../../thresh/packages/messaging
+        version: link:../../../thresh/packages/messaging
+      '@thresh/persistence':
+        specifier: link:../../../thresh/packages/persistence
+        version: link:../../../thresh/packages/persistence
+      '@thresh/reminders':
+        specifier: link:../../../thresh/packages/reminders
+        version: link:../../../thresh/packages/reminders
 
 packages:
 

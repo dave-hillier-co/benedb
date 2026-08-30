@@ -259,7 +259,6 @@ an S4 file, so pulling it forward would break the leaves-first ordering. It also
 | S4    | `tests/Spiceport.Grains.Tests/SameKeyCycleMeshTests.cs`                              | `packages/grains/src/same-key-cycle-mesh-tests.test.ts`                              |
 | S4    | `tests/Spiceport.Grains.Tests/SchemaAtRevisionMeshTests.cs`                          | `packages/grains/src/schema-at-revision-mesh-tests.test.ts`                          |
 | S4    | `tests/Spiceport.Grains.Tests/SchemaPropagationMeshTests.cs`                         | `packages/grains/src/schema-propagation-mesh-tests.test.ts`                          |
-| S4    | `tests/Spiceport.Grains.Tests/SeedDataTests.cs`                                      | `packages/grains/src/seed-data-tests.test.ts`                                        |
 | S4    | `tests/Spiceport.Grains.Tests/SeededFixtureMeshTests.cs`                             | `packages/grains/src/seeded-fixture-mesh-tests.test.ts`                              |
 | S4    | `tests/Spiceport.Grains.Tests/SequencerAdmissionTests.cs`                            | `packages/grains/src/sequencer-admission-tests.test.ts`                              |
 | S4    | `tests/Spiceport.Grains.Tests/SequencerMetricsTests.cs`                              | `packages/grains/src/sequencer-metrics-tests.test.ts`                                |
@@ -286,10 +285,12 @@ an S4 file, so pulling it forward would break the leaves-first ordering. It also
 | S5    | `src/Spiceport.Api/Program.cs`                                                       | `packages/api/src/program.ts`                                                        |
 | S5    | `src/Spiceport.Api/ReflectionMapper.cs`                                              | `packages/api/src/reflection-mapper.ts`                                              |
 | S5    | `src/Spiceport.Api/RequestLimits.cs`                                                 | `packages/api/src/request-limits.ts`                                                 |
+| S5    | `src/Spiceport.Api/RequestLimits.cs`                                                 | `packages/api/src/rpc-error.ts`                                                      |
 | S5    | `src/Spiceport.Api/SchemaFilters.cs`                                                 | `packages/api/src/schema-filters.ts`                                                 |
 | S5    | `src/Spiceport.Api/SchemaValidation.cs`                                              | `packages/api/src/schema-validation.ts`                                              |
 | S5    | `src/Spiceport.Api/SeedData.cs`                                                      | `packages/api/src/seed-data.ts`                                                      |
 | S5    | `src/Spiceport.Api/WatchGrpcService.cs`                                              | `packages/api/src/watch-grpc-service.ts`                                             |
+| S5    | `src/Spiceport.Api/WatchGrpcService.cs`                                              | `packages/api/src/server-stream-writer.ts`                                           |
 | S5    | `src/Spiceport.Server/Hosting/DatastoreStorageConfig.cs`                             | `packages/silo/src/datastore-storage-config.ts`                                      |
 | S5    | `src/Spiceport.Silo/Program.cs`                                                      | `packages/silo/src/program.ts`                                                       |
 | S5    | `src/Spiceport.Silo/SiloSchema.cs`                                                   | `packages/silo/src/silo-schema.ts`                                                   |
@@ -301,6 +302,7 @@ an S4 file, so pulling it forward would break the leaves-first ordering. It also
 | S5    | `tests/Spiceport.Differential.Tests/SpiceDbGrpcClient.cs`                            | `packages/differential/src/spice-db-grpc-client.test.ts`                             |
 | S5    | `tests/Spiceport.Differential.Tests/SpiceDbReset.cs`                                 | `packages/differential/src/spice-db-reset.test.ts`                                   |
 | S5    | `tests/Spiceport.Differential.Tests/WriteSchemaWildcardTransitivityTests.cs`         | `packages/differential/src/write-schema-wildcard-transitivity-tests.test.ts`         |
+| S5    | `tests/Spiceport.Grains.Tests/SeedDataTests.cs`                                      | `packages/api/src/seed-data-tests.test.ts`                                           |
 
 ## Spiceport files with no SpaceDB target
 

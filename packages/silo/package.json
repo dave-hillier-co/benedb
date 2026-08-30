@@ -7,8 +7,15 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
+    "@spacedb/core": "workspace:*",
+    "@spacedb/datastore": "workspace:*",
     "@spacedb/grains": "workspace:*",
+    "@spacedb/schema": "workspace:*",
+    "@thresh/core": "link:../../../thresh/packages/core",
     "@thresh/hosting": "link:../../../thresh/packages/hosting",
-    "@thresh/core": "link:../../../thresh/packages/core"
+    "@thresh/journaling": "link:../../../thresh/packages/journaling",
+    "@thresh/messaging": "link:../../../thresh/packages/messaging",
+    "@thresh/persistence": "link:../../../thresh/packages/persistence",
+    "@thresh/reminders": "link:../../../thresh/packages/reminders"
   }
 }
