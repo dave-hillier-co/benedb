@@ -21,5 +21,10 @@
     "@thresh/reminders": "link:../../../thresh/packages/reminders",
     "@thresh/runtime": "link:../../../thresh/packages/runtime",
     "@thresh/testing": "link:../../../thresh/packages/testing"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0",
+    "pg": "^8.23.0",
+    "testcontainers": "^11.14.0"
   }
 }

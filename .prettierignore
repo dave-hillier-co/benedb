@@ -1,4 +1,5 @@
 node_modules
 packages/protos/generated
 packages/conformance/corpus
+packages/conformance/steel-thread
 pnpm-lock.yaml

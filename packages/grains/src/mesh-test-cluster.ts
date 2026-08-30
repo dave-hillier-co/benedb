@@ -1,6 +1,7 @@
 import type { IDatastore } from "@spacedb/datastore/i-datastore";
 import { createClient, type ClientNode } from "@thresh/client/client-node";
 import type { Duration } from "@thresh/core/duration";
+import type { GrainStorage } from "@thresh/core/grain-storage";
 import { SiloAddress } from "@thresh/core/silo-address";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { InProcessTransport } from "@thresh/messaging/in-process-transport";
@@ -151,11 +152,34 @@ export class MeshTestCluster {
   readonly #cluster: TestCluster;
   readonly #wirings: readonly SiloWiring[];
   readonly #client: ClientNode;
+  readonly #datastoreStorage: GrainStorage;
 
-  private constructor(cluster: TestCluster, wirings: readonly SiloWiring[], client: ClientNode) {
+  private constructor(
+    cluster: TestCluster,
+    wirings: readonly SiloWiring[],
+    client: ClientNode,
+    datastoreStorage: GrainStorage,
+  ) {
     this.#cluster = cluster;
     this.#wirings = wirings;
     this.#client = client;
+    this.#datastoreStorage = datastoreStorage;
+  }
+
+  /**
+   * The `datastore` grain-storage provider every silo shares - the C#'s
+   * `cluster.Services.GetRequiredKeyedService<IGrainStorage>("datastore")`.
+   *
+   * PORT DECISION 10. Thresh has no keyed DI, so there is nothing to resolve the provider back out
+   * of: the harness constructs the ONE `MemoryGrainStorage` (port decision 3) and hands it to the
+   * silos through `SpiceportGrainServicesOptions.datastoreStorage`. `ThinSequencerTests` reads the
+   * sequencer's RAW storage rows (`head`, `meta/{version}`, `log/{version}`,
+   * `shard/{flushVersion}/{dir}/{type}/{id}`, `indexb/...`, `indexd/...`) to prove the flush
+   * protocol ran, and plants an orphan log row through it, so the handle has to be reachable. It is
+   * exposed rather than faked: a test-owned duplicate store would grade rows nothing wrote.
+   */
+  get datastoreStorage(): GrainStorage {
+    return this.#datastoreStorage;
   }
 
   get cluster(): TestCluster {
@@ -371,7 +395,7 @@ export class MeshTestCluster {
     }).registerGrains(SPICEPORT_GRAIN_REGISTRATIONS);
     await client.connect();
 
-    return new MeshTestCluster(cluster, wirings, client);
+    return new MeshTestCluster(cluster, wirings, client, storage);
   }
 
   /**

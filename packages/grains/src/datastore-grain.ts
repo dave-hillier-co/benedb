@@ -1773,12 +1773,41 @@ function minBig(a: bigint, b: bigint): bigint {
   return a < b ? a : b;
 }
 
-/** `(DateTimeOffset.UtcNow - DateTimeOffset.UnixEpoch).Ticks * 100L`. */
+/**
+ * The whole-millisecond part of the process's clock origin, in nanoseconds. Read ONCE, so the
+ * sub-millisecond term below is measured against a fixed anchor - see {@link nowNanos}.
+ */
+const CLOCK_ORIGIN_NANOS = BigInt(Math.round(performance.timeOrigin)) * 1_000_000n;
+
+/**
+ * `(DateTimeOffset.UtcNow - DateTimeOffset.UnixEpoch).Ticks * 100L`.
+ *
+ * SUB-MILLISECOND ON PURPOSE. .NET ticks are 100ns and `DateTimeOffset.UtcNow` resolves finer than
+ * one commit takes, so in Spiceport `now` is essentially always greater than the head and a minted
+ * revision IS a timestamp. `Date.now()` resolves only to the millisecond, and at this grain's commit
+ * rate that is coarser than the interval between commits: every commit after the first in a given
+ * millisecond falls to the `head + 1` branch, so the head climbs ABOVE the clock and a minted
+ * revision stops being a timestamp at all.
+ *
+ * THAT IS NOT COSMETIC, and the claim this comment used to make ("nothing depends on the
+ * resolution") is false. {@link runGc} computes its floor as `min(head, now - window)` from the SAME
+ * clock, so with a zero window the floor lands at `now` while the revisions just committed sit at
+ * `now + k` - and the collection silently skips rows it was asked to collect. `thin-sequencer-tests`
+ * catches it directly: a key whose only rows are deleted below a zero-window GC floor must EMPTY at
+ * its next flush (dropping it from the key index with a tombstone), and under the millisecond clock
+ * it intermittently did not.
+ *
+ * `performance.timeOrigin + performance.now()` is the same wall clock with sub-microsecond
+ * resolution. The two halves are combined in `bigint` AFTER the small one is scaled, never as one
+ * float: `(timeOrigin + now()) * 1e6` is ~1.8e18, past float64's integer precision, and would
+ * quantise the result back to hundreds of nanoseconds. `performance.now()` is monotonic, so the
+ * result is monotonic within the process; it does NOT absorb wall-clock corrections after start,
+ * which is the deliberate trade - a clock that steps backwards would be worse here than one that
+ * drifts, and every comparison the grain makes (head vs now, GC floor vs revision) reads this same
+ * function.
+ */
 function nowNanos(): bigint {
-  // .NET ticks are 100ns; JS has only millisecond wall-clock resolution, so the value is coarser
-  // than the C#'s. Nothing depends on the resolution: minting is `now > head ? now : head + 1`, so
-  // revisions stay strictly monotonic however coarse the clock is.
-  return BigInt(Date.now()) * 1_000_000n;
+  return CLOCK_ORIGIN_NANOS + BigInt(Math.round(performance.now() * 1_000_000));
 }
 
 /** `TimeSpan <` on two `Duration`s. */

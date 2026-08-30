@@ -37,8 +37,13 @@ const notes = args?.notes ?? "";
  */
 const portTests = args?.portTests === true;
 
-if (sources.length === 0)
-  throw new Error("port-stage: args.sources must list the C# files to port");
+// A stage may be ALL tests (a mesh-suite stage, where every production file already landed in an
+// earlier slice), so an empty `sources` is legitimate as long as `portTests` supplies the work.
+if (sources.length === 0 && !(portTests && tests.length > 0)) {
+  throw new Error(
+    "port-stage: args.sources must list the C# files to port (or set portTests with args.tests)",
+  );
+}
 
 const CONTEXT = `
 You are porting Spiceport (.NET 10 + Orleans, at ${SPICEPORT}) to SpaceDB
