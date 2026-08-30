@@ -10,6 +10,7 @@ import { SiloAddress } from "@thresh/core/silo-address";
 import { InProcessTransport } from "@thresh/messaging/in-process-transport";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
+import { constructGrain } from "@thresh/runtime/construct-grain";
 
 import { DatastoreGrain } from "./datastore-grain";
 import { GrainBackedDatastore } from "./grain-backed-datastore";
@@ -77,9 +78,7 @@ async function newDatastoreCluster(): Promise<TestCluster> {
       builder.addStorage("datastore", storage);
       builder.useGrainActivator({
         createInstance: (ctor) =>
-          ctor === (DatastoreGrain as unknown as new () => DatastoreGrain)
-            ? new DatastoreGrain({ storage })
-            : new ctor(),
+          ctor === DatastoreGrain ? new DatastoreGrain({ storage }) : constructGrain(ctor),
       });
     },
   });
@@ -92,9 +91,7 @@ async function newClient(cluster: TestCluster): Promise<ClientNode> {
     local: new SiloAddress("watch-push-client", "uid-watch-push-client", "watch-push-client:22222"),
     transport: new InProcessTransport(cluster.network, cluster.clusterId),
     gateway: cluster.primary.address,
-  }).registerGrains([
-    { ctor: DatastoreGrain as unknown as new () => never, interfaces: [IDatastoreGrain] },
-  ]);
+  }).registerGrains([{ ctor: DatastoreGrain, interfaces: [IDatastoreGrain] }]);
   await client.connect();
   return client;
 }

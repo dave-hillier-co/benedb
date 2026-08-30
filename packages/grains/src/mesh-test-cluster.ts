@@ -368,7 +368,7 @@ export class MeshTestCluster {
       local: new SiloAddress("mesh-test-client", "uid-mesh-test-client", "mesh-test-client:22222"),
       transport: new InProcessTransport(cluster.network, cluster.clusterId),
       gateway: cluster.primary.address,
-    }).registerGrains(SPICEPORT_GRAIN_REGISTRATIONS.map((r) => ({ ...r })));
+    }).registerGrains(SPICEPORT_GRAIN_REGISTRATIONS);
     await client.connect();
 
     return new MeshTestCluster(cluster, wirings, client);

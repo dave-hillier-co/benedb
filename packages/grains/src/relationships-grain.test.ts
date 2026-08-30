@@ -23,6 +23,7 @@ import { grain } from "@thresh/core/decorators";
 import { Grain } from "@thresh/core/grain";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { TestCluster } from "@thresh/testing/test-cluster";
+import { constructGrain } from "@thresh/runtime/construct-grain";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { CommitFailureKind, CommitReply, CommitRequest } from "./commit-contract";
@@ -388,7 +389,7 @@ async function start(options: { maxInFlightCommits?: number } = {}): Promise<Fix
     configureSilo: (builder) => {
       builder.useGrainActivator({
         createInstance: (ctor) =>
-          ctor === (RelationshipsGrain as unknown as new () => RelationshipsGrain)
+          ctor === RelationshipsGrain
             ? new RelationshipsGrain({
                 datastore,
                 schemaProvider: provider,
@@ -397,7 +398,7 @@ async function start(options: { maxInFlightCommits?: number } = {}): Promise<Fix
                 hub: hubRef.current!,
                 admission,
               })
-            : new ctor(),
+            : constructGrain(ctor),
       });
     },
   });

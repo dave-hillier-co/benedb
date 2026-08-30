@@ -7,6 +7,7 @@ import { grainReferenceIdentity } from "@thresh/core/grain-reference";
 import { IManagementGrain } from "@thresh/core/management-grain";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
+import { constructGrain } from "@thresh/runtime/construct-grain";
 import { describe, expect, it } from "vitest";
 
 import type { CommitRequest } from "./commit-contract";
@@ -217,9 +218,7 @@ async function newCluster(): Promise<Fixture> {
       builder.addStorage("datastore", storage);
       builder.useGrainActivator({
         createInstance: (ctor) =>
-          ctor === (DatastoreGrain as unknown as new () => DatastoreGrain)
-            ? new DatastoreGrain({ storage })
-            : new ctor(),
+          ctor === DatastoreGrain ? new DatastoreGrain({ storage }) : constructGrain(ctor),
       });
     },
   });

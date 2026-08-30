@@ -12,6 +12,7 @@ import type { GrainKeyFor } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
+import { constructGrain } from "@thresh/runtime/construct-grain";
 import { describe, expect, it } from "vitest";
 
 import { DatastoreGrain } from "./datastore-grain";
@@ -64,9 +65,7 @@ async function newCluster(storage: GrainStorage): Promise<TestCluster> {
       builder.addStorage("datastore", storage);
       builder.useGrainActivator({
         createInstance: (ctor) =>
-          ctor === (DatastoreGrain as unknown as new () => DatastoreGrain)
-            ? new DatastoreGrain({ storage })
-            : new ctor(),
+          ctor === DatastoreGrain ? new DatastoreGrain({ storage }) : constructGrain(ctor),
       });
     },
   });

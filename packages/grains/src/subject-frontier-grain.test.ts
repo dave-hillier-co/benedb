@@ -12,6 +12,7 @@ import {
 import { computeSchemaHash } from "@spacedb/engine/schema-hash";
 import { compileSchema } from "@spacedb/schema/schema-compiler";
 import { TestCluster } from "@thresh/testing/test-cluster";
+import { constructGrain } from "@thresh/runtime/construct-grain";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { GRAPH_LOCALITY_PLACEMENT_STRATEGY } from "./graph-locality-placement";
@@ -182,7 +183,7 @@ async function start(options: StartOptions): Promise<Fixture> {
       );
       builder.useGrainActivator({
         createInstance: (ctor) =>
-          ctor === (SubjectFrontierGrain as unknown as new () => SubjectFrontierGrain)
+          ctor === SubjectFrontierGrain
             ? new SubjectFrontierGrain({
                 schemaSource: NEVER_READ_SCHEMA,
                 schemaProvider: new FixedSchemaProvider(snapshot),
@@ -194,7 +195,7 @@ async function start(options: StartOptions): Promise<Fixture> {
                 },
                 metrics,
               })
-            : new ctor(),
+            : constructGrain(ctor),
       });
     },
   });

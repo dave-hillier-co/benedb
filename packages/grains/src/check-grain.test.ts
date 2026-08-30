@@ -19,6 +19,7 @@ import { computeSchemaHash } from "@spacedb/engine/schema-hash";
 import { compileSchema } from "@spacedb/schema/schema-compiler";
 import { TestCluster } from "@thresh/testing/test-cluster";
 import { RequestContext } from "@thresh/core/request-context";
+import { constructGrain } from "@thresh/runtime/construct-grain";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CheckGrain } from "./check-grain";
@@ -192,7 +193,7 @@ async function start(options: StartOptions = {}): Promise<Fixture> {
       );
       builder.useGrainActivator({
         createInstance: (ctor) =>
-          ctor === (CheckGrain as unknown as new () => CheckGrain)
+          ctor === CheckGrain
             ? new CheckGrain({
                 schemaSource,
                 schemaProvider: new FixedSchemaProvider(snapshot),
@@ -202,7 +203,7 @@ async function start(options: StartOptions = {}): Promise<Fixture> {
                 memoOptions: { enabled: options.memoEnabled ?? true },
                 metrics,
               })
-            : new ctor(),
+            : constructGrain(ctor),
       });
     },
   });

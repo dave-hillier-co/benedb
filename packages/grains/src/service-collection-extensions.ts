@@ -4,9 +4,10 @@ import type { IDispatcher } from "@spacedb/engine/i-dispatcher";
 import type { ISchemaHashSource } from "@spacedb/engine/i-schema-hash-source";
 import type { Duration } from "@thresh/core/duration";
 import type { Grain } from "@thresh/core/grain";
-import type { GrainInterface } from "@thresh/core/grain-interface";
+import type { GrainRegistrationSpec } from "@thresh/core/grain-registration-spec";
 import type { GrainStorage } from "@thresh/core/grain-storage";
 import type { Logger } from "@thresh/core/logger";
+import { constructGrain } from "@thresh/runtime/construct-grain";
 import type { GrainFactoryAccess, SiloBuilder } from "@thresh/hosting/silo-builder";
 
 import type { ActivationMemoOptions } from "./activation-memo-options";
@@ -183,19 +184,13 @@ export interface SpiceportGrainServices {
  * SAME list is what a cluster CLIENT must be told about to address these grains: a client hosts no
  * activations, but `getGrain` still has to map an erased TypeScript interface onto a grain type.
  */
-export const SPICEPORT_GRAIN_REGISTRATIONS: readonly {
-  readonly ctor: new () => Grain;
-  readonly interfaces: GrainInterface<unknown>[];
-}[] = [
-  { ctor: DatastoreGrain as unknown as new () => Grain, interfaces: [IDatastoreGrain] },
-  { ctor: RelationshipsGrain as unknown as new () => Grain, interfaces: [IRelationshipsGrain] },
-  { ctor: CheckGrain as unknown as new () => Grain, interfaces: [ICheckGrain] },
-  { ctor: GraphShardGrain as unknown as new () => Grain, interfaces: [IGraphShardGrain] },
-  { ctor: MembershipWalkGrain as unknown as new () => Grain, interfaces: [IMembershipWalkGrain] },
-  {
-    ctor: SubjectFrontierGrain as unknown as new () => Grain,
-    interfaces: [ISubjectFrontierGrain],
-  },
+export const SPICEPORT_GRAIN_REGISTRATIONS: readonly GrainRegistrationSpec[] = [
+  { ctor: DatastoreGrain, interfaces: [IDatastoreGrain] },
+  { ctor: RelationshipsGrain, interfaces: [IRelationshipsGrain] },
+  { ctor: CheckGrain, interfaces: [ICheckGrain] },
+  { ctor: GraphShardGrain, interfaces: [IGraphShardGrain] },
+  { ctor: MembershipWalkGrain, interfaces: [IMembershipWalkGrain] },
+  { ctor: SubjectFrontierGrain, interfaces: [ISubjectFrontierGrain] },
 ];
 
 export function addSpiceportGrainServices(
@@ -348,13 +343,13 @@ export function addSpiceportGrainServices(
   builder.addOutgoingCallFilter(createCheckDispatchOutgoingCallFilter());
   builder.addIncomingCallFilter(createCheckDispatchIncomingCallFilter(dispatchMetrics));
 
-  builder.registerGrains([...SPICEPORT_GRAIN_REGISTRATIONS]);
+  builder.registerGrains(SPICEPORT_GRAIN_REGISTRATIONS);
 
   // Thresh has no constructor DI: the activator is the seam that hands each grain its bag. Every
   // other grain type on the silo (the management grain among them) falls through to `new ctor()`.
   builder.useGrainActivator({
-    createInstance: (ctor: new () => Grain): Grain => {
-      switch (ctor as unknown) {
+    createInstance: (ctor): Grain => {
+      switch (ctor) {
         case DatastoreGrain:
           return new DatastoreGrain({
             ...(options.datastoreStorage !== undefined
@@ -365,7 +360,7 @@ export function addSpiceportGrainServices(
               : {}),
             metrics: sequencerMetrics,
             ...(options.logger !== undefined ? { logger: options.logger } : {}),
-          }) as unknown as Grain;
+          });
         case RelationshipsGrain:
           return new RelationshipsGrain({
             datastore: datastore(),
@@ -374,7 +369,7 @@ export function addSpiceportGrainServices(
             scanner: snapshotScanner(),
             hub: hub(),
             admission,
-          }) as unknown as Grain;
+          });
         case CheckGrain:
           return new CheckGrain({
             schemaSource: schemaSource(),
@@ -384,7 +379,7 @@ export function addSpiceportGrainServices(
             readerSource: graphReaderSource(),
             memoOptions: activationMemoOptions,
             metrics: dispatchMetrics,
-          }) as unknown as Grain;
+          });
         case MembershipWalkGrain:
           return new MembershipWalkGrain({
             schemaSource: schemaSource(),
@@ -392,7 +387,7 @@ export function addSpiceportGrainServices(
             schemaResolver,
             readerSource: graphReaderSource(),
             options: membershipWalkOptions,
-          }) as unknown as Grain;
+          });
         case SubjectFrontierGrain:
           return new SubjectFrontierGrain({
             schemaSource: schemaSource(),
@@ -401,9 +396,9 @@ export function addSpiceportGrainServices(
             readerSource: graphReaderSource(),
             memoOptions: subjectFrontierMemoOptions,
             metrics: dispatchMetrics,
-          }) as unknown as Grain;
+          });
         default:
-          return new ctor();
+          return constructGrain(ctor);
       }
     },
   });
