@@ -58,6 +58,23 @@ barrels, no emojis, kebab-case filenames, one primary export per file, classic s
 The Go original is at /Users/davehillier/repos/spicedb and Orleans itself at
 /Users/davehillier/repos/orleans. Consult them when Spiceport's intent is ambiguous; never
 guess at semantics that the conformance corpus will later assert.
+
+FLAG SUSPECT SPICEPORT CODE; DO NOT ACT ON IT. Spiceport is the design authority and its
+decisions are already paid for by its own test suite, so "transliterate; do not redesign" still
+governs everything you write: reproduce the C# behaviour even where you believe it is wrong, and
+let the port carry the same bug. But do not let the suspicion evaporate either - record it in
+"sourceConcerns" with the file and line, the concrete input that shows it, and what the port does.
+
+The bar is "I traced this and it is wrong", not "this surprised me" or "I would have written it
+differently". Empty is the normal and expected answer for most files. Spend NO extra time hunting:
+this is for what you notice while reading a file you had to read anyway, never a reason to go
+looking, to open files outside your batch, or to write a probe. If confirming a suspicion would
+cost real time, record it as confidence "unsure" and move on - a cheap uncertain flag someone can
+follow up is worth more than an expensive certain one that ate the batch.
+
+The one case where a concern changes what you write is when reproducing the C# faithfully is
+IMPOSSIBLE (the construct has no TypeScript counterpart) - that is an ordinary "deviations" entry
+and the existing rules apply. A bug you could reproduce but would rather not is NOT that case.
 ${notes ? `\nStage-specific guidance:\n${notes}\n` : ""}`;
 
 const FILE_SCHEMA = {
@@ -116,8 +133,50 @@ const RESULT_SCHEMA = {
       items: { type: "string" },
       description: "Thresh features or bugs that blocked the port",
     },
+    sourceConcerns: {
+      type: "array",
+      description:
+        "Spiceport code that looks WRONG - not merely surprising. Observation only: the port still " +
+        "reproduces the C# behaviour. Empty is the normal answer; only a concern you can state as a " +
+        "concrete input and consequence belongs here.",
+      items: {
+        type: "object",
+        properties: {
+          source: {
+            type: "string",
+            description: "C# file and line, e.g. Grains/SchemaDiff.cs:233",
+          },
+          claim: { type: "string", description: "one sentence: what is wrong" },
+          consequence: {
+            type: "string",
+            description:
+              "a concrete input and the wrong behaviour it produces, or 'unreachable' plus why nothing can currently reach it",
+          },
+          confidence: {
+            type: "string",
+            enum: ["certain", "likely", "unsure"],
+            description:
+              "certain = you traced it end to end in the C#; unsure = it smells wrong but you did not confirm the consequence",
+          },
+          portBehaviour: {
+            type: "string",
+            description:
+              "what the TypeScript does: 'reproduces it' (the default and the rule), or the deviation taken and why it was forced",
+          },
+        },
+        required: ["source", "claim", "consequence", "confidence", "portBehaviour"],
+      },
+    },
   },
-  required: ["targetPath", "done", "exportsAdded", "deviations", "guideGaps", "threshGaps"],
+  required: [
+    "targetPath",
+    "done",
+    "exportsAdded",
+    "deviations",
+    "guideGaps",
+    "threshGaps",
+    "sourceConcerns",
+  ],
 };
 
 // ── Order ──────────────────────────────────────────────────────────────────
@@ -335,7 +394,13 @@ ${plan.batches
   .join("\n")}
 
 Read both sides — the C# and the TypeScript — for each. Report only defects you can state as a
-concrete failing input, with the file and line. If you find none, say so; do not pad.`,
+concrete failing input, with the file and line. If you find none, say so; do not pad.
+
+When a defect you find is present on BOTH sides, say so explicitly and label it a SPICEPORT
+CONCERN rather than a port defect. The two need opposite responses: a port defect is fixed here,
+whereas a faithfully-copied C# bug is left exactly as it is and only recorded — so reporting the
+second as the first would send someone to "fix" a deliberate transliteration. You are already
+reading both sides, so this costs nothing; do not go looking beyond the files listed above.`,
         { label: `review:${lens.key}`, phase: "Review", effort: "high" },
       ),
   ),
@@ -349,5 +414,6 @@ return {
   deviations: results.flatMap((r) => r?.deviations ?? []),
   guideGaps: results.flatMap((r) => r?.guideGaps ?? []),
   threshGaps: results.flatMap((r) => r?.threshGaps ?? []),
+  sourceConcerns: results.flatMap((r) => r?.sourceConcerns ?? []),
   reviews: LENSES.map((l, i) => ({ lens: l.key, findings: reviews[i] })),
 };

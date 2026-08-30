@@ -47,6 +47,12 @@ pnpm lint                         # eslint + prettier
 - **Transliterate; do not redesign.** Keep the same names, structure and order of operations as
   the C#. Spiceport's design decisions have already been paid for by its own test suite;
   re-litigating them in the port loses that.
+- **Flag suspect Spiceport code; do not act on it.** Transliteration means reproducing a C# bug,
+  not fixing it — but a suspicion noticed in passing should be recorded rather than absorbed.
+  Raise it as an issue on `spiceport`, with the file and line, the input that shows it, and the
+  consequence. The bar is "I traced this and it is wrong", not "this surprised me"; an unreachable
+  one is still worth a line, marked unreachable. Do not go hunting: this is for what a file you had
+  to read anyway reveals. `sourceConcerns` in the port-stage workflow is the collection point.
 - **When the blocker is Thresh, fix Thresh.** Test-first, in that repo. Working around a Thresh
   limitation here hides the bug that SpaceDB exists to surface.
 - Record every source file's target in [`docs/port-ledger.md`](docs/port-ledger.md), so that
