@@ -232,7 +232,7 @@ an S4 file, so pulling it forward would break the leaves-first ordering. It also
 | S4    | `tests/Spiceport.Grains.Tests/DatastoreGcMeshTests.cs`                               | `packages/grains/src/datastore-gc-mesh-tests.test.ts`                                |
 | S4    | `tests/Spiceport.Grains.Tests/DatastoreInterleavedReadTests.cs`                      | `packages/grains/src/datastore-interleaved-read-tests.test.ts`                       |
 | S4    | `tests/Spiceport.Grains.Tests/DatastoreStateWireRoundTripTests.cs`                   | `packages/grains/src/datastore-state-wire-round-trip-tests.test.ts`                  |
-| S4    | `tests/Spiceport.Grains.Tests/DispatchContextTestHelper.cs`                          | `packages/grains/src/dispatch-context-test-helper.test.ts`                           |
+| S4    | `tests/Spiceport.Grains.Tests/DispatchContextTestHelper.cs`                          | `packages/grains/src/dispatch-context-test-helper.ts` (+ `.test.ts` cases)           |
 | S4    | `tests/Spiceport.Grains.Tests/DispatchContextTests.cs`                               | `packages/grains/src/dispatch-context-tests.test.ts`                                 |
 | S4    | `tests/Spiceport.Grains.Tests/DispatchErrorMapperTests.cs`                           | `packages/grains/src/dispatch-error-mapper-tests.test.ts`                            |
 | S4    | `tests/Spiceport.Grains.Tests/DispatchMeshMetricsTests.cs`                           | `packages/grains/src/dispatch-mesh-metrics-tests.test.ts`                            |
@@ -247,11 +247,11 @@ an S4 file, so pulling it forward would break the leaves-first ordering. It also
 | S4    | `tests/Spiceport.Grains.Tests/GrainBackedDatastoreWriteBaseTests.cs`                 | `packages/grains/src/grain-backed-datastore-write-base-tests.test.ts`                |
 | S4    | `tests/Spiceport.Grains.Tests/GrainKeyCodecTests.cs`                                 | `packages/grains/src/grain-key-codec-tests.test.ts`                                  |
 | S4    | `tests/Spiceport.Grains.Tests/GraphLocalityPlacementTests.cs`                        | `packages/grains/src/graph-locality-placement-tests.test.ts`                         |
-| S4    | `tests/Spiceport.Grains.Tests/IsolatedWatchHub.cs`                                   | `packages/grains/src/isolated-watch-hub.test.ts`                                     |
+| S4    | `tests/Spiceport.Grains.Tests/IsolatedWatchHub.cs`                                   | `packages/grains/src/isolated-watch-hub.ts`                                          |
 | S4    | `tests/Spiceport.Grains.Tests/LogEventEquivalenceTests.cs`                           | `packages/grains/src/log-event-equivalence-tests.test.ts`                            |
 | S4    | `tests/Spiceport.Grains.Tests/MembershipWalkGrainTests.cs`                           | `packages/grains/src/membership-walk-grain-tests.test.ts`                            |
-| S4    | `tests/Spiceport.Grains.Tests/MeshClusterCollection.cs`                              | `packages/grains/src/mesh-cluster-collection.test.ts`                                |
-| S4    | `tests/Spiceport.Grains.Tests/MeshTestCluster.cs`                                    | `packages/grains/src/mesh-test-cluster.test.ts`                                      |
+| S4    | `tests/Spiceport.Grains.Tests/MeshClusterCollection.cs`                              | `packages/grains/src/mesh-cluster-collection.ts`                                     |
+| S4    | `tests/Spiceport.Grains.Tests/MeshTestCluster.cs`                                    | `packages/grains/src/mesh-test-cluster.ts`                                           |
 | S4    | `tests/Spiceport.Grains.Tests/NativeCancellationProbeTests.cs`                       | `packages/grains/src/native-cancellation-probe-tests.test.ts`                        |
 | S4    | `tests/Spiceport.Grains.Tests/ReverseOpsCorpusMeshTests.cs`                          | `packages/grains/src/reverse-ops-corpus-mesh-tests.test.ts`                          |
 | S4    | `tests/Spiceport.Grains.Tests/ReverseOpsGrpcServiceTests.cs`                         | `packages/grains/src/reverse-ops-grpc-service-tests.test.ts`                         |

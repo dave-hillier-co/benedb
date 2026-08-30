@@ -8,17 +8,18 @@ import { defineGrainInterface } from "@thresh/core/grain-interface";
  * keeps a slow heartbeat that resubscribes and pulls the head - a missed push costs at most one
  * heartbeat of latency, never a lost event (streams always read their own diffs from the log).
  *
- * THRESH GAP, RECORDED HERE RATHER THAN WORKED AROUND. Orleans' `IGrainObserver` - a non-durable
- * CLIENT REFERENCE that a grain can hold and call back on - has no Thresh counterpart.
- * `../thresh/docs/orleans-port-analysis.md` lists it as a missing Orleans feature. Thresh has
- * `ObserverManager`, the snapshot/TTL fan-out COLLECTION ported from Orleans, but no observer
- * reference TYPE, so there is nothing for `IDatastoreGrain.subscribeWatch(watcher)` to receive and
- * later invoke. This file therefore ports the method SHAPES and the one-way delivery contract, and
- * the reference question goes to Thresh test-first before the subscribe side is wired (a later
- * slice); the port guide's Grains table needs an `IGrainObserver` row once it lands.
+ * OBSERVER REFERENCES ARE AVAILABLE (correcting an earlier note in this port that claimed
+ * otherwise). Orleans' `IGrainObserver` - a non-durable CLIENT REFERENCE that a grain can hold and
+ * call back on - maps to `ClientNode.createObjectReference` / `deleteObjectReference` (and the same
+ * pair on the `GrainFactoryAccess` a startup task is handed); `LogWatchHub` creates one and passes
+ * it into `IDatastoreGrain.subscribeWatch` as an ordinary grain-call argument, and the grain calls
+ * back on it through `ObserverManager`.
  *
- * The best-effort delivery contract above is what makes a temporarily weaker mapping survivable at
- * all: nothing is lost by a dropped push, only latency.
+ * ONE REAL DIFFERENCE, and it is load-bearing where the registration is refreshed: Orleans observer
+ * references have VALUE equality, so `DatastoreGrain` could key its `ObserverManager` by the
+ * reference itself (`Subscribe(watcher, watcher)`). Thresh references do not, so the grain keys the
+ * manager by `grainReferenceIdentity(watcher).grainId` instead - without that, every heartbeat
+ * resubscribe would ADD an entry rather than refresh one.
  */
 export interface IDatastoreWatcher {
   /** The head advanced to `head`. One-way: the notify never blocks the commit. */

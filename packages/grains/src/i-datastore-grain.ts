@@ -98,15 +98,15 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
    * re-registered. Registration expires if not refreshed (observers are best-effort, non-durable
    * client references).
    *
-   * BLOCKED ON A THRESH GAP: Thresh has no observer REFERENCE type, so there is nothing to pass
-   * here that a grain could later call back on. See `i-datastore-watcher.ts` - the fix belongs in
-   * `../thresh`, test-first, before this method is implemented in a later slice.
+   * The `watcher` is an observer REFERENCE minted by `createObjectReference` (see
+   * `i-datastore-watcher.ts`). Thresh references have no value equality, so the grain keys its
+   * `ObserverManager` by the reference's grain id rather than by the reference itself.
    */
   subscribeWatch(watcher: IDatastoreWatcher): Promise<DatastoreHeadWire>;
 
   /**
-   * Removes a head-advance observer (best-effort; expiry would remove it anyway). Blocked on the
-   * same `IGrainObserver` gap as `subscribeWatch`.
+   * Removes a head-advance observer (best-effort; expiry would remove it anyway). Keyed by the
+   * reference's grain id, like `subscribeWatch`.
    */
   unsubscribeWatch(watcher: IDatastoreWatcher): Promise<void>;
 

@@ -143,6 +143,9 @@ importers:
 
   packages/grains:
     dependencies:
+      '@spacedb/conformance':
+        specifier: workspace:*
+        version: link:../conformance
       '@spacedb/core':
         specifier: workspace:*
         version: link:../core
@@ -155,6 +158,9 @@ importers:
       '@spacedb/schema':
         specifier: workspace:*
         version: link:../schema
+      '@thresh/client':
+        specifier: link:../../../thresh/packages/client
+        version: link:../../../thresh/packages/client
       '@thresh/core':
         specifier: link:../../../thresh/packages/core
         version: link:../../../thresh/packages/core
@@ -164,6 +170,9 @@ importers:
       '@thresh/journaling':
         specifier: link:../../../thresh/packages/journaling
         version: link:../../../thresh/packages/journaling
+      '@thresh/messaging':
+        specifier: link:../../../thresh/packages/messaging
+        version: link:../../../thresh/packages/messaging
       '@thresh/persistence':
         specifier: link:../../../thresh/packages/persistence
         version: link:../../../thresh/packages/persistence
@@ -173,6 +182,9 @@ importers:
       '@thresh/runtime':
         specifier: link:../../../thresh/packages/runtime
         version: link:../../../thresh/packages/runtime
+      '@thresh/testing':
+        specifier: link:../../../thresh/packages/testing
+        version: link:../../../thresh/packages/testing
 
   packages/protos:
     dependencies:

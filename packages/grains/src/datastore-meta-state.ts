@@ -238,9 +238,10 @@ export interface DatastoreMetaEntry {
  * the small state is an immutable record. The fold replaces `value` with a new immutable state per
  * applied event.
  *
- * OPEN QUESTION, deliberately not settled here: Thresh's `bindJournaledGrain` takes a `transition`
- * that RETURNS new state, so the holder may well be droppable. The grain that would answer that is
- * a later slice, so the type is ported as-is and the fold signatures are kept free of it.
+ * SETTLED BY `datastore-grain.ts`: Thresh's `JournaledGrain.transitionState(state, event)` RETURNS
+ * the next state rather than mutating a holder in place, so the ported grain is a
+ * `JournaledGrain<DatastoreMetaState, LogEvent>` and never constructs one of these. The type stays
+ * because it is a faithful port of a source file's member, but nothing in the port depends on it.
  *
  * A mutable class rather than a readonly interface, because that mutability is the whole point of
  * the type in the source.

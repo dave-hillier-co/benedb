@@ -27,6 +27,15 @@ const tests = args?.tests ?? [];
 const batchCount = args?.batchCount ?? 5;
 /** Stage-specific guidance appended to every agent's context. */
 const notes = args?.notes ?? "";
+/**
+ * When set, the C# files in `tests` are DELIVERABLES of this stage rather than candidate covers to
+ * name in a file's `testSource`. The completeness guard then polices the union: a mesh suite
+ * silently dropped from the plan is the same invisible failure as a dropped production file, and
+ * it is the LOUDER one, because the suite is what grades the port. Declared HERE, with the other
+ * args, because the Order prompt below reads it -- a `const` beside the guard is in its temporal
+ * dead zone by then.
+ */
+const portTests = args?.portTests === true;
 
 if (sources.length === 0)
   throw new Error("port-stage: args.sources must list the C# files to port");
@@ -116,8 +125,15 @@ const plan = await agent(
 Read each of these C# files and work out the dependency graph between them:
 ${sources.map((s) => `  - ${s}`).join("\n")}
 
-Candidate covering tests:
-${tests.length > 0 ? tests.map((t) => `  - ${t}`).join("\n") : "  (none supplied)"}
+${
+  portTests
+    ? `C# test files that are THEMSELVES deliverables of this stage. Place every one of them into a
+batch, in the batch where its subject is ported or in a later one - never earlier. They are the
+gate this stage is graded by, so a dropped suite is worse than a dropped implementation:
+${tests.map((t) => `  - ${t}`).join("\n")}`
+    : `Candidate covering tests:
+${tests.length > 0 ? tests.map((t) => `  - ${t}`).join("\n") : "  (none supplied)"}`
+}
 
 Group them into roughly ${batchCount} cohesive batches, in dependency order: a batch may depend
 on earlier batches and on its own members, never on a later one. Group by module and by what a
@@ -139,14 +155,16 @@ behaviour is wire-visible.`,
 const planned = plan.batches.flatMap((b) => b.files.map((f) => f.source));
 const totalFiles = planned.length;
 
+const universe = portTests ? [...sources, ...tests] : sources;
+
 // Completeness guard. A file silently dropped from the plan would port nothing and pass
 // every gate downstream, because the gates only ever see what the plan produced -- it is
 // the one failure mode this pipeline cannot otherwise observe. Duplicates matter too: the
 // same file ported twice in different batches means the second port overwrites the first,
 // losing whatever the later batch's dependencies taught it.
-const missing = sources.filter((s) => !planned.includes(s));
+const missing = universe.filter((s) => !planned.includes(s));
 const duplicated = planned.filter((s, i) => planned.indexOf(s) !== i);
-const unknown = planned.filter((s) => !sources.includes(s));
+const unknown = planned.filter((s) => !universe.includes(s));
 if (missing.length > 0 || duplicated.length > 0 || unknown.length > 0) {
   throw new Error(
     `port-stage ${stage}: the plan does not cover the inputs exactly once.\n` +
@@ -163,6 +181,7 @@ log(`${stage}: ${totalFiles} files in ${plan.batches.length} batches, coverage v
 // earlier ones existing, which is exactly what the dependency order was computed for.
 const results = [];
 for (const [i, batch] of plan.batches.entries()) {
+  const isTestPort = (f) => tests.includes(f.source);
   const manifest = batch.files
     .map(
       (f) =>
@@ -179,7 +198,21 @@ for (const [i, batch] of plan.batches.entries()) {
 Write the tests for batch "${batch.name}" (${batch.rationale}).
 
 ${manifest}
+${
+  portTests && batch.files.some(isTestPort)
+    ? `\nThese entries are C# TEST files and are this batch's real work — port each one to Vitest at
+its target path, faithfully. Do NOT write a test for a test file:
+${batch.files
+  .filter(isTestPort)
+  .map((f) => `  - ${f.source} -> ${f.targetPath}`)
+  .join("\n")}
 
+Port them AS THEY ARE. Keep every case and every assertion. If a case cannot run yet because its
+subject is not ported, leave it failing — the port step that follows is what makes it pass. Never
+delete, skip or soften a case to get a green run; a suite that has been trimmed to fit the
+implementation grades nothing.\n`
+    : ""
+}
 For a file WITH a covering C# test: port that test to Vitest, into the .test.ts path beside its
 subject. Keep its cases and its assertions; do not weaken one to make it pass, and do not invent
 coverage the C# did not have.
@@ -202,7 +235,13 @@ pass.`,
 
 Port batch "${batch.name}" (${batch.rationale}).
 
-${manifest}
+${
+  portTests
+    ? batch.files.filter((f) => !isTestPort(f)).length === 0
+      ? "This batch is test ports only — they were just written. Make them pass by fixing the\nimplementation ported in earlier batches, never by editing the test."
+      : manifest
+    : manifest
+}
 
 Everything in earlier batches is already ported; import from it rather than duplicating.
 

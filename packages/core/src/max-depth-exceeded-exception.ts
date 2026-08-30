@@ -1,3 +1,5 @@
+import { registerSurrogate } from "@thresh/core/value-codec";
+
 /**
  * Thrown when a permission check exhausts its recursion depth budget before reaching a definitive
  * answer. Mirrors SpiceDB's `MaxDepthExceededError` (dispatch.CheckDepth): a graph/schema deeper
@@ -13,8 +15,11 @@
  * `namespace Spiceport.Core`; only its directory said otherwise.
  *
  * The C# `[GenerateSerializer]` exists so the error round-trips the Orleans grain boundary with its
- * concrete type intact. Under Thresh that becomes an error registration at the grain layer (S4);
- * the class itself carries no state beyond its message.
+ * concrete type intact. Under Thresh that is the surrogate registered at the bottom of this module:
+ * Thresh serializes a bare `Error` subclass down to an empty object, so without it this arrives at
+ * the caller as an unrecognised error, `DispatchErrorMapper` misses its domain arm, and a
+ * max-depth failure is reported as an internal `DispatchFailedException` instead of the
+ * `FailedPrecondition` the API layer owes `zed`. Importing this module performs the registration.
  */
 export class MaxDepthExceededException extends Error {
   /**
@@ -34,3 +39,10 @@ export class MaxDepthExceededException extends Error {
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+
+registerSurrogate<MaxDepthExceededException>({
+  tag: "spacedb.maxDepthExceededException",
+  test: (value) => value instanceof MaxDepthExceededException,
+  encode: (error) => ({ message: error.message }),
+  decode: (fields) => new MaxDepthExceededException(fields.message as string),
+});
