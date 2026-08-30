@@ -77,6 +77,12 @@ importers:
       '@thresh/messaging':
         specifier: link:../../../thresh/packages/messaging
         version: link:../../../thresh/packages/messaging
+      '@thresh/persistence':
+        specifier: link:../../../thresh/packages/persistence
+        version: link:../../../thresh/packages/persistence
+      '@thresh/testing':
+        specifier: link:../../../thresh/packages/testing
+        version: link:../../../thresh/packages/testing
 
   packages/conformance:
     dependencies:

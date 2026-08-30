@@ -18,6 +18,8 @@
     "@thresh/client": "link:../../../thresh/packages/client",
     "@thresh/core": "link:../../../thresh/packages/core",
     "@thresh/hosting": "link:../../../thresh/packages/hosting",
-    "@thresh/messaging": "link:../../../thresh/packages/messaging"
+    "@thresh/messaging": "link:../../../thresh/packages/messaging",
+    "@thresh/persistence": "link:../../../thresh/packages/persistence",
+    "@thresh/testing": "link:../../../thresh/packages/testing"
   }
 }
