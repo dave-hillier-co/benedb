@@ -2,6 +2,8 @@ import { CheckGrain } from "@spacedb/grains/check-grain";
 import { getGrainMetadata } from "@thresh/core/grain-metadata";
 import { SiloAddress } from "@thresh/core/silo-address";
 import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { DATASTORE_PROVIDER_NAME, createConfiguration } from "./datastore-storage-config";
@@ -222,5 +224,24 @@ describe("shutdownSiloHost", () => {
     await shutdownSiloHost(wiring);
 
     expect(calls).toContain("host.stop");
+  });
+});
+
+describe("the host entry point", () => {
+  // The defect this pins. `process.argv[1] === fileURLToPath(import.meta.url)` is the standard
+  // "am I the entry point" idiom, and it is WRONG under a bundler: everything is inlined into one
+  // file, so `import.meta.url` and `argv[1]` are both that file and the guard fires during module
+  // evaluation. `main()` then runs at import time, and `start.ts`'s own call runs a SECOND host
+  // once the first returns -- observed as a bundled artifact that shuts down on SIGTERM and comes
+  // straight back up, serving, needing a second signal to die. `start.ts` is the only entry point,
+  // so the module must have NO top-level invocation at all: inert by construction, not by a
+  // heuristic that a bundler defeats.
+  it("has no module-scope invocation of main(), which a bundler would fire at import time", () => {
+    const source = readFileSync(new URL("./program.ts", import.meta.url), "utf8");
+
+    // Matches the guard STATEMENT, not the prose: the comment above `main` explains why the
+    // guard is absent, and naming it there must not fail this.
+    expect(source).not.toMatch(/^\s*if \(process\.argv\[1\]/m);
+    expect(source).not.toMatch(/^\s*(await )?main\(\)/m);
   });
 });

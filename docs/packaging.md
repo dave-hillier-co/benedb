@@ -10,17 +10,28 @@ pnpm --filter @spacedb/api start    # gRPC on 50051, plain GET / on 8080
 pnpm --filter @spacedb/silo start   # silo only, no gRPC surface
 ```
 
-Each host has a `src/start.ts` that calls its `main()` explicitly. That file exists because
-`program.ts` ends in the usual entry-point guard — `process.argv[1] === fileURLToPath(import.meta.url)`
-— which is correct for a compiled `node program.js`, and this repository never produces one:
-`tsconfig.base.json` sets `noEmit`, every package exports its `.ts` sources
-(`"exports": { "./*": "./src/*.ts" }`), and relative imports are extensionless, so the only thing
-that can execute the tree is the SWC pipeline behind vitest / vite-node. Under vite-node
-`process.argv[1]` is the vite-node CLI, so the guard is false and `main()` silently never runs.
+Each host has a `src/start.ts` that calls its `main()` explicitly, and `program.ts` has **no
+module-scope invocation at all**. That split matters, and the obvious alternative is wrong in both
+directions.
 
-The guard is deliberately left in place: it is what keeps an **import** of `program.ts` inert, which
-is what stops a test booting a host. A backgrounded host orphans and runs forever, which is why
-`CLAUDE.md` forbids starting one from a test or from CI.
+The C# runs `Program.cs` as top-level statements, so the natural port is a
+`process.argv[1] === fileURLToPath(import.meta.url)` guard at the end of the module — the standard
+"am I the entry point" idiom, correct for a compiled `node program.js`. This repository never
+produces one: `tsconfig.base.json` sets `noEmit`, every package exports its `.ts` sources
+(`"exports": { "./*": "./src/*.ts" }`), and relative imports are extensionless, so the only thing
+that can execute the tree is the SWC pipeline behind vitest / vite-node. There, `argv[1]` is the
+vite-node CLI, the guard never matches, and `main()` silently never runs — the module loads, does
+nothing, and the process exits 0.
+
+Bundled, the guard fails the other way. Everything is inlined into one file, so `import.meta.url`
+and `argv[1]` are **both that file**: the guard fires during module evaluation, and `start.ts`'s own
+call then starts a **second host** once the first returns. The symptom is an artifact that shuts
+down on `SIGTERM` and immediately comes back up serving, needing a second signal to die.
+
+So the invocation is explicit and singular. Importing `program.ts` starts nothing **by
+construction** rather than by a heuristic a bundler defeats — which is the property that stops a
+test booting a host. A backgrounded host orphans and runs forever, which is why `CLAUDE.md` forbids
+starting one from a test or from CI.
 
 A `zed` smoke test against a running host is attended and manual, with explicit teardown:
 
@@ -79,9 +90,12 @@ installable and bundling `pg` breaks its optional `pg-native` require. Import `d
 Measured on the API host: 1,717 modules, 5.4 MB (1.04 MB gzip), ~330 ms. The artifact boots and
 serves `zed` correctly — schema reads, checks, writes and lookups.
 
-**A bundled artifact does not yet satisfy the shutdown invariant**, so no build is committed. It
-closes its listening ports on `SIGTERM` and then stays alive, holding at least one handle beyond the
-watch hub that has not been identified. The same source run under vite-node exits in about 2s, and a
-bundled bare Thresh silo shuts down correctly, so the residue is specific to the bundled full host
-rather than to bundling, to Thresh, to grpc-js or to the HTTP server. That gap is what stands between
-this and a deployable image.
+A bundled artifact satisfies the shutdown invariant: it boots, serves, and exits about 2s after a
+single `SIGTERM`. No build is committed all the same — a build path with no deployment target rots,
+and nothing would exercise it. When there is somewhere to deploy, this is the shape to build, and
+the artifact should be smoke-tested the way a host is: start it, drive it with `zed`, signal it
+once, and check the process is gone.
+
+Two failure modes to re-check whenever host wiring changes, because both were live at once and each
+masks the other: a handle that outlives shutdown (the process closes its ports and lingers), and a
+double `main()` (the process shuts down and comes straight back up).

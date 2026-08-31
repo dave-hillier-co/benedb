@@ -1,7 +1,5 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { once } from "node:events";
-import { fileURLToPath } from "node:url";
-
 import type {
   MethodDefinition,
   Server as GrpcServer,
@@ -496,6 +494,12 @@ export function createApiHost(
 /**
  * The process entry point an ATTENDED manual `zed`/grpcurl run uses. NEVER call this from a test or
  * from CI: a backgrounded host orphans and runs forever.
+ *
+ * Invoked ONLY from `start.ts`. This module deliberately has no module-scope call and no
+ * `process.argv[1] === fileURLToPath(import.meta.url)` guard: that idiom never matches under
+ * vite-node (which is the only thing here that can execute TypeScript) and fires during module
+ * evaluation once bundled, where both sides are the same inlined file - starting a second host on
+ * top of the entry point's own call. Importing this module starts nothing BY CONSTRUCTION.
  */
 export async function main(): Promise<void> {
   await runApiHost(apiHostSteps(createApiHost()));
@@ -539,9 +543,4 @@ export function apiHostSteps(host: ApiHost): ApiHostSteps {
         process.once("SIGTERM", stop);
       }),
   };
-}
-
-// The C#'s top-level statements run on load; this guard keeps an IMPORT inert.
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
-  await main();
 }

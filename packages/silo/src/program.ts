@@ -1,5 +1,3 @@
-import { fileURLToPath } from "node:url";
-
 import type { DatastoreGcOptions } from "@spacedb/grains/datastore-gc-options";
 import { GrainBackedDatastore } from "@spacedb/grains/grain-backed-datastore";
 import type { SpiceportGrainServices } from "@spacedb/grains/service-collection-extensions";
@@ -33,10 +31,14 @@ import { SILO_SCHEMA_TEXT } from "./silo-schema";
  * PORT DECISIONS.
  *
  *  1. TOP-LEVEL STATEMENTS BECOME `main()`. `Host.CreateApplicationBuilder(args)` + `host.Run()` is
- *     a file whose body executes on load. Here {@link main} is EXPORTED and only invoked when this
- *     module is the process entry point, so importing it (a manual smoke script does) starts
- *     nothing - and nothing may boot a silo from a test or from CI, where a backgrounded host
- *     orphans and runs forever.
+ *     a file whose body executes on load. Here {@link main} is EXPORTED and this module has NO
+ *     module-scope invocation at all - `start.ts` is the sole entry point. The obvious
+ *     `process.argv[1] === fileURLToPath(import.meta.url)` guard is deliberately ABSENT, because it
+ *     is wrong in both directions: it never matches under vite-node (the only thing here that can
+ *     execute TypeScript), and once bundled it fires during module evaluation, where both sides are
+ *     the same inlined file - starting a second host on top of the entry point's own call.
+ *     Importing this module therefore starts nothing BY CONSTRUCTION, which is what keeps a test
+ *     from booting a silo - and a backgrounded host orphans and runs forever.
  *  2. `UseLocalhostClustering()` becomes static membership over this one silo plus Thresh's
  *     IN-PROCESS transport. The transport choice is forced, not preferred: `LogWatchHub` mints an
  *     observer reference from the silo's startup task, and `createObjectReference` throws on a
@@ -189,9 +191,4 @@ export async function shutdownSiloHost(wiring: SiloHostWiring): Promise<void> {
     // a hub that never resolved cannot be holding a heartbeat
   }
   await wiring.host.stop();
-}
-
-// The C#'s top-level statements run on load; this guard keeps an IMPORT inert (port decision 1).
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
-  await main();
 }
