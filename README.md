@@ -16,6 +16,9 @@ dispatch layer — consistent-hash routing, singleflight coalescing, cluster mem
 virtual actors, where the runtime provides all three natively. BeneDB is that architecture in
 a different runtime. See [`docs/port-plan.md`](docs/port-plan.md).
 
+The name keeps SpiceDB's Dune reference and moves it from the spice to the Bene Gesserit, who
+decide who may do what.
+
 ## Layout
 
 ```

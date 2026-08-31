@@ -28,7 +28,7 @@ pnpm test:conformance             # the SpiceDB conformance corpus
 pnpm test:differential            # against a real spicedb container; skips without Docker
 pnpm typecheck                    # tsc --noEmit over every package
 pnpm lint                         # eslint + prettier
-pnpm --filter @benedb/api start  # run a host; attended and manual, never from a test or CI
+pnpm --filter @benedb/api start   # run a host; attended and manual, never from a test or CI
 ```
 
 - **Use pnpm for dependency changes** (`pnpm add`, `pnpm --filter <pkg> add`). Do not hand-edit
