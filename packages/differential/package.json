@@ -7,11 +7,13 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.1",
     "@spacedb/api": "workspace:*",
+    "@spacedb/conformance": "workspace:*",
     "@spacedb/core": "workspace:*",
+    "@spacedb/engine": "workspace:*",
     "@spacedb/grains": "workspace:*",
     "@spacedb/protos": "workspace:*",
-    "@grpc/grpc-js": "^1.14.1",
     "testcontainers": "^11.9.1"
   }
 }

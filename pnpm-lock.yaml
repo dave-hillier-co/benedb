@@ -131,9 +131,15 @@ importers:
       '@spacedb/api':
         specifier: workspace:*
         version: link:../api
+      '@spacedb/conformance':
+        specifier: workspace:*
+        version: link:../conformance
       '@spacedb/core':
         specifier: workspace:*
         version: link:../core
+      '@spacedb/engine':
+        specifier: workspace:*
+        version: link:../engine
       '@spacedb/grains':
         specifier: workspace:*
         version: link:../grains
