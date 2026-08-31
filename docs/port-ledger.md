@@ -7,6 +7,10 @@ Paths are relative to `../spiceport` and to this repository's root respectively.
 presence records the mapping, not completion — the gates in
 [`port-plan.md`](port-plan.md) decide that.
 
+A row whose target reads _not ported_ is a deliberate decision with its reason, not an omission.
+The distinction matters for the same reason the ledger exists: "no target" and "decided against a
+target" look identical in a file list and mean opposite things.
+
 `tests/Spiceport.Conformance.Tests/SteelThread/SteelThreadTests.cs` is listed under S4 rather
 than with the rest of the conformance suite: it drives `Spiceport.Grains.SchemaChangeValidator`,
 an S4 file, so pulling it forward would break the leaves-first ordering. It also needs its
@@ -49,7 +53,7 @@ an S4 file, so pulling it forward would break the leaves-first ordering. It also
 | S1    | `src/Spiceport.Server/Schema/SchemaCompileException.cs`                                                                                       | `packages/schema/src/schema-compile-exception.ts`                                    |
 | S1    | `src/Spiceport.Server/Schema/SchemaCompiler.cs`                                                                                               | `packages/schema/src/schema-compiler.ts`                                             |
 | S1    | `src/Spiceport.Server/Schema/SchemaCompiler.cs`                                                                                               | `packages/schema/src/compiled-schema.ts`                                             |
-| S1    | `tests/Spiceport.Core.Tests/UnitTest1.cs`                                                                                                     | `packages/core/src/unit-test1.test.ts`                                               |
+| S1    | `tests/Spiceport.Core.Tests/UnitTest1.cs`                                                                                                     | _not ported (empty template stub)_                                                   |
 | S1    | `tests/Spiceport.Schema.Tests/SchemaCompilerTests.cs`                                                                                         | `packages/schema/src/schema-compiler-tests.test.ts`                                  |
 | S2    | `src/Spiceport.Datastore/CounterFilterJson.cs`                                                                                                | `packages/datastore/src/counter-filter-json.ts`                                      |
 | S2    | `src/Spiceport.Datastore/Counters.cs`                                                                                                         | `packages/datastore/src/counters.ts`                                                 |
