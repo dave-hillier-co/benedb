@@ -53,9 +53,12 @@ import {
  *     `MeshTestCluster` uses, with a durable provider swapped in for the memory one.
  *  2. ISOLATION DEVIATION: A UNIQUE TABLE, NOT A SERVICE ID. The C# isolates each test with a
  *     distinct Orleans `ServiceId`, because the AdoNet `OrleansStorage` row key is derived from
- *     ServiceId + GrainId. Thresh's `PostgresGrainStorage` keys rows by `(grain_id, state_name)`
- *     ONLY, so `TestClusterOptions.serviceId` does NOT isolate anything here; the tests share one
- *     database and the singleton grain's key is the constant `0n`, so two tests would collide.
+ *     ServiceId + GrainId. Thresh's `PostgresGrainStorage` now keys rows by
+ *     `(service_id, grain_id, state_name)` (thresh#59), but that service id comes from the PROVIDER
+ *     it was constructed with, and these tests construct one directly over the fixture pool with no
+ *     `serviceId` - so every one of them lands on the same `"default"`, and
+ *     `TestClusterOptions.serviceId` still isolates nothing here. The tests share one database and
+ *     the singleton grain's key is the constant `0n`, so two tests would collide.
  *     Each test therefore gets its own TABLE ({@link freshTable}), dropped in its `finally`. The
  *     C#'s fixed-ServiceId-per-test requirement inverts into the same guarantee: cluster A and
  *     cluster B of ONE test share the table, and no two tests do.

@@ -11,7 +11,6 @@ import { WatchContent, type RevisionChange } from "@spacedb/datastore/watch";
 import type { ClientNode } from "@thresh/client/client-node";
 import type { GrainId } from "@thresh/core/grain-id";
 import { grainReferenceIdentity } from "@thresh/core/grain-reference";
-import type { ReminderRegistration, ReminderTable } from "@thresh/core/reminder";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
 
@@ -57,16 +56,15 @@ import {
  *     Thresh has one storage codec. `AddCustomStorageBasedLogConsistencyProvider("CustomStorage")`
  *     likewise has none - Thresh's journaling binder DETECTS a custom-storage grain and installs
  *     the adaptor, and `TestCluster` already calls `useMemoryJournaling`.
- *  4. THRESH DEVIATION - "NO REMINDER SERVICE AT ALL" HAS NO LITERAL COUNTERPART.
- *     `GcWithoutReminderServiceSiloConfigurator` simply omits `UseInMemoryReminderService()`, so
+ *  4. `GcWithoutReminderServiceSiloConfigurator` simply omits `UseInMemoryReminderService()`, so
  *     `RegisterOrUpdateReminder` throws and `DatastoreGrain.OnActivateAsync`'s try/catch gate is
- *     what keeps activation alive. Thresh's `TestCluster` hardcodes `.useReminders(this.reminderTable)`
- *     on every silo BEFORE `configureSilo` runs, and there is no "unregister the reminder service"
- *     call. The closest faithful analogue - and the one that drives the SAME catch - is to override
- *     the table in `configureSilo` with {@link failingReminderTable}, whose `upsert` rejects:
- *     `LocalReminderService.register` awaits `table.upsert`, so the rejection surfaces out of
- *     `runtime.registerReminder` exactly as a missing service would. The ASSERTION is unchanged:
- *     the grain activates, serves calls, and `runGc` still works.
+ *     what keeps activation alive. Thresh's `TestCluster` used to hardcode
+ *     `.useReminders(this.reminderTable)` on every silo, so this case could only be approximated by
+ *     a reminder table whose `upsert` rejects - which tests a reminder service that FAILED, not one
+ *     that is absent. Thresh #62 added `TestClusterOptions.reminders`, the literal counterpart:
+ *     `reminders: false` builds silos with no reminder service at all, exactly as the C#
+ *     configurator does. The ASSERTION is unchanged: the grain activates, serves calls, and
+ *     `runGc` still works.
  *  5. `((InProcessSiloHandle)cluster.Primary!).SiloHost.Services.GetRequiredService<IOptions<DatastoreGcOptions>>()`
  *     has no counterpart (Thresh has no container to resolve out of). The test passes the SAME
  *     options OBJECT to the silo and to `GrainBackedDatastore`, which is what the C# resolution was
@@ -158,16 +156,6 @@ const shortWindowOptions: DatastoreGcOptions = {
   reminderEnabled: false,
 };
 
-/** See port decision 4: the stand-in for "no reminder service registered at all". */
-const failingReminderTable: ReminderTable = {
-  upsert: (_registration: ReminderRegistration) =>
-    Promise.reject(new Error("no reminder service is configured on this silo")),
-  remove: () => Promise.reject(new Error("no reminder service is configured on this silo")),
-  read: () => Promise.reject(new Error("no reminder service is configured on this silo")),
-  readForGrain: () => Promise.reject(new Error("no reminder service is configured on this silo")),
-  readRange: () => Promise.resolve([]),
-};
-
 interface GcCluster {
   readonly cluster: TestCluster;
   readonly client: ClientNode;
@@ -177,16 +165,16 @@ interface GcCluster {
 /** The C#'s `NewClusterAsync<TConfigurator>()`, with the configurator's ONE varying value as an argument. */
 async function buildCluster(
   options: DatastoreGcOptions,
-  reminderTable?: ReminderTable,
+  silo?: { reminders?: boolean },
 ): Promise<GcCluster> {
   const storage = new MemoryGrainStorage();
   let services!: SpiceportGrainServices;
   const cluster = await TestCluster.start({
     initialSilos: 1,
     grains: SPICEPORT_GRAIN_REGISTRATIONS,
+    ...(silo?.reminders !== undefined ? { reminders: silo.reminders } : {}),
     configureSilo: (builder) => {
       builder.addStorage("datastore", storage);
-      if (reminderTable !== undefined) builder.useReminders(reminderTable);
       let datastore: IDatastore | undefined;
       services = addSpiceportGrainServices(builder, {
         schemaText: SCHEMA,
@@ -521,9 +509,9 @@ describe("DatastoreGcMeshTests", () => {
   }, 60_000);
 
   it("Activation_without_a_reminder_service_does_not_throw", async () => {
-    // The try/catch gate in DatastoreGrain.onActivate: reminder registration cannot succeed on this
-    // cluster at all (port decision 4), yet the grain must still activate and serve calls normally.
-    const scope = await buildCluster({ window: { ms: 0 } }, failingReminderTable);
+    // The try/catch gate in DatastoreGrain.onActivate: this cluster has NO reminder service at all
+    // (port decision 4), yet the grain must still activate and serve calls normally.
+    const scope = await buildCluster({ window: { ms: 0 } }, { reminders: false });
     const hub = createIsolatedWatchHub(scope.client);
     try {
       const ds: IDatastore = new GrainBackedDatastore(scope.client, hub);
@@ -532,6 +520,10 @@ describe("DatastoreGcMeshTests", () => {
       await ds.readWriteTx((tx) => tx.writeRelationships([create("a", "alice")]));
       const floor = await grain.runGc(); // runGc itself remains fully usable without the reminder service
       expect(floor).not.toBeUndefined();
+      // Guards port decision 4: the silo really has no reminder service, rather than one whose
+      // registration merely failed - nothing reached the cluster's reminder table.
+      const grainId: GrainId = grainReferenceIdentity(grain)!.grainId;
+      expect(await scope.cluster.reminderTable.read(grainId, "mvcc-gc")).toBeUndefined();
     } finally {
       await disposeAll(scope, hub);
     }
