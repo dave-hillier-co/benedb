@@ -1,8 +1,10 @@
 # CLAUDE.md
 
 Guidance for working in this repository. See [`README.md`](README.md) for what the project is,
-[`docs/port-plan.md`](docs/port-plan.md) for how the port is structured, and
-[`docs/port-ledger.md`](docs/port-ledger.md) for the file-by-file source mapping.
+[`docs/port-plan.md`](docs/port-plan.md) for how the port is structured,
+[`docs/port-ledger.md`](docs/port-ledger.md) for the file-by-file source mapping, and
+[`docs/packaging.md`](docs/packaging.md) for running a host and the shutdown invariant it must
+satisfy.
 
 ## What this is
 
@@ -26,6 +28,7 @@ pnpm test:conformance             # the SpiceDB conformance corpus
 pnpm test:differential            # against a real spicedb container; skips without Docker
 pnpm typecheck                    # tsc --noEmit over every package
 pnpm lint                         # eslint + prettier
+pnpm --filter @spacedb/api start  # run a host; attended and manual, never from a test or CI
 ```
 
 - **Use pnpm for dependency changes** (`pnpm add`, `pnpm --filter <pkg> add`). Do not hand-edit

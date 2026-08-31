@@ -409,6 +409,44 @@ export interface ApiHostSteps {
 }
 
 /** START the host, THEN seed, THEN wait for shutdown. A failure at any step stops the sequence. */
+/**
+ * Releases everything the host holds, in the order that lets each step still work.
+ *
+ * The hub is the one that is easy to miss and the one that matters most. {@link LogWatchHub} runs a
+ * heartbeat as a detached loop whose timer is a real `setTimeout`, so an undisposed hub keeps the
+ * Node event loop alive INDEFINITELY: the signal handler runs, the silo stops, `main()` returns —
+ * and the process still never exits. Under an orchestrator that is a container which ignores
+ * SIGTERM until it is SIGKILLed at the end of its grace period, losing in-flight work. The hub's
+ * own remarks call an orphaned heartbeat "the Node analogue of the orphaned-host hazard CLAUDE.md
+ * forbids"; the mechanism was always there, nothing called it.
+ *
+ * ORDER. The listeners stop first so nothing new arrives. The hub is disposed BEFORE the silo,
+ * because disposal deletes its object reference and that needs a runtime that has not gone away.
+ * The silo stops last.
+ *
+ * Every step runs even when an earlier one fails: a shutdown that gives up half way leaves exactly
+ * the orphan it exists to prevent. `services.hub` is resolved lazily off a started silo, so reading
+ * it can itself throw when start-up failed — that is inside the guarded step too.
+ */
+export async function shutdownApiHost(host: ApiHost): Promise<void> {
+  try {
+    host.root.close();
+  } catch {
+    // already closed, or never listened
+  }
+  try {
+    host.server.forceShutdown();
+  } catch {
+    // already shut down, or never bound
+  }
+  try {
+    await host.services.hub.dispose();
+  } catch {
+    // a hub that never resolved cannot be holding a heartbeat
+  }
+  await host.silo.stop();
+}
+
 export async function runApiHost(steps: ApiHostSteps): Promise<void> {
   await steps.start();
   await steps.seed();
@@ -495,9 +533,7 @@ export function apiHostSteps(host: ApiHost): ApiHostSteps {
         const stop = (): void => {
           process.off("SIGINT", stop);
           process.off("SIGTERM", stop);
-          host.root.close();
-          host.server.forceShutdown();
-          void host.silo.stop().then(resolve, resolve);
+          void shutdownApiHost(host).then(resolve, resolve);
         };
         process.once("SIGINT", stop);
         process.once("SIGTERM", stop);

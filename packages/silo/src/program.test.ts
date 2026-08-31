@@ -5,7 +5,7 @@ import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
 import { describe, expect, it } from "vitest";
 
 import { DATASTORE_PROVIDER_NAME, createConfiguration } from "./datastore-storage-config";
-import { configureSiloHost, main } from "./program";
+import { configureSiloHost, main, shutdownSiloHost, type SiloHostWiring } from "./program";
 import { SILO_SCHEMA_TEXT } from "./silo-schema";
 
 /**
@@ -172,5 +172,55 @@ describe("the silo entry point", () => {
     // Reaching this line is the assertion: the import at the top did not start a silo. `host.Run()`
     // blocks until shutdown, so a module that ran it on import would hang this suite forever.
     expect(typeof main).toBe("function");
+  });
+});
+
+describe("shutdownSiloHost", () => {
+  function recordingWiring(): { wiring: SiloHostWiring; calls: string[] } {
+    const calls: string[] = [];
+    const wiring = {
+      host: {
+        stop: async () => {
+          calls.push("host.stop");
+        },
+      },
+      services: {
+        hub: {
+          dispose: async () => {
+            calls.push("hub.dispose");
+          },
+        },
+      },
+    } as unknown as SiloHostWiring;
+    return { wiring, calls };
+  }
+
+  // Same defect as the API host: LogWatchHub's heartbeat is a real timer, and an undisposed hub
+  // keeps the Node event loop alive after the silo has stopped, so the process never exits.
+  it("disposes the watch hub, so the heartbeat cannot outlive the silo", async () => {
+    const { wiring, calls } = recordingWiring();
+
+    await shutdownSiloHost(wiring);
+
+    expect(calls).toContain("hub.dispose");
+  });
+
+  it("disposes the hub BEFORE stopping the silo", async () => {
+    const { wiring, calls } = recordingWiring();
+
+    await shutdownSiloHost(wiring);
+
+    expect(calls.indexOf("hub.dispose")).toBeLessThan(calls.indexOf("host.stop"));
+  });
+
+  it("stops the silo even when disposing the hub fails", async () => {
+    const { wiring, calls } = recordingWiring();
+    (wiring.services as { hub: { dispose: () => Promise<void> } }).hub = {
+      dispose: () => Promise.reject(new Error("hub is already gone")),
+    };
+
+    await shutdownSiloHost(wiring);
+
+    expect(calls).toContain("host.stop");
   });
 });

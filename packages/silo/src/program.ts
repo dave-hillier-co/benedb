@@ -154,18 +154,41 @@ export const SILO_NAME = "spiceport-silo";
  * NEVER call this from a test or from CI.
  */
 export async function main(): Promise<void> {
-  const { host } = createSiloHost();
-  await host.start();
+  const wiring = createSiloHost();
+  await wiring.host.start();
 
   await new Promise<void>((resolve) => {
     const stop = (): void => {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
-      void host.stop().then(resolve, resolve);
+      void shutdownSiloHost(wiring).then(resolve, resolve);
     };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });
+}
+
+/**
+ * Releases everything the silo host holds. The API host has the identical function for the
+ * identical reason (`@spacedb/api/program`'s `shutdownApiHost`), and the duplication is deliberate
+ * for the same reason the two hosts are duplicated: they are independently maintained in the C#.
+ *
+ * {@link LogWatchHub} runs its heartbeat as a detached loop over a real `setTimeout`, so an
+ * undisposed hub keeps the Node event loop alive INDEFINITELY — the signal handler runs, the silo
+ * stops, `main()` returns, and the process still never exits. Under an orchestrator that is a
+ * container ignoring SIGTERM until it is SIGKILLed at the end of its grace period.
+ *
+ * The hub is disposed BEFORE the silo, because disposal deletes its object reference and that needs
+ * a runtime that has not gone away; and the silo is stopped even if that fails, because a shutdown
+ * that gives up half way leaves exactly the orphan it exists to prevent.
+ */
+export async function shutdownSiloHost(wiring: SiloHostWiring): Promise<void> {
+  try {
+    await wiring.services.hub.dispose();
+  } catch {
+    // a hub that never resolved cannot be holding a heartbeat
+  }
+  await wiring.host.stop();
 }
 
 // The C#'s top-level statements run on load; this guard keeps an IMPORT inert (port decision 1).

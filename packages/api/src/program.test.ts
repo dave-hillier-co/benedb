@@ -27,6 +27,8 @@ import {
   createServiceRegistrations,
   main,
   runApiHost,
+  shutdownApiHost,
+  type ApiHost,
   type ApiHostSteps,
   type ApiServiceDependencies,
 } from "./program";
@@ -220,6 +222,68 @@ describe("runApiHost", () => {
 
     await expect(runApiHost(steps)).rejects.toThrow("start failed");
     expect(calls).toEqual(["start"]);
+  });
+});
+
+describe("shutdownApiHost", () => {
+  /**
+   * A host whose four shutdown collaborators only record that they were called. `services` carries
+   * the real shape the host uses: `hub` is resolved lazily off a started silo, which is why this
+   * test builds the bag rather than a real host.
+   */
+  function recordingHost(): { host: ApiHost; calls: string[] } {
+    const calls: string[] = [];
+    const host = {
+      root: { close: () => calls.push("root.close") },
+      server: { forceShutdown: () => calls.push("server.forceShutdown") },
+      silo: {
+        stop: async () => {
+          calls.push("silo.stop");
+        },
+      },
+      services: {
+        hub: {
+          dispose: async () => {
+            calls.push("hub.dispose");
+          },
+        },
+      },
+    } as unknown as ApiHost;
+    return { host, calls };
+  }
+
+  // The defect this pins: LogWatchHub runs a heartbeat timer, and an undisposed heartbeat keeps
+  // the Node event loop alive forever. The host would then serve SIGTERM's handler to completion
+  // and STILL not exit, so a container hangs until the orchestrator escalates to SIGKILL. The
+  // hub's own doc calls an orphaned heartbeat "the Node analogue of the orphaned-host hazard
+  // CLAUDE.md forbids" -- the mechanism was always there; nothing called it.
+  it("disposes the watch hub, so the heartbeat cannot outlive the host", async () => {
+    const { host, calls } = recordingHost();
+
+    await shutdownApiHost(host);
+
+    expect(calls).toContain("hub.dispose");
+  });
+
+  it("disposes the hub BEFORE stopping the silo", async () => {
+    const { host, calls } = recordingHost();
+
+    await shutdownApiHost(host);
+
+    // Disposal deletes the hub's object reference, which needs a runtime that has not gone away.
+    expect(calls.indexOf("hub.dispose")).toBeLessThan(calls.indexOf("silo.stop"));
+  });
+
+  it("stops the silo even when disposing the hub fails", async () => {
+    const { host, calls } = recordingHost();
+    (host.services as { hub: { dispose: () => Promise<void> } }).hub = {
+      dispose: () => Promise.reject(new Error("hub is already gone")),
+    };
+
+    await shutdownApiHost(host);
+
+    // A shutdown path that gives up half way leaves exactly the orphan it exists to prevent.
+    expect(calls).toContain("silo.stop");
   });
 });
 
