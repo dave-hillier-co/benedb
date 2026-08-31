@@ -325,10 +325,11 @@ file, rather than leaving them to look overlooked.
 Types the port introduced because .NET supplies them and TypeScript does not. They have no C#
 counterpart, so they have no row above.
 
-| SpaceDB                                       | Stands in for                                 |
-| --------------------------------------------- | --------------------------------------------- |
-| `packages/core/src/invalid-argument-error.ts` | `ArgumentException` / `ArgumentNullException` |
-| `packages/core/src/format-error.ts`           | `FormatException`                             |
-| `packages/engine/src/cel-context-value.ts`    | Cel.NET's absent-map-key semantics            |
-| `packages/engine/src/seeded-random.ts`        | `System.Random(int seed)`                     |
-| `packages/grains/src/convert-base64.ts`       | `Convert.ToBase64String` / `FromBase64String` |
+| SpaceDB                                       | Stands in for                                                                                                                                                                                                                                                                                |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core/src/invalid-argument-error.ts` | `ArgumentException` / `ArgumentNullException`                                                                                                                                                                                                                                                |
+| `packages/core/src/format-error.ts`           | `FormatException`                                                                                                                                                                                                                                                                            |
+| `packages/engine/src/cel-context-value.ts`    | Cel.NET's absent-map-key semantics                                                                                                                                                                                                                                                           |
+| `packages/engine/src/seeded-random.ts`        | `System.Random(int seed)`                                                                                                                                                                                                                                                                    |
+| `packages/grains/src/convert-base64.ts`       | `Convert.ToBase64String` / `FromBase64String`                                                                                                                                                                                                                                                |
+| `packages/silo/src/clustering-config.ts`      | `UseLocalhostClustering(siloPort, gatewayPort, primarySiloEndpoint)` — Spiceport's two hosts call only the no-argument form and it ships no deployment configuration, so a multi-silo host has no C# counterpart to port. Shared by both hosts, exactly as `datastore-storage-config.ts` is. |

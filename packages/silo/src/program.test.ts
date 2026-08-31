@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { CLUSTERING_SILOS_KEY, resolveClustering } from "./clustering-config";
 import { DATASTORE_PROVIDER_NAME, createConfiguration } from "./datastore-storage-config";
 import { configureSiloHost, main, shutdownSiloHost, type SiloHostWiring } from "./program";
 import { SILO_SCHEMA_TEXT } from "./silo-schema";
@@ -61,10 +62,12 @@ interface Call {
  * AND SUPPRESSED rather than delegated: `addPostgresStorage` constructs a live `pg.Pool`, and this
  * test must not reach for a database that is not there.
  */
-function recordingBuilder(): { builder: SiloBuilder; calls: Call[] } {
+function recordingBuilder(
+  local: SiloAddress = new SiloAddress("silo-test", "uid-silo-test", "silo-test:11111"),
+): { builder: SiloBuilder; calls: Call[] } {
   const target = createSilo({
     clusterId: "spacedb-silo-test",
-    local: new SiloAddress("silo-test", "uid-silo-test", "silo-test:11111"),
+    local,
   });
   const calls: Call[] = [];
   const suppressed = new Set(["addStorage", "addPostgresStorage", "addRedisStorage"]);
@@ -155,6 +158,53 @@ describe("configureSiloHost", () => {
     // `AddActivationMemoCollectionAge` has no per-silo counterpart in Thresh; the ported extension
     // rewrites the grain class's metadata, so the age is observable there.
     expect(getGrainMetadata(CheckGrain)?.options?.collectionAgeSeconds).toBeGreaterThan(0);
+  });
+
+  it("wires the in-process transport and a single-address view with no clustering configured", () => {
+    const { builder, calls } = recordingBuilder();
+
+    configureSiloHost(builder, createConfiguration({}));
+
+    const membership = named(calls, "useStaticMembership");
+    expect(membership).toHaveLength(1);
+    expect(membership[0]?.args[0]).toEqual([builder.local]);
+    expect(named(calls, "useInProcessTransport")).toHaveLength(1);
+    expect(named(calls, "useWebSocketTransport")).toHaveLength(0);
+  });
+
+  it("wires the WebSocket transport and the whole configured view when clustered", () => {
+    const configuration = createConfiguration({
+      "ConnectionStrings:OrleansStorage": "postgres://localhost/spacedb",
+      [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111,127.0.0.1:11112",
+    });
+    const clustering = resolveClustering(configuration);
+    const local = clustering.kind === "clustered" ? clustering.local : undefined;
+    const { builder, calls } = recordingBuilder(local);
+
+    configureSiloHost(builder, configuration, clustering);
+
+    expect(named(calls, "useWebSocketTransport")).toHaveLength(1);
+    expect(named(calls, "useInProcessTransport")).toHaveLength(0);
+    expect(named(calls, "useStaticMembership")[0]?.args[0]).toEqual(
+      clustering.kind === "clustered" ? clustering.silos : undefined,
+    );
+  });
+
+  it("declares observer hosting on BOTH paths - LogWatchHub mints a reference at startup", () => {
+    const plain = recordingBuilder();
+    configureSiloHost(plain.builder, createConfiguration({}));
+    expect(named(plain.calls, "requireObserverHosting")).toHaveLength(1);
+
+    const configuration = createConfiguration({
+      "ConnectionStrings:OrleansStorage": "postgres://localhost/spacedb",
+      [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111",
+    });
+    const clustering = resolveClustering(configuration);
+    const clustered = recordingBuilder(
+      clustering.kind === "clustered" ? clustering.local : undefined,
+    );
+    configureSiloHost(clustered.builder, configuration, clustering);
+    expect(named(clustered.calls, "requireObserverHosting")).toHaveLength(1);
   });
 
   it("guards both arguments, as the C# ThrowIfNull pair does", () => {

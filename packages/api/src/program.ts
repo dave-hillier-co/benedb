@@ -31,6 +31,12 @@ import {
   PermissionsServiceService,
   WatchServiceService,
 } from "@spacedb/protos/permissions";
+import type { ClusteringOptions } from "@spacedb/silo/clustering-config";
+import {
+  applyClustering,
+  readConfiguredPort,
+  resolveClustering,
+} from "@spacedb/silo/clustering-config";
 import type { Configuration } from "@spacedb/silo/datastore-storage-config";
 import {
   DATASTORE_PROVIDER_NAME,
@@ -41,7 +47,6 @@ import { SiloAddress } from "@thresh/core/silo-address";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
 import type { SiloHost } from "@thresh/hosting/silo-host";
-import { InProcessNetwork } from "@thresh/messaging/in-process-transport";
 
 import { AuthzedExperimentalV1Service } from "./authzed-experimental-v1-service";
 import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
@@ -68,7 +73,8 @@ import { WatchGrpcService } from "./watch-grpc-service";
  *  1. THE SILO WIRING IS THE SILO HOST'S, MINUS NOTHING AND PLUS NOTHING - except that it compiles
  *     {@link SEED_SCHEMA_TEXT} and it seeds. See `@spacedb/silo/program` for why the duplication
  *     between the two hosts is deliberate rather than a missing helper, and for the transport /
- *     journaling / reminder substitutions, which are identical here.
+ *     journaling / reminder substitutions, which are identical here - clustering (that file's port
+ *     decision 6) included.
  *  2. `MapGrpcService<T>()` becomes `server.addService(definition, implementation)` on a
  *     `@grpc/grpc-js` `Server`. ASP.NET Core generates a base class per service, so a method the
  *     C# does not override still answers UNIMPLEMENTED; grpc-js does not, and a missing handler
@@ -90,7 +96,13 @@ import { WatchGrpcService } from "./watch-grpc-service";
  *  5. THE STARTUP ORDER IS LOAD-BEARING and is what {@link runApiHost} exists to hold: START the
  *     host, THEN seed, THEN wait for shutdown. Seeding needs the cluster running because the
  *     datastore lives behind the singleton grain. Not before start, and not lazily on first
- *     request.
+ *     request. Every API host in a cluster runs this sequence, so `seedAsync` must be exactly-once
+ *     across silos rather than once per process - see `seed-data.ts`.
+ *  6. THE LISTEN ADDRESSES ARE CONFIGURABLE, for the same reason the silo endpoint is (the silo
+ *     host's port decision 6). `Api:GrpcPort` / `Api:HttpPort` are read through the SAME
+ *     `Configuration` object as everything else, and default to the two constants below, so a
+ *     zero-configuration host is unchanged. Without them two API hosts on one machine collide on
+ *     50051 and 8080 before they ever reach a silo port.
  */
 
 /** The body of the plain `GET /` liveness endpoint, verbatim from the C#. */
@@ -99,14 +111,51 @@ export const API_ROOT_BODY = "Spiceport API up.";
 /** The dev cluster this host joins - `UseLocalhostClustering`'s fixed identity. */
 export const API_CLUSTER_ID = "spiceport";
 
-/** This silo's name/address stem within that cluster. */
+/**
+ * This silo's name/address stem within that cluster, for the SINGLE-PROCESS host. A clustered silo
+ * derives its whole identity from its endpoint - see `@spacedb/silo/program`'s port decision 6.
+ */
 export const API_SILO_NAME = "spiceport-api";
 
-/** Where the gRPC surface listens. ASP.NET Core's Kestrel binding has no port-level counterpart. */
+/**
+ * Where the gRPC surface listens by default. ASP.NET Core's Kestrel binding has no port-level
+ * counterpart. {@link API_GRPC_PORT_KEY} moves the port; the bind host is kept from this constant.
+ */
 export const GRPC_LISTEN_ADDRESS = "0.0.0.0:50051";
 
-/** Where the `GET /` endpoint listens - a separate socket, see port decision 4. */
+/** Where the `GET /` endpoint listens by default - a separate socket, see port decision 4. */
 export const HTTP_LISTEN_PORT = 8080;
+
+/** Overrides the port of {@link GRPC_LISTEN_ADDRESS} (env `Api__GrpcPort`) - port decision 6. */
+export const API_GRPC_PORT_KEY = "Api:GrpcPort";
+
+/** Overrides {@link HTTP_LISTEN_PORT} (env `Api__HttpPort`) - port decision 6. */
+export const API_HTTP_PORT_KEY = "Api:HttpPort";
+
+/** Where this host's two listening surfaces bind - see {@link resolveApiListenEndpoints}. */
+export interface ApiListenEndpoints {
+  /** The `host:port` string `Server.bindAsync` takes. */
+  readonly grpcListenAddress: string;
+  /** The port the plain `GET /` listener takes. */
+  readonly httpListenPort: number;
+}
+
+/**
+ * Reads the two listen endpoints out of configuration, defaulting to {@link GRPC_LISTEN_ADDRESS}
+ * and {@link HTTP_LISTEN_PORT}. Pure: it binds nothing.
+ *
+ * The gRPC BIND HOST is kept from the constant rather than configured. It is `0.0.0.0` on purpose -
+ * a serving surface should answer on every interface - which is the opposite of a silo's advertised
+ * host, where a wildcard is rejected because peers have to dial it back.
+ */
+export function resolveApiListenEndpoints(configuration: Configuration): ApiListenEndpoints {
+  const defaultPort = Number(GRPC_LISTEN_ADDRESS.slice(GRPC_LISTEN_ADDRESS.lastIndexOf(":") + 1));
+  const bindHost = GRPC_LISTEN_ADDRESS.slice(0, GRPC_LISTEN_ADDRESS.lastIndexOf(":"));
+  return {
+    grpcListenAddress: `${bindHost}:${readConfiguredPort(configuration, API_GRPC_PORT_KEY, defaultPort)}`,
+    httpListenPort: readConfiguredPort(configuration, API_HTTP_PORT_KEY, HTTP_LISTEN_PORT),
+  };
+}
 
 /**
  * See `@spacedb/silo/program`: the datastore grain and the `GrainBackedDatastore` facade MUST be
@@ -353,6 +402,7 @@ export function addServices(
 export function configureApiSilo(
   builder: SiloBuilder,
   configuration: Configuration,
+  clustering: ClusteringOptions = resolveClustering(configuration),
 ): SpiceportGrainServices {
   if (builder === undefined || builder === null) {
     throw new InvalidArgumentError("builder is required");
@@ -361,9 +411,11 @@ export function configureApiSilo(
     throw new InvalidArgumentError("configuration is required");
   }
 
-  // `silo.UseLocalhostClustering();`
-  builder.useStaticMembership([builder.local]);
-  builder.useInProcessTransport(new InProcessNetwork());
+  // `silo.UseLocalhostClustering();` - nothing configured keeps today's single-process silo; a
+  // configured silo list takes the WebSocket transport and the whole static view. The resolved
+  // options are an OPTIONAL parameter because {@link createApiHost} must resolve them before
+  // `createSilo` (the local address is constructor input) and would otherwise resolve them twice.
+  applyClustering(builder, clustering);
   builder.requireObserverHosting();
   // CheckGrain's per-activation reply memo (default ON) needs a matching idle-collection age so a
   // warm activation survives long enough between calls for the memo to pay off.
@@ -372,7 +424,9 @@ export function configureApiSilo(
   addDatastoreGrainStorage(builder, configuration);
   // The event-sourced datastore grain's log-consistency backing.
   builder.useMemoryJournaling();
-  // Backs the datastore grain's periodic MVCC-GC reminder ("mvcc-gc").
+  // Backs the datastore grain's periodic MVCC-GC reminder ("mvcc-gc"). The default table is PER
+  // SILO and firing is gated on hash-ring ownership, so in a cluster the reminder can silently stop
+  // running - see the same note on the silo host, and `docs/packaging.md`.
   builder.useReminders();
 
   // Schema + check-engine singletons (compiled once from the embedded seed schema).
@@ -457,17 +511,27 @@ export interface ApiHost {
   readonly services: SpiceportGrainServices;
   readonly server: GrpcServer;
   readonly root: HttpServer;
+  /** Where {@link apiHostSteps} binds the gRPC surface - see port decision 6. */
+  readonly grpcListenAddress: string;
+  /** Where {@link apiHostSteps} binds the plain `GET /` listener - see port decision 6. */
+  readonly httpListenPort: number;
 }
 
 /** `builder.Build()` plus the seven `MapGrpcService` calls: everything but `StartAsync`. */
 export function createApiHost(
   configuration: Configuration = configurationFromEnvironment(),
 ): ApiHost {
+  // Resolved BEFORE `createSilo`, because a clustered silo's own address is constructor input and
+  // is derived from its configured endpoint (`@spacedb/silo/program`'s port decision 6).
+  const clustering = resolveClustering(configuration);
   const builder = createSilo({
     clusterId: API_CLUSTER_ID,
-    local: new SiloAddress(API_SILO_NAME, `uid-${API_SILO_NAME}`, `${API_SILO_NAME}:11111`),
+    local:
+      clustering.kind === "clustered"
+        ? clustering.local
+        : new SiloAddress(API_SILO_NAME, `uid-${API_SILO_NAME}`, `${API_SILO_NAME}:11111`),
   });
-  const services = configureApiSilo(builder, configuration);
+  const services = configureApiSilo(builder, configuration, clustering);
   const silo = builder.build();
 
   // The `Server` is created here, as the C# maps its services before `StartAsync`, but the seven
@@ -488,7 +552,7 @@ export function createApiHost(
     response.writeHead(404).end();
   });
 
-  return { silo, services, server, root };
+  return { silo, services, server, root, ...resolveApiListenEndpoints(configuration) };
 }
 
 /**
@@ -523,12 +587,16 @@ export function apiHostSteps(host: ApiHost): ApiHostSteps {
         }),
       );
       await new Promise<void>((resolve, reject) => {
-        host.server.bindAsync(GRPC_LISTEN_ADDRESS, ServerCredentials.createInsecure(), (error) => {
-          if (error !== null) reject(error);
-          else resolve();
-        });
+        host.server.bindAsync(
+          host.grpcListenAddress,
+          ServerCredentials.createInsecure(),
+          (error) => {
+            if (error !== null) reject(error);
+            else resolve();
+          },
+        );
       });
-      await new Promise<void>((resolve) => host.root.listen(HTTP_LISTEN_PORT, resolve));
+      await new Promise<void>((resolve) => host.root.listen(host.httpListenPort, resolve));
     },
     // Seed relationships once at startup so CheckPermission returns a real answer.
     seed: () => seedAsync(host.services.datastore),

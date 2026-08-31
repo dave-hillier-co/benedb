@@ -14,6 +14,7 @@ import {
   PermissionsServiceService,
   WatchServiceService,
 } from "@spacedb/protos/permissions";
+import { CLUSTERING_SILOS_KEY, resolveClustering } from "@spacedb/silo/clustering-config";
 import { createConfiguration } from "@spacedb/silo/datastore-storage-config";
 import { getGrainMetadata } from "@thresh/core/grain-metadata";
 import { SiloAddress } from "@thresh/core/silo-address";
@@ -23,11 +24,16 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  API_GRPC_PORT_KEY,
+  API_HTTP_PORT_KEY,
   API_ROOT_BODY,
+  GRPC_LISTEN_ADDRESS,
+  HTTP_LISTEN_PORT,
   addServices,
   configureApiSilo,
   createServiceRegistrations,
   main,
+  resolveApiListenEndpoints,
   runApiHost,
   shutdownApiHost,
   type ApiHost,
@@ -297,6 +303,87 @@ describe("configureApiSilo", () => {
     });
   }
 
+  /**
+   * A real `SiloBuilder` behind a recording proxy - the silo host's suite has the identical helper
+   * for the identical reason, and the duplication follows the two hosts' own. Nothing is built.
+   */
+  function recordingBuilder(local?: SiloAddress): {
+    builder: SiloBuilder;
+    calls: { name: string; args: readonly unknown[] }[];
+  } {
+    const target = createSilo({
+      clusterId: "spacedb-api-test",
+      local: local ?? new SiloAddress("api-test", "uid-api-test", "api-test:11111"),
+    });
+    const calls: { name: string; args: readonly unknown[] }[] = [];
+    const suppressed = new Set(["addStorage", "addPostgresStorage", "addRedisStorage"]);
+    const proxy: SiloBuilder = new Proxy(target, {
+      get(receiver, property) {
+        const value = Reflect.get(receiver, property);
+        if (typeof value !== "function" || typeof property !== "string") return value;
+        return (...args: unknown[]) => {
+          calls.push({ name: property, args });
+          if (suppressed.has(property)) return proxy;
+          const result = (value as (...a: unknown[]) => unknown).apply(receiver, args);
+          return result === receiver ? proxy : result;
+        };
+      },
+    }) as SiloBuilder;
+    return { builder: proxy, calls };
+  }
+
+  function named(
+    calls: readonly { name: string; args: readonly unknown[] }[],
+    name: string,
+  ): { name: string; args: readonly unknown[] }[] {
+    return calls.filter((call) => call.name === name);
+  }
+
+  /** A clustered configuration and the options both the host and this suite resolve from it. */
+  function clusteredConfiguration(silos: string) {
+    const configuration = createConfiguration({
+      "ConnectionStrings:OrleansStorage": "postgres://localhost/spacedb",
+      [CLUSTERING_SILOS_KEY]: silos,
+    });
+    const clustering = resolveClustering(configuration);
+    if (clustering.kind !== "clustered") throw new Error("expected a clustered configuration");
+    return { configuration, clustering };
+  }
+
+  it("wires the in-process transport and a single-address view with no clustering configured", () => {
+    const { builder: recording, calls } = recordingBuilder();
+
+    configureApiSilo(recording, createConfiguration({}));
+
+    const membership = named(calls, "useStaticMembership");
+    expect(membership).toHaveLength(1);
+    expect(membership[0]?.args[0]).toEqual([recording.local]);
+    expect(named(calls, "useInProcessTransport")).toHaveLength(1);
+    expect(named(calls, "useWebSocketTransport")).toHaveLength(0);
+  });
+
+  it("wires the WebSocket transport and the whole configured view when clustered", () => {
+    const { configuration, clustering } = clusteredConfiguration("127.0.0.1:11111,127.0.0.1:11112");
+    const { builder: recording, calls } = recordingBuilder(clustering.local);
+
+    configureApiSilo(recording, configuration, clustering);
+
+    expect(named(calls, "useWebSocketTransport")).toHaveLength(1);
+    expect(named(calls, "useInProcessTransport")).toHaveLength(0);
+    expect(named(calls, "useStaticMembership")[0]?.args[0]).toEqual(clustering.silos);
+  });
+
+  it("declares observer hosting on BOTH paths - LogWatchHub mints a reference at startup", () => {
+    const plain = recordingBuilder();
+    configureApiSilo(plain.builder, createConfiguration({}));
+    expect(named(plain.calls, "requireObserverHosting")).toHaveLength(1);
+
+    const { configuration, clustering } = clusteredConfiguration("127.0.0.1:11111");
+    const clustered = recordingBuilder(clustering.local);
+    configureApiSilo(clustered.builder, configuration, clustering);
+    expect(named(clustered.calls, "requireObserverHosting")).toHaveLength(1);
+  });
+
   it("compiles the API host's own schema constant into the live provider", () => {
     const services = configureApiSilo(builder(), createConfiguration({}));
 
@@ -310,6 +397,38 @@ describe("configureApiSilo", () => {
     // rewrites the grain class's metadata, so the age is observable there.
     const metadata = getGrainMetadata(CheckGrain);
     expect(metadata?.options?.collectionAgeSeconds).toBeGreaterThan(0);
+  });
+});
+
+describe("resolveApiListenEndpoints", () => {
+  // Two API hosts on one machine collide on 50051/8080 long before they collide on a silo port,
+  // and two API hosts is exactly the topology the concurrent-seed case is about.
+  it("defaults to the hardcoded listen values with nothing configured", () => {
+    expect(resolveApiListenEndpoints(createConfiguration({}))).toEqual({
+      grpcListenAddress: GRPC_LISTEN_ADDRESS,
+      httpListenPort: HTTP_LISTEN_PORT,
+    });
+  });
+
+  it("moves both listeners when the ports are configured, keeping the gRPC bind host", () => {
+    expect(
+      resolveApiListenEndpoints(
+        createConfiguration({ [API_GRPC_PORT_KEY]: "50052", [API_HTTP_PORT_KEY]: "8081" }),
+      ),
+    ).toEqual({ grpcListenAddress: "0.0.0.0:50052", httpListenPort: 8081 });
+  });
+
+  it("reads the `__` environment spelling, as every other key does", () => {
+    expect(resolveApiListenEndpoints(createConfiguration({ Api__HttpPort: "8082" }))).toEqual({
+      grpcListenAddress: GRPC_LISTEN_ADDRESS,
+      httpListenPort: 8082,
+    });
+  });
+
+  it("rejects a port that is not one, naming the key", () => {
+    expect(() =>
+      resolveApiListenEndpoints(createConfiguration({ [API_GRPC_PORT_KEY]: "https" })),
+    ).toThrow(/Api:GrpcPort/);
   });
 });
 

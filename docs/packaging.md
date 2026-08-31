@@ -43,6 +43,96 @@ zed --endpoint localhost:50051 --token any --insecure permission check document:
 The host seeds `document:readme#viewer@user:alice` and a schema whose `view` permission is
 `viewer + editor`, so that check answers `true` and the same check for `user:bob` answers `false`.
 
+## Clustering
+
+With nothing configured, each host is a **single-process silo**: static membership over itself and
+Thresh's in-process transport, needing no external dependency and no configuration. That is what
+`UseLocalhostClustering()`'s no-argument form is for, and it is what both `pnpm --filter ... start`
+commands above give you.
+
+Several silos in one cluster is opt-in, through the same `Configuration` object the datastore
+storage config reads — .NET's rules, so every key has an `A:B` form and an `A__B` environment form,
+and both are case-insensitive.
+
+| Key                               | Default     | Meaning                                                                                                          |
+| --------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| `Clustering:Silos`                | _unset_     | Comma-separated `host:port` list covering the **whole** cluster, this silo included. Its presence is the switch. |
+| `Clustering:SiloPort`             | `11111`     | This silo's listen and advertise port.                                                                           |
+| `Clustering:AdvertisedHost`       | `127.0.0.1` | This silo's bind host **and** the host peers dial back.                                                          |
+| `Clustering:AllowInMemoryStorage` | `false`     | Accept a clustered silo whose datastore state is per-silo and disposable.                                        |
+| `Api:GrpcPort`                    | `50051`     | API host only: the port of the gRPC surface.                                                                     |
+| `Api:HttpPort`                    | `8080`      | API host only: the port of the plain `GET /` listener.                                                           |
+
+Two silos on one machine — an API host and a silo-only host, in two terminals:
+
+```sh
+Clustering__Silos=127.0.0.1:11111,127.0.0.1:11112 \
+Clustering__AllowInMemoryStorage=true \
+  pnpm --filter @spacedb/api start
+
+Clustering__Silos=127.0.0.1:11111,127.0.0.1:11112 \
+Clustering__SiloPort=11112 \
+Clustering__AllowInMemoryStorage=true \
+  pnpm --filter @spacedb/silo start
+```
+
+Every clustered silo needs the storage opt-in or a connection string, this one included:
+`resolveClustering` throws before the silo is built otherwise. A cluster that is to keep its data
+sets `ConnectionStrings__OrleansStorage` on **both** and drops the opt-in. Start the silo-only host
+**first** — static membership reports every configured peer `active` immediately, so the API host's
+startup seed can be placed on a peer that is not listening yet.
+
+The second silo changes **one** variable. A clustered silo's whole identity — its name, its uid and
+its ring position — is derived from `AdvertisedHost:SiloPort`, so moving the port moves all three
+and a collision is impossible by construction. That derivation is also why the silo list is
+identical on every host: each silo must reconstruct its peers' addresses bit-identically to how
+those peers construct their own, or a silo's entry in the shared view differs from its own address
+and it dials itself over the wire. It is also why there is no silo-name knob — a name only one
+silo's environment sets is a name its peers cannot derive.
+
+**Every silo gets the whole list.** Orleans' nearest counterpart,
+`UseLocalhostClustering(siloPort, gatewayPort, primarySiloEndpoint)`, gossips through a _primary_
+endpoint, so a joiner needs only that one address. Thresh has no development or gossip membership
+provider; `useStaticMembership` takes the entire view. A `Clustering:PrimarySilo` key becomes
+possible only if Thresh grows one.
+
+**Static membership has no join/leave protocol.** Every configured peer is reported `active` from
+the moment a silo starts, so a grain placed on a peer that has not come up yet fails or times out
+until it does — start order matters — and a stopped silo is never removed from the view. That is
+inherent to static membership and is why `useKubernetesMembership` is the production path; under
+Kubernetes the pod IP satisfies both halves of `AdvertisedHost` at once.
+
+**MVCC garbage collection does not survive clustering.** The datastore grain registers the
+`mvcc-gc` reminder through the default per-silo reminder table, while `LocalReminderService` fires
+only reminders whose grain hashes into the ranges that silo owns on the ring. The registering silo
+and the owning silo coincide only by chance, so in a cluster the reminder can stop firing and MVCC
+history is never collected. Re-registering on activation does not help — registering and firing are
+keyed on different silos. Closing it means a shared table (`usePostgresReminders`), which is not
+wired yet.
+
+**A dead silo wedges the cluster.** `useStaticMembership` has no failure detection, so calls keep
+routing to a silo that has exited and the caller hangs rather than failing — `zed` sees no error to
+retry. Observed directly: killing one silo left a check that had just answered `true` hanging
+indefinitely.
+
+**A real multi-silo deployment needs durable grain storage.** The datastore grain is a _cluster
+singleton_ over the `datastore` grain-storage provider, and that provider's fallback branch
+constructs a `MemoryGrainStorage` **per silo**. The grain declares no placement, so after an idle
+deactivation it reactivates on an arbitrary silo and reads an empty store: not merely non-durable
+across restarts, but silent data loss during normal operation. So a clustered silo with no
+`ConnectionStrings:OrleansStorage` refuses to configure, naming the key, unless
+`Clustering__AllowInMemoryStorage=true` says out loud that the state is disposable. Pointing that
+connection string at Postgres is sufficient — the grain's confirmed log rides the custom-storage
+seam over the same named provider, so `useMemoryJournaling()` carries no state of its own.
+
+A clustered host binds a real WebSocket listener, so `ws` must be present at the deployment target
+(see the packaging note below about real npm packages being left external to the bundle).
+
+Verifying a real socket-level cluster is an **attended, manual** check, like the `zed` smoke test:
+start the two hosts above in two terminals, drive the API host with `zed`, and signal both. Nothing
+automated ever starts a host. Multi-silo behaviour that _can_ be tested is tested through Thresh's
+`TestCluster` (`MeshTestCluster`), which runs several silos in one process.
+
 ## The shutdown invariant
 
 **A host must release the event loop when it stops.** Not "close its listeners" — release the loop,
@@ -84,7 +174,8 @@ So: **bundle, do not publish.** A vite SSR build with `unplugin-swc` produces a 
 runs on plain `node`, with no vite, no TypeScript and no workspace. SWC must own the transformation:
 esbuild and Oxc do not support the standard TC39 decorators the Thresh interop surface uses. Inline
 `@spacedb/*` and `@thresh/*` via `ssr.noExternal`; leave real npm packages external, since they are
-installable and bundling `pg` breaks its optional `pg-native` require. Import `defineConfig` from
+installable and bundling `pg` breaks its optional `pg-native` require. `ws` is external for the same
+reason and is not optional for a clustered host — `useWebSocketTransport()` needs it at runtime. Import `defineConfig` from
 `vitest/config` rather than `vite`, which is not a direct dependency under pnpm's strict layout.
 
 Measured on the API host: 1,717 modules, 5.4 MB (1.04 MB gzip), ~330 ms. The artifact boots and

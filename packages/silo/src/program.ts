@@ -8,8 +8,9 @@ import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
 import { SiloAddress } from "@thresh/core/silo-address";
 import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
 import type { SiloHost } from "@thresh/hosting/silo-host";
-import { InProcessNetwork } from "@thresh/messaging/in-process-transport";
 
+import type { ClusteringOptions } from "./clustering-config";
+import { applyClustering, resolveClustering } from "./clustering-config";
 import type { Configuration } from "./datastore-storage-config";
 import {
   DATASTORE_PROVIDER_NAME,
@@ -39,13 +40,16 @@ import { SILO_SCHEMA_TEXT } from "./silo-schema";
  *     the same inlined file - starting a second host on top of the entry point's own call.
  *     Importing this module therefore starts nothing BY CONSTRUCTION, which is what keeps a test
  *     from booting a silo - and a backgrounded host orphans and runs forever.
- *  2. `UseLocalhostClustering()` becomes static membership over this one silo plus Thresh's
- *     IN-PROCESS transport. The transport choice is forced, not preferred: `LogWatchHub` mints an
- *     observer reference from the silo's startup task, and `createObjectReference` throws on a
- *     WebSocket-hosted silo (thresh#55). {@link SiloBuilder.requireObserverHosting} is declared so
- *     that a later move to a networked transport fails at BUILD time rather than on the first
- *     Watch call. A single-process dev silo is what `UseLocalhostClustering` is for; a multi-silo
- *     deployment needs the networked transport, and so needs thresh#55 fixed first.
+ *  2. `UseLocalhostClustering()` BECOMES A CHOICE, not a constant - see {@link applyClustering} and
+ *     port decision 6. With nothing configured it is static membership over this one silo plus
+ *     Thresh's IN-PROCESS transport, which is exactly what `UseLocalhostClustering`'s no-argument
+ *     form is for: a single-process dev silo needing no external dependency. The transport is now
+ *     PREFERRED rather than forced - thresh#55 (`createObjectReference` throwing on a
+ *     WebSocket-hosted silo) is closed and verified over real sockets, so a networked silo can back
+ *     the observer seam `LogWatchHub` needs. {@link SiloBuilder.requireObserverHosting} is declared
+ *     unconditionally on BOTH paths, and is load-bearing rather than aspirational now that two
+ *     transports can back the seam and others cannot: it is what makes a future third choice fail
+ *     at BUILD time rather than on the first Watch call.
  *  3. `AddCustomStorageBasedLogConsistencyProvider("CustomStorage")` has no counterpart: Thresh's
  *     journaling binder DETECTS a custom-storage host and installs the adaptor, so what the C#
  *     named a provider is `useMemoryJournaling()` here - the call that makes the binder run. The
@@ -57,6 +61,21 @@ import { SILO_SCHEMA_TEXT } from "./silo-schema";
  *  5. `AddSingleton<IDatastore>(...)` has no container to live in: `addSpiceportGrainServices`
  *     takes the host-owned datastore as a thunk and exposes it back on the returned record, which
  *     IS the container (see that file's port decisions).
+ *  6. MULTI-SILO CLUSTERING IS A DEVIATION WITH NO SPICEPORT SOURCE. Spiceport calls only
+ *     `silo.UseLocalhostClustering();` and ships no deployment configuration, so there is nothing
+ *     to transliterate; the nearest Orleans counterpart is the OVERLOAD
+ *     `UseLocalhostClustering(siloPort, gatewayPort, primarySiloEndpoint)`, which is how Orleans
+ *     runs several silos on one machine. `clustering-config.ts` stands in for it, read through the
+ *     SAME `Configuration` object the datastore storage config already uses (`Clustering:Silos` and
+ *     friends, with .NET's `__`/case-insensitive key rules), and the port ledger carries a row for
+ *     it. Three consequences belong at this call site. The presence of a silo list is the only
+ *     switch, so the DEFAULT is byte-identically today's host. A clustered silo's IDENTITY is
+ *     derived from its endpoint (`SiloAddress.ringKey` is `podName`, so two silos sharing this
+ *     host's constant name would be one ring position), which is why {@link SILO_NAME} names only
+ *     the single-process silo. And a clustered silo needs DURABLE grain storage - the datastore
+ *     grain is a cluster singleton whose default in-memory provider is constructed per silo, so its
+ *     state would not survive the activation moving - which `resolveClustering` refuses at
+ *     configure time unless the operator opts in.
  */
 
 /**
@@ -75,6 +94,7 @@ const DATASTORE_GC_OPTIONS: DatastoreGcOptions | undefined = undefined;
 export function configureSiloHost(
   builder: SiloBuilder,
   configuration: Configuration,
+  clustering: ClusteringOptions = resolveClustering(configuration),
 ): SpiceportGrainServices {
   if (builder === undefined || builder === null) {
     throw new InvalidArgumentError("builder is required");
@@ -83,9 +103,10 @@ export function configureSiloHost(
     throw new InvalidArgumentError("configuration is required");
   }
 
-  // `silo.UseLocalhostClustering();` - see port decision 2.
-  builder.useStaticMembership([builder.local]);
-  builder.useInProcessTransport(new InProcessNetwork());
+  // `silo.UseLocalhostClustering();` - see port decisions 2 and 6. The resolved options are an
+  // OPTIONAL parameter because {@link createSiloHost} must resolve them before `createSilo` (the
+  // local address is constructor input) and would otherwise resolve them twice.
+  applyClustering(builder, clustering);
   builder.requireObserverHosting();
   // CheckGrain's per-activation reply memo (default ON) needs a matching idle-collection age so a
   // warm activation survives long enough between calls for the memo to pay off.
@@ -98,6 +119,14 @@ export function configureSiloHost(
   // "datastore" grain-storage provider above - see port decision 3.
   builder.useMemoryJournaling();
   // Backs the datastore grain's periodic MVCC-GC reminder ("mvcc-gc") - see port decision 4.
+  //
+  // KNOWN LIMITATION IN A CLUSTER. The default table is PER SILO, and `LocalReminderService` fires
+  // only the reminders whose grain hashes into the ranges THIS silo owns on the ring. Registration
+  // lands on the silo the singleton activated on; firing is decided by the ring owner. Those are
+  // the same silo only by coincidence, so with N silos `mvcc-gc` can silently stop running and MVCC
+  // history is never collected. Re-registering on every activation does NOT close the gap, because
+  // registering and firing are keyed on different silos. The fix is a SHARED table
+  // (`usePostgresReminders`), which is not wired yet - single-process hosts are unaffected.
   builder.useReminders();
 
   // Schema + dispatch mesh (Caching over the grain mesh) + check-engine singletons.
@@ -135,18 +164,27 @@ export interface SiloHostWiring {
 export function createSiloHost(
   configuration: Configuration = configurationFromEnvironment(),
 ): SiloHostWiring {
+  // Resolved BEFORE `createSilo`, because a clustered silo's own address is constructor input and
+  // is derived from its configured endpoint (port decision 6).
+  const clustering = resolveClustering(configuration);
   const builder = createSilo({
     clusterId: SILO_CLUSTER_ID,
-    local: new SiloAddress(SILO_NAME, `uid-${SILO_NAME}`, `${SILO_NAME}:11111`),
+    local:
+      clustering.kind === "clustered"
+        ? clustering.local
+        : new SiloAddress(SILO_NAME, `uid-${SILO_NAME}`, `${SILO_NAME}:11111`),
   });
-  const services = configureSiloHost(builder, configuration);
+  const services = configureSiloHost(builder, configuration, clustering);
   return { host: builder.build(), services };
 }
 
 /** The dev cluster this host joins - `UseLocalhostClustering`'s fixed identity. */
 export const SILO_CLUSTER_ID = "spiceport";
 
-/** This silo's name/address stem within that cluster. */
+/**
+ * This silo's name/address stem within that cluster, for the SINGLE-PROCESS host. A clustered silo
+ * derives its whole identity from its endpoint instead - see port decision 6.
+ */
 export const SILO_NAME = "spiceport-silo";
 
 /**
