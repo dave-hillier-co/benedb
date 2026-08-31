@@ -1,5 +1,5 @@
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { SetOperationType } from "@spacedb/core/userset-rewrite";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { SetOperationType } from "@benedb/core/userset-rewrite";
 
 import type { CaveatExpression } from "./caveat-expression";
 
@@ -26,7 +26,7 @@ import type { CaveatExpression } from "./caveat-expression";
  *   * `DirectSubject(Subject, Caveat = null)` has an optional second parameter; the factory leaves
  *     `caveat` genuinely absent rather than defaulting it.
  *   * Public wildcards are represented by the subject ONR's object id being `"*"`; `isPublicWildcard`
- *     from @spacedb/core owns that test and nothing here re-implements it.
+ *     from @benedb/core owns that test and nothing here re-implements it.
  */
 
 /**

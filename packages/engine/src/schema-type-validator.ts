@@ -2,15 +2,15 @@ import { CelError } from "@bufbuild/cel";
 import {
   isAllowedRelationPublicWildcard,
   type AllowedRelation,
-} from "@spacedb/core/allowed-relation";
-import { allowedRelationSource } from "@spacedb/core/allowed-relation-identity";
-import type { CaveatDefinition } from "@spacedb/core/caveat-definition";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { isPermission, type Relation } from "@spacedb/core/relation";
-import type { SetOperation, SetOperationChild } from "@spacedb/core/userset-rewrite";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
+} from "@benedb/core/allowed-relation";
+import { allowedRelationSource } from "@benedb/core/allowed-relation-identity";
+import type { CaveatDefinition } from "@benedb/core/caveat-definition";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { isPermission, type Relation } from "@benedb/core/relation";
+import type { SetOperation, SetOperationChild } from "@benedb/core/userset-rewrite";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 
 import { parseCaveatExpression } from "./caveat-compiler";
 import { referencesIdentifier } from "./references-identifier";
@@ -243,7 +243,7 @@ function validateBaseRelation(
 
   const seen = new Set<string>();
   for (const subject of allowed) {
-    // `AllowedRelationIdentity.Source`, already ported in @spacedb/core: the duplicate check
+    // `AllowedRelationIdentity.Source`, already ported in @benedb/core: the duplicate check
     // depends on caveat + expiration being part of the identity, so it must not be re-derived here.
     const source = allowedRelationSource(subject);
 

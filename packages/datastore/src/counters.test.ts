@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createRelationship } from "@spacedb/core/relationship";
+import { createRelationship } from "@benedb/core/relationship";
 
 import { relationshipsFilterMatches, type RelationshipsFilter } from "./relationships-filter";
 import type { RegisteredCounter } from "./counters";

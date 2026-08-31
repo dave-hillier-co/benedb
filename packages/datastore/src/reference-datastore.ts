@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { IRevisionParser } from "@spacedb/core/i-revision-parser";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { IRevisionParser } from "@benedb/core/i-revision-parser";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 import type { Duration } from "@thresh/core/duration";
 import { durationToMs } from "@thresh/core/duration";
 

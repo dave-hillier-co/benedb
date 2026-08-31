@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { atExactSnapshot, MINIMIZE_LATENCY } from "@spacedb/core/consistency-requirement";
-import { MaxDepthExceededException } from "@spacedb/core/max-depth-exceeded-exception";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { CheckEngine } from "@spacedb/engine/check-engine";
-import { visitKeyOf, visitKeyToCanonicalString } from "@spacedb/engine/i-dispatcher";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { atExactSnapshot, MINIMIZE_LATENCY } from "@benedb/core/consistency-requirement";
+import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { CheckEngine } from "@benedb/engine/check-engine";
+import { visitKeyOf, visitKeyToCanonicalString } from "@benedb/engine/i-dispatcher";
 
 import { caveatFromWire } from "./caveat-wire";
 import { setTestDispatchContext } from "./dispatch-context-test-helper";

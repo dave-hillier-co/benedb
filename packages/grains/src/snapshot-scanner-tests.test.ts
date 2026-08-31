@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { CounterNotRegisteredException } from "@spacedb/datastore/datastore-exceptions";
-import type { RelationshipsFilter } from "@spacedb/datastore/relationships-filter";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { CounterNotRegisteredException } from "@benedb/datastore/datastore-exceptions";
+import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 
 import type { ISnapshotScanner } from "./i-snapshot-scanner";
 import { MeshTestCluster } from "./mesh-test-cluster";

@@ -1,10 +1,10 @@
-import type { ConsistencyRequirement } from "@spacedb/core/consistency-requirement";
-import type { IRevisionParser } from "@spacedb/core/i-revision-parser";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { InvalidConsistencyTokenException } from "@spacedb/core/invalid-consistency-token-exception";
-import type { ResolvedRevision } from "@spacedb/core/resolved-revision";
-import type { ZedToken } from "@spacedb/core/zed-token";
-import { decodeRevision } from "@spacedb/core/zed-tokens";
+import type { ConsistencyRequirement } from "@benedb/core/consistency-requirement";
+import type { IRevisionParser } from "@benedb/core/i-revision-parser";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { InvalidConsistencyTokenException } from "@benedb/core/invalid-consistency-token-exception";
+import type { ResolvedRevision } from "@benedb/core/resolved-revision";
+import type { ZedToken } from "@benedb/core/zed-token";
+import { decodeRevision } from "@benedb/core/zed-tokens";
 
 import type { IDatastore } from "./i-datastore";
 

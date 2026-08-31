@@ -21,7 +21,7 @@ export class SchemaWriteValidationException extends Error {
 
 // The message is the sole distinguishing state.
 registerSurrogate<SchemaWriteValidationException>({
-  tag: "spacedb.schemaWriteValidationException",
+  tag: "benedb.schemaWriteValidationException",
   test: (value) => value instanceof SchemaWriteValidationException,
   encode: (error) => ({ message: error.message }),
   decode: (fields) => new SchemaWriteValidationException(fields.message as string),

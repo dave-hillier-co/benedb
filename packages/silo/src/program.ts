@@ -1,10 +1,10 @@
-import type { DatastoreGcOptions } from "@spacedb/grains/datastore-gc-options";
-import { GrainBackedDatastore } from "@spacedb/grains/grain-backed-datastore";
-import type { SpiceportGrainServices } from "@spacedb/grains/service-collection-extensions";
-import { addSpiceportGrainServices } from "@spacedb/grains/service-collection-extensions";
-import { addActivationMemoCollectionAge } from "@spacedb/grains/silo-builder-extensions";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import type { DatastoreGcOptions } from "@benedb/grains/datastore-gc-options";
+import { GrainBackedDatastore } from "@benedb/grains/grain-backed-datastore";
+import type { SpiceportGrainServices } from "@benedb/grains/service-collection-extensions";
+import { addSpiceportGrainServices } from "@benedb/grains/service-collection-extensions";
+import { addActivationMemoCollectionAge } from "@benedb/grains/silo-builder-extensions";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import { SiloAddress } from "@thresh/core/silo-address";
 import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
 import type { SiloHost } from "@thresh/hosting/silo-host";
@@ -23,7 +23,7 @@ import { SILO_SCHEMA_TEXT } from "./silo-schema";
  * Ported from Spiceport `src/Spiceport.Silo/Program.cs`.
  *
  * The silo-only host: an Orleans silo with no web server, so the keyed check grains activate here.
- * NEARLY identical to the API host (`@spacedb/api/program`) minus everything gRPC - and the
+ * NEARLY identical to the API host (`@benedb/api/program`) minus everything gRPC - and the
  * duplication is DELIBERATE. The two files are independently maintained in the C# and differ in
  * exactly the two places that matter: this host compiles {@link SILO_SCHEMA_TEXT} (NOT the API
  * host's `SEED_SCHEMA_TEXT`), and it does NOT seed. Factoring the shared five-call wiring into one
@@ -210,7 +210,7 @@ export async function main(): Promise<void> {
 
 /**
  * Releases everything the silo host holds. The API host has the identical function for the
- * identical reason (`@spacedb/api/program`'s `shutdownApiHost`), and the duplication is deliberate
+ * identical reason (`@benedb/api/program`'s `shutdownApiHost`), and the duplication is deliberate
  * for the same reason the two hosts are duplicated: they are independently maintained in the C#.
  *
  * {@link LogWatchHub} runs its heartbeat as a detached loop over a real `setTimeout`, so an

@@ -1,8 +1,8 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { baseRelation } from "@spacedb/core/relation";
-import { allowedRelationDirect } from "@spacedb/core/allowed-relation";
-import { createNamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { baseRelation } from "@benedb/core/relation";
+import { allowedRelationDirect } from "@benedb/core/allowed-relation";
+import { createNamespaceDefinition } from "@benedb/core/namespace-definition";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import { SchemaTypeException } from "./schema-type-exception";

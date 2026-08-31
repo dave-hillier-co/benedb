@@ -1,4 +1,4 @@
-import type { RelationshipReference } from "@spacedb/core/relationship-reference";
+import type { RelationshipReference } from "@benedb/core/relationship-reference";
 import { describe, expect, it } from "vitest";
 
 import {

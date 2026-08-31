@@ -1,4 +1,4 @@
-import { defaultGreaterThan, type IRevision } from "@spacedb/core/i-revision";
+import { defaultGreaterThan, type IRevision } from "@benedb/core/i-revision";
 
 /**
  * A placeholder revision used when the engine is driven directly from an

@@ -1,24 +1,24 @@
 import { status } from "@grpc/grpc-js";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { FormatError } from "@spacedb/core/format-error";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { InvalidConsistencyTokenException } from "@spacedb/core/invalid-consistency-token-exception";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
-import type { ConsistencyWire } from "@spacedb/grains/consistency-wire";
-import { MINIMIZE_LATENCY_WIRE } from "@spacedb/grains/consistency-wire";
-import type { IRelationshipsGrain } from "@spacedb/grains/i-relationships-grain";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { FormatError } from "@benedb/core/format-error";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { InvalidConsistencyTokenException } from "@benedb/core/invalid-consistency-token-exception";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
+import type { ConsistencyWire } from "@benedb/grains/consistency-wire";
+import { MINIMIZE_LATENCY_WIRE } from "@benedb/grains/consistency-wire";
+import type { IRelationshipsGrain } from "@benedb/grains/i-relationships-grain";
 import {
   IRelationshipsGrain as IRelationshipsGrainDefinition,
   RELATIONSHIPS_GRAIN_KEY,
-} from "@spacedb/grains/i-relationships-grain";
-import type { RelationshipReads } from "@spacedb/grains/relationship-reads";
+} from "@benedb/grains/i-relationships-grain";
+import type { RelationshipReads } from "@benedb/grains/relationship-reads";
 import type {
   RelationshipsFilterWire,
   RelationshipStreamItem,
   RelationshipWire,
-} from "@spacedb/grains/relationships-dtos";
-import { SequencerOverloadedException } from "@spacedb/grains/sequencer-overloaded-exception";
-import { WriteConflictException } from "@spacedb/grains/write-conflict-exception";
+} from "@benedb/grains/relationships-dtos";
+import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
+import { WriteConflictException } from "@benedb/grains/write-conflict-exception";
 import type {
   Consistency,
   ExportBulkRelationshipsRequest,
@@ -27,7 +27,7 @@ import type {
   ImportBulkRelationshipsResponse,
   Relationship as ProtoRelationship,
   RelationshipFilter as ProtoRelationshipFilter,
-} from "@spacedb/protos/permissions";
+} from "@benedb/protos/permissions";
 import { isCancellationError } from "@thresh/core/errors";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
@@ -61,7 +61,7 @@ const NANOS_PER_SECOND = 1_000_000_000n;
  *     member the C# reads off it. `@grpc/grpc-js`'s `ServerWritableStream` / `ServerReadableStream`
  *     are adapted onto those seams in `program.ts`, where Node backpressure is handled too.
  *   * `FormatException` has no TypeScript analogue; what a malformed bulk-export cursor throws is
- *     `@spacedb/core`'s {@link FormatError}, and that is what the INVALID_ARGUMENT arm catches.
+ *     `@benedb/core`'s {@link FormatError}, and that is what the INVALID_ARGUMENT arm catches.
  *   * `catch (OperationCanceledException) when (ct.IsCancellationRequested)` becomes
  *     `isCancellationError(error) && signal?.aborted === true`, matched on the TYPE, never on a
  *     message string.

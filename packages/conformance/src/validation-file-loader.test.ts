@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import { isPublicWildcard } from "@spacedb/core/object-and-relation";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import { isPublicWildcard } from "@benedb/core/object-and-relation";
 
 import { loadValidationFile, parseValidationFile } from "./validation-file-loader";
 import {

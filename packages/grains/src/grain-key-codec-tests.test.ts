@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { FormatError } from "@spacedb/core/format-error";
+import { FormatError } from "@benedb/core/format-error";
 
 import { joinGrainKey, splitGrainKey } from "./grain-key-codec";
 
@@ -18,7 +18,7 @@ import { joinGrainKey, splitGrainKey } from "./grain-key-codec";
  *    being folded into that one. The two overlap by design - this is the C# author's own gate.
  *  - `GrainKeyCodec.Join(string[])` -> the variadic `joinGrainKey(...segments)`;
  *    `GrainKeyCodec.Split(key, count)` -> `splitGrainKey(key, count)`.
- *  - `FormatException` has no JS analogue; the port raises `@spacedb/core`'s `FormatError`, which
+ *  - `FormatException` has no JS analogue; the port raises `@benedb/core`'s `FormatError`, which
  *    is what this asserts on. NOT a bare `toThrow()`: both message assertions - the expected
  *    segment count and the malformed key verbatim - are kept, because a message that names
  *    neither is useless at the call site where a malformed grain key actually surfaces.

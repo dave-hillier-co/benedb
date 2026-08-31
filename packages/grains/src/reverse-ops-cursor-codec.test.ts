@@ -1,7 +1,7 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { FormatError } from "@spacedb/core/format-error";
-import type { LookupResourcesCursor } from "@spacedb/engine/lookup-resources-cursor";
-import { createLookupResourcesCursor } from "@spacedb/engine/lookup-resources-cursor";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { FormatError } from "@benedb/core/format-error";
+import type { LookupResourcesCursor } from "@benedb/engine/lookup-resources-cursor";
+import { createLookupResourcesCursor } from "@benedb/engine/lookup-resources-cursor";
 import { describe, expect, it } from "vitest";
 
 import {

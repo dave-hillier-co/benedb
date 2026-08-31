@@ -1,4 +1,4 @@
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
 import { describe, expect, it } from "vitest";
 
 import { computeStoredSchemaHash } from "./stored-schema-hash";

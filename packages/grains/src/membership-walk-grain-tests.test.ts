@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { DEFAULT_MAX_DEPTH } from "@spacedb/engine/check-engine";
-import { LookupResourcesEngine } from "@spacedb/engine/lookup-resources-engine";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { DEFAULT_MAX_DEPTH } from "@benedb/engine/check-engine";
+import { LookupResourcesEngine } from "@benedb/engine/lookup-resources-engine";
 
 import { IMembershipWalkGrain } from "./i-membership-walk-grain";
 import { membershipWalkKeyBuild } from "./membership-walk-key";

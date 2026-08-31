@@ -1,16 +1,16 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { Relationship } from "@spacedb/core/relationship";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { formatRelationship, parseRelationship } from "@spacedb/core/tuple-strings";
-import type { RegisteredCounter } from "@spacedb/datastore/counters";
-import type { CounterVersion, DatastoreState } from "@spacedb/datastore/datastore-state";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { Relationship } from "@benedb/core/relationship";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { formatRelationship, parseRelationship } from "@benedb/core/tuple-strings";
+import type { RegisteredCounter } from "@benedb/datastore/counters";
+import type { CounterVersion, DatastoreState } from "@benedb/datastore/datastore-state";
 import {
   CounterNotRegisteredException,
   InvalidRevisionException,
   RevisionNotFoundException,
-} from "@spacedb/datastore/datastore-exceptions";
-import type { RelationshipsFilter } from "@spacedb/datastore/relationships-filter";
+} from "@benedb/datastore/datastore-exceptions";
+import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import { describe, expect, it } from "vitest";
 

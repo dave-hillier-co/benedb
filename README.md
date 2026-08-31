@@ -1,10 +1,10 @@
-# SpaceDB
+# BeneDB
 
 A wire-compatible [SpiceDB](https://github.com/authzed/spicedb) implementation in TypeScript,
 built on [Thresh](https://github.com/dave-hillier/thresh) — a TypeScript virtual-actor runtime
 in the Orleans model, hosted on Kubernetes.
 
-SpaceDB answers the [Zanzibar](https://authzed.com/zanzibar) question — _"can subject X perform
+BeneDB answers the [Zanzibar](https://authzed.com/zanzibar) question — _"can subject X perform
 action Y on resource Z?"_ — from a relationship graph defined by a schema, and runs the
 recursive permission-check dispatch on Thresh grains. It speaks the `authzed.api.v1` gRPC
 protocol, so the official [`zed`](https://github.com/authzed/zed) CLI and SpiceDB clients work
@@ -13,7 +13,7 @@ against it.
 It is a port of [Spiceport](../spiceport), the .NET + Orleans rearchitecture of SpiceDB, rather
 than of SpiceDB itself: Spiceport has already made the translation from Go's hand-rolled
 dispatch layer — consistent-hash routing, singleflight coalescing, cluster membership — to
-virtual actors, where the runtime provides all three natively. SpaceDB is that architecture in
+virtual actors, where the runtime provides all three natively. BeneDB is that architecture in
 a different runtime. See [`docs/port-plan.md`](docs/port-plan.md).
 
 ## Layout
@@ -34,7 +34,7 @@ packages/
 
 ## Develop
 
-A [pnpm](https://pnpm.io) workspace of `@spacedb/*` packages. Requires Node 22+, pnpm, and a
+A [pnpm](https://pnpm.io) workspace of `@benedb/*` packages. Requires Node 22+, pnpm, and a
 sibling checkout of Thresh at `../thresh` — the workspace links to it directly so that fixes to
 Thresh are visible here without a release.
 
@@ -50,5 +50,5 @@ pnpm lint
 Regenerating the gRPC bindings needs `protoc` on PATH:
 
 ```sh
-pnpm --filter @spacedb/protos generate
+pnpm --filter @benedb/protos generate
 ```

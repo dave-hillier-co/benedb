@@ -1,4 +1,4 @@
-import { MaxDepthExceededException } from "@spacedb/core/max-depth-exceeded-exception";
+import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
 import {
   GrainCallAbortedError,
   GrainCallError,

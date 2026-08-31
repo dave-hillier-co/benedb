@@ -1,10 +1,10 @@
-import type { AllowedRelation } from "@spacedb/core/allowed-relation";
-import { isAllowedRelationPublicWildcard } from "@spacedb/core/allowed-relation";
-import type { CaveatDefinition, CaveatTypeReference } from "@spacedb/core/caveat-definition";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import type { Relation } from "@spacedb/core/relation";
-import { isPermission } from "@spacedb/core/relation";
+import type { AllowedRelation } from "@benedb/core/allowed-relation";
+import { isAllowedRelationPublicWildcard } from "@benedb/core/allowed-relation";
+import type { CaveatDefinition, CaveatTypeReference } from "@benedb/core/caveat-definition";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import type { Relation } from "@benedb/core/relation";
+import { isPermission } from "@benedb/core/relation";
 import type {
   ReflectionCaveat,
   ReflectionCaveatParameter,
@@ -12,7 +12,7 @@ import type {
   ReflectionPermission,
   ReflectionRelation,
   ReflectionTypeReference,
-} from "@spacedb/protos/authzed/api/v1/schema_service";
+} from "@benedb/protos/authzed/api/v1/schema_service";
 
 /**
  * Translates the compiled Core schema model into the `authzed.api.v1` reflection proto messages.

@@ -26,7 +26,7 @@ export class SequencerOverloadedException extends Error {
 }
 
 registerSurrogate<SequencerOverloadedException>({
-  tag: "spacedb.sequencerOverloadedException",
+  tag: "benedb.sequencerOverloadedException",
   test: (value) => value instanceof SequencerOverloadedException,
   encode: (error) => ({ message: error.message }),
   decode: (fields) => new SequencerOverloadedException(fields.message as string),

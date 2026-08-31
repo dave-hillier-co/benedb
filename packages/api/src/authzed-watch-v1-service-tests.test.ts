@@ -1,10 +1,10 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { zedTokenFromRevision } from "@spacedb/core/zed-tokens";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
-import type { RelationshipUpdateWire } from "@spacedb/grains/relationships-dtos";
-import { RelationshipUpdate_Operation } from "@spacedb/protos/authzed/api/v1/core";
-import type { WatchRequest, WatchResponse } from "@spacedb/protos/authzed/api/v1/watch_service";
-import { WatchKind } from "@spacedb/protos/authzed/api/v1/watch_service";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
+import type { RelationshipUpdateWire } from "@benedb/grains/relationships-dtos";
+import { RelationshipUpdate_Operation } from "@benedb/protos/authzed/api/v1/core";
+import type { WatchRequest, WatchResponse } from "@benedb/protos/authzed/api/v1/watch_service";
+import { WatchKind } from "@benedb/protos/authzed/api/v1/watch_service";
 import { describe, expect, it } from "vitest";
 
 import { AuthzedWatchV1Service } from "./authzed-watch-v1-service";
@@ -22,10 +22,10 @@ import { CollectingStreamWriter } from "./collecting-stream-writer";
  *
  * PORT NOTES.
  *  - LEDGER DEVIATION: lands in `packages/api/src` rather than `packages/grains/src`, because
- *    `@spacedb/grains` does not depend on `@spacedb/api` (see `data-plane-grpc-service-tests.test.ts`
+ *    `@benedb/grains` does not depend on `@benedb/api` (see `data-plane-grpc-service-tests.test.ts`
  *    for the full note). It is DISTINCT from the S5 characterization file
  *    `authzed-watch-v1-service.test.ts`, which pins the same service over a scripted fake changefeed.
- *  - TYPES COME FROM THE authzed v1 GENERATED TREE, never from `@spacedb/protos/permissions`: the v0
+ *  - TYPES COME FROM THE authzed v1 GENERATED TREE, never from `@benedb/protos/permissions`: the v0
  *    and v1 `WatchResponse` are different messages with different fields (v1 alone carries
  *    `is_checkpoint`), and crossing them would silently grade the wrong surface.
  *  - The C#'s private `CollectingStreamWriter` (a `List` plus an unbounded `Channel`) is the shared
@@ -36,7 +36,7 @@ import { CollectingStreamWriter } from "./collecting-stream-writer";
  *    because it is the assertion's own patience.
  *  - `Assert.True(watchTask.IsCompletedSuccessfully)` after a cancel becomes "the promise RESOLVES":
  *    an aborted watch that rejected with an AbortError would be a service defect, not a test detail.
- *  - `ZedTokens.FromRevision` is `zedTokenFromRevision` from `@spacedb/core/zed-tokens`.
+ *  - `ZedTokens.FromRevision` is `zedTokenFromRevision` from `@benedb/core/zed-tokens`.
  *  - `await using var cluster` becomes an explicit `try { ... } finally { await cluster.dispose(); }`.
  *
  * WHAT THIS FILE DOES NOT BEAR ON. Neither checkpoint case is a checkpoints-ONLY watch (both select

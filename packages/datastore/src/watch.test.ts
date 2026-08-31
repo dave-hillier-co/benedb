@@ -1,7 +1,7 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import type { IRevision } from "@benedb/core/i-revision";
+import { createRelationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 import { describe, expect, it } from "vitest";
 
 import { WatchContent, watchOptionsContent, type RevisionChange, type WatchOptions } from "./watch";

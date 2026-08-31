@@ -1,8 +1,8 @@
-import { PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { CaveatExpression } from "@spacedb/engine/caveat-expression";
-import { caveatExpressionFromCaveat } from "@spacedb/engine/caveat-expression";
-import type { FoundSubject } from "@spacedb/engine/found-subject";
-import { createFoundSubject } from "@spacedb/engine/found-subject";
+import { PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { CaveatExpression } from "@benedb/engine/caveat-expression";
+import { caveatExpressionFromCaveat } from "@benedb/engine/caveat-expression";
+import type { FoundSubject } from "@benedb/engine/found-subject";
+import { createFoundSubject } from "@benedb/engine/found-subject";
 import { describe, expect, it } from "vitest";
 
 import { caveatFromWire, caveatToWire } from "./caveat-wire";

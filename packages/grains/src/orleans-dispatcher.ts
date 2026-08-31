@@ -1,13 +1,13 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { ISchemaHashSource } from "@spacedb/engine/i-schema-hash-source";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { ISchemaHashSource } from "@benedb/engine/i-schema-hash-source";
 import {
   visitKeyOf,
   visitKeyToCanonicalString,
   type DispatchCheckRequest,
   type DispatchCheckResult,
   type IDispatcher,
-} from "@spacedb/engine/i-dispatcher";
+} from "@benedb/engine/i-dispatcher";
 import type { GrainRuntime } from "@thresh/core/grain-runtime";
 
 import { caveatFromWire } from "./caveat-wire";
@@ -38,7 +38,7 @@ export type DispatcherGrainFactory = Pick<GrainRuntime, "getGrain">;
  * optimisation would silently change the mesh's grain-call counts, which the mesh metrics tests
  * assert.
  *
- * `@spacedb/engine`'s `LocalDispatcher` is the in-process counterpart of this class: the two must
+ * `@benedb/engine`'s `LocalDispatcher` is the in-process counterpart of this class: the two must
  * produce identical verdicts over the same data.
  */
 export class OrleansDispatcher implements IDispatcher {

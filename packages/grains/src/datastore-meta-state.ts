@@ -1,4 +1,4 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 
 import type { CounterVersionWire, SchemaVersionWire } from "./datastore-dtos";
 import { fnv1a64 } from "./stable-hash";

@@ -1,4 +1,4 @@
-import { MaxDepthExceededException } from "@spacedb/core/max-depth-exceeded-exception";
+import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
 import { GrainCallTimeoutError } from "@thresh/core/errors";
 import { RequestContext } from "@thresh/core/request-context";
 import { describe, expect, it } from "vitest";

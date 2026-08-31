@@ -1,13 +1,13 @@
-import type { ContextualizedCaveat } from "@spacedb/core/contextualized-caveat";
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import type { ContextualizedCaveat } from "@benedb/core/contextualized-caveat";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import { CheckEngine } from "./check-engine";

@@ -1,7 +1,7 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import type { IDispatcher } from "@spacedb/engine/i-dispatcher";
-import type { ISchemaHashSource } from "@spacedb/engine/i-schema-hash-source";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import type { IDispatcher } from "@benedb/engine/i-dispatcher";
+import type { ISchemaHashSource } from "@benedb/engine/i-schema-hash-source";
 import type { Duration } from "@thresh/core/duration";
 import type { Grain } from "@thresh/core/grain";
 import type { GrainRegistrationSpec } from "@thresh/core/grain-registration-spec";

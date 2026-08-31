@@ -3,13 +3,13 @@ import { createHash } from "node:crypto";
 import {
   isAllowedRelationPublicWildcard,
   type AllowedRelation,
-} from "@spacedb/core/allowed-relation";
-import type { CaveatDefinition, CaveatTypeReference } from "@spacedb/core/caveat-definition";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import type { Relation } from "@spacedb/core/relation";
-import type { SetOperation, SetOperationChild } from "@spacedb/core/userset-rewrite";
+} from "@benedb/core/allowed-relation";
+import type { CaveatDefinition, CaveatTypeReference } from "@benedb/core/caveat-definition";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import type { Relation } from "@benedb/core/relation";
+import type { SetOperation, SetOperationChild } from "@benedb/core/userset-rewrite";
 
 /**
  * Computes a stable hash of a compiled schema model (namespaces + caveats), used as part of the
@@ -39,7 +39,7 @@ import type { SetOperation, SetOperationChild } from "@spacedb/core/userset-rewr
  *     identically. That is a latent cache-correctness bug, not a contract, and reproducing it in
  *     TypeScript is impossible anyway, so this port renders the parameters and the expression
  *     bytes.
- *  2. ENUM CASING follows the SpaceDB string unions, not the .NET enum names: "union" not
+ *  2. ENUM CASING follows the BeneDB string unions, not the .NET enum names: "union" not
  *     "Union", "tupleObject" not "TupleObject", "any" not "Any". No mapping layer is introduced
  *     just to restore PascalCase.
  */
@@ -227,7 +227,7 @@ function appendCaveat(parts: string[], caveat: CaveatDefinition): void {
 
 /**
  * `t` for a scalar, `t<a,b>` for a generic. An ABSENT child list renders bare; an EMPTY one
- * renders `t<>`. `@spacedb/core/caveat-definition` keeps the two distinct and so does this.
+ * renders `t<>`. `@benedb/core/caveat-definition` keeps the two distinct and so does this.
  */
 function renderTypeReference(type: CaveatTypeReference): string {
   if (type.childTypes === undefined) return type.typeName;

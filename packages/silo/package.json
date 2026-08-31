@@ -1,5 +1,5 @@
 {
-  "name": "@spacedb/silo",
+  "name": "@benedb/silo",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,10 +10,10 @@
     "start": "vite-node --config ../../vitest.config.ts --root . src/start.ts"
   },
   "dependencies": {
-    "@spacedb/core": "workspace:*",
-    "@spacedb/datastore": "workspace:*",
-    "@spacedb/grains": "workspace:*",
-    "@spacedb/schema": "workspace:*",
+    "@benedb/core": "workspace:*",
+    "@benedb/datastore": "workspace:*",
+    "@benedb/grains": "workspace:*",
+    "@benedb/schema": "workspace:*",
     "@thresh/core": "link:../../../thresh/packages/core",
     "@thresh/hosting": "link:../../../thresh/packages/hosting",
     "@thresh/journaling": "link:../../../thresh/packages/journaling",

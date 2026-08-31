@@ -3,13 +3,13 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { loadValidationFile } from "@spacedb/conformance/validation-file-loader";
-import type { ValidationFile } from "@spacedb/conformance/validation-model";
-import { assertionExpectedMembership } from "@spacedb/conformance/validation-model";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
+import { loadValidationFile } from "@benedb/conformance/validation-file-loader";
+import type { ValidationFile } from "@benedb/conformance/validation-model";
+import { assertionExpectedMembership } from "@benedb/conformance/validation-model";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
 import { IManagementGrain } from "@thresh/core/management-grain";
 
 import { MeshTestCluster } from "./mesh-test-cluster";
@@ -36,7 +36,7 @@ import type { ExpandTreeNodeWire } from "./reverse-ops-dtos";
  *     clusters must produce identical reverse-ops results.
  *
  * PORT NOTES.
- *  - The corpus is reached through `@spacedb/conformance` (see `conformance-mesh-tests.test.ts`),
+ *  - The corpus is reached through `@benedb/conformance` (see `conformance-mesh-tests.test.ts`),
  *    with the same `File.Exists` anti-vacuous-pass guard.
  *  - `management.GetDetailedGrainStatistics()` is Thresh's `IManagementGrain` of the same name,
  *    reached with the integer key `0n`; the grain-type match stays a CASE-INSENSITIVE substring, so
@@ -48,7 +48,7 @@ import type { ExpandTreeNodeWire } from "./reverse-ops-dtos";
 const requireFromHere = createRequire(import.meta.url);
 
 const CORPUS_DIR = resolvePath(
-  dirname(requireFromHere.resolve("@spacedb/conformance/validation-file-loader")),
+  dirname(requireFromHere.resolve("@benedb/conformance/validation-file-loader")),
   "..",
   "corpus",
 );

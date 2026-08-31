@@ -1,7 +1,7 @@
 import { status } from "@grpc/grpc-js";
-import { ContextualizedCaveat, type Relationship } from "@spacedb/protos/authzed/api/v1/core";
-import type { WriteRelationshipsRequest } from "@spacedb/protos/authzed/api/v1/permission_service";
-import { Struct } from "@spacedb/protos/google/protobuf/struct";
+import { ContextualizedCaveat, type Relationship } from "@benedb/protos/authzed/api/v1/core";
+import type { WriteRelationshipsRequest } from "@benedb/protos/authzed/api/v1/permission_service";
+import { Struct } from "@benedb/protos/google/protobuf/struct";
 
 import { RpcError } from "./rpc-error";
 

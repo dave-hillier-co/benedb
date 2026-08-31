@@ -2,7 +2,7 @@ import { main } from "./program";
 
 /**
  * The silo-only host's entry point -- no gRPC surface; the keyed check grains activate here. Run it
- * with `pnpm --filter @spacedb/silo start`.
+ * with `pnpm --filter @benedb/silo start`.
  *
  * See `packages/api/src/start.ts` for why the invocation lives in this file and `program.ts` has no
  * module-scope side effect: the `process.argv[1]` entry guard the C#'s top-level statements suggest

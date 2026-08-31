@@ -1,4 +1,4 @@
-import type { IRevision } from "@spacedb/core/i-revision";
+import type { IRevision } from "@benedb/core/i-revision";
 import { registerSurrogate } from "@thresh/core/value-codec";
 
 // A deliberately MULTI-EXPORT module, per the port ledger: the one sanctioned exception to the
@@ -140,14 +140,14 @@ export class CounterNotRegisteredException extends DatastoreException {
 }
 
 registerSurrogate<SerializationException>({
-  tag: "spacedb.serializationException",
+  tag: "benedb.serializationException",
   test: (value) => value instanceof SerializationException,
   encode: (error) => ({ message: error.message }),
   decode: (fields) => new SerializationException(fields.message as string),
 });
 
 registerSurrogate<CreateRelationshipExistsException>({
-  tag: "spacedb.createRelationshipExistsException",
+  tag: "benedb.createRelationshipExistsException",
   // Only the relationship crosses: the constructor derives the message from it deterministically.
   test: (value) => value instanceof CreateRelationshipExistsException,
   encode: (error) => ({ relationship: error.relationship }),
@@ -155,14 +155,14 @@ registerSurrogate<CreateRelationshipExistsException>({
 });
 
 registerSurrogate<CounterAlreadyRegisteredException>({
-  tag: "spacedb.counterAlreadyRegisteredException",
+  tag: "benedb.counterAlreadyRegisteredException",
   test: (value) => value instanceof CounterAlreadyRegisteredException,
   encode: (error) => ({ counterName: error.counterName }),
   decode: (fields) => new CounterAlreadyRegisteredException(fields.counterName as string),
 });
 
 registerSurrogate<CounterNotRegisteredException>({
-  tag: "spacedb.counterNotRegisteredException",
+  tag: "benedb.counterNotRegisteredException",
   test: (value) => value instanceof CounterNotRegisteredException,
   encode: (error) => ({ counterName: error.counterName }),
   decode: (fields) => new CounterNotRegisteredException(fields.counterName as string),

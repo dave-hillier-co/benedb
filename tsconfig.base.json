@@ -18,15 +18,15 @@
     "noEmit": true,
     "skipLibCheck": true,
     "paths": {
-      "@spacedb/core/*": ["./packages/core/src/*"],
-      "@spacedb/schema/*": ["./packages/schema/src/*"],
-      "@spacedb/datastore/*": ["./packages/datastore/src/*"],
-      "@spacedb/engine/*": ["./packages/engine/src/*"],
-      "@spacedb/grains/*": ["./packages/grains/src/*"],
-      "@spacedb/protos/*": ["./packages/protos/src/*"],
-      "@spacedb/api/*": ["./packages/api/src/*"],
-      "@spacedb/silo/*": ["./packages/silo/src/*"],
-      "@spacedb/conformance/*": ["./packages/conformance/src/*"],
+      "@benedb/core/*": ["./packages/core/src/*"],
+      "@benedb/schema/*": ["./packages/schema/src/*"],
+      "@benedb/datastore/*": ["./packages/datastore/src/*"],
+      "@benedb/engine/*": ["./packages/engine/src/*"],
+      "@benedb/grains/*": ["./packages/grains/src/*"],
+      "@benedb/protos/*": ["./packages/protos/src/*"],
+      "@benedb/api/*": ["./packages/api/src/*"],
+      "@benedb/silo/*": ["./packages/silo/src/*"],
+      "@benedb/conformance/*": ["./packages/conformance/src/*"],
       "@thresh/core/*": ["../thresh/packages/core/src/*"],
       "@thresh/messaging/*": ["../thresh/packages/messaging/src/*"],
       "@thresh/directory/*": ["../thresh/packages/directory/src/*"],
@@ -42,7 +42,7 @@
       "@thresh/streams/*": ["../thresh/packages/streams/src/*"],
       "@thresh/client/*": ["../thresh/packages/client/src/*"],
       "@thresh/testing/*": ["../thresh/packages/testing/src/*"],
-      "@spacedb/differential/*": ["./packages/differential/src/*"]
+      "@benedb/differential/*": ["./packages/differential/src/*"]
     }
   }
 }

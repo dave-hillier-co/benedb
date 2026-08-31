@@ -1,6 +1,6 @@
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
 
 import { createSeededRandom, type SeededRandom } from "./seeded-random";
 

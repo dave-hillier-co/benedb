@@ -1,7 +1,7 @@
 import { status } from "@grpc/grpc-js";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
-import type { RelationshipFilter } from "@spacedb/protos/authzed/api/v1/permission_service";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
+import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
 import { describe, expect, it } from "vitest";
 
 import { AuthzedExperimentalV1Service } from "./authzed-experimental-v1-service";
@@ -18,7 +18,7 @@ import { RpcError } from "./rpc-error";
  *
  * PORT NOTES.
  *  - LEDGER DEVIATION: lands in `packages/api/src` rather than `packages/grains/src`, because
- *    `@spacedb/grains` does not depend on `@spacedb/api`.
+ *    `@benedb/grains` does not depend on `@benedb/api`.
  *  - `FakeServerCallContext : ServerCallContext` DISAPPEARS: the ported methods take a trailing
  *    optional `AbortSignal`, so every call passes nothing.
  *  - `await using var cluster` becomes an explicit `try { ... } finally { await cluster.dispose(); }`.

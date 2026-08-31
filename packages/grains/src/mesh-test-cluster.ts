@@ -1,4 +1,4 @@
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
 import { createClient, type ClientNode } from "@thresh/client/client-node";
 import type { Duration } from "@thresh/core/duration";
 import type { GrainStorage } from "@thresh/core/grain-storage";

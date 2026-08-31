@@ -1,13 +1,13 @@
 import { status } from "@grpc/grpc-js";
-import type { IRelationshipsGrain } from "@spacedb/grains/i-relationships-grain";
+import type { IRelationshipsGrain } from "@benedb/grains/i-relationships-grain";
 import {
   IRelationshipsGrain as IRelationshipsGrainDefinition,
   RELATIONSHIPS_GRAIN_KEY,
-} from "@spacedb/grains/i-relationships-grain";
-import type { ISchemaProvider } from "@spacedb/grains/i-schema-provider";
-import type { RelationshipsFilterWire } from "@spacedb/grains/relationships-dtos";
-import { CounterOperationException } from "@spacedb/grains/relationships-dtos";
-import { SequencerOverloadedException } from "@spacedb/grains/sequencer-overloaded-exception";
+} from "@benedb/grains/i-relationships-grain";
+import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
+import type { RelationshipsFilterWire } from "@benedb/grains/relationships-dtos";
+import { CounterOperationException } from "@benedb/grains/relationships-dtos";
+import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
 import type {
   ExperimentalCountRelationshipsRequest,
   ExperimentalCountRelationshipsResponse,
@@ -15,8 +15,8 @@ import type {
   ExperimentalRegisterRelationshipCounterResponse,
   ExperimentalUnregisterRelationshipCounterRequest,
   ExperimentalUnregisterRelationshipCounterResponse,
-} from "@spacedb/protos/authzed/api/v1/experimental_service";
-import type { RelationshipFilter } from "@spacedb/protos/authzed/api/v1/permission_service";
+} from "@benedb/protos/authzed/api/v1/experimental_service";
+import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
 import { RpcError } from "./rpc-error";

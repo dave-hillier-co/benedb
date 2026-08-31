@@ -1,10 +1,7 @@
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { IGraphReader } from "@spacedb/datastore/i-graph-reader";
-import type {
-  SubjectRelationFilter,
-  SubjectsFilter,
-} from "@spacedb/datastore/relationships-filter";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
+import type { SubjectRelationFilter, SubjectsFilter } from "@benedb/datastore/relationships-filter";
 
 import type { MembershipCoverage } from "./membership-coverage";
 

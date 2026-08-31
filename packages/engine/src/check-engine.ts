@@ -1,9 +1,9 @@
-import type { CaveatDefinition } from "@spacedb/core/caveat-definition";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { IGraphReader } from "@spacedb/datastore/i-graph-reader";
+import type { CaveatDefinition } from "@benedb/core/caveat-definition";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
 
 import { CaveatEvaluator } from "./caveat-evaluator";
 import { systemClockNow } from "./clock";

@@ -1,6 +1,6 @@
-import { FormatError } from "@spacedb/core/format-error";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
+import { FormatError } from "@benedb/core/format-error";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
 
 import type { CaveatExpression } from "./caveat-expression";
 
@@ -58,7 +58,7 @@ export interface VisitKey {
  * string IS the identity here, and a plain join would make the cycle guard conflate two distinct
  * sub-problems whenever a separator fell inside a field. Nothing on this path enforces the
  * SpiceDB object-id grammar, so "the separator cannot occur" is not a property the engine may
- * rely on -- the same reasoning as `relationshipKeyString` in @spacedb/datastore.
+ * rely on -- the same reasoning as `relationshipKeyString` in @benedb/datastore.
  */
 const SEPARATOR = String.fromCharCode(0x1f);
 

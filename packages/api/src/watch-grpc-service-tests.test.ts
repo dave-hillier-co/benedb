@@ -1,21 +1,21 @@
 import { status } from "@grpc/grpc-js";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { createRelationship } from "@spacedb/core/relationship";
-import { zedTokenFromRevision } from "@spacedb/core/zed-tokens";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import type { DatastoreGcOptions } from "@spacedb/grains/datastore-gc-options";
-import { GrainBackedDatastore } from "@spacedb/grains/grain-backed-datastore";
-import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "@spacedb/grains/i-datastore-grain";
-import { createIsolatedWatchHub } from "@spacedb/grains/isolated-watch-hub";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
-import type { RelationshipUpdateWire } from "@spacedb/grains/relationships-dtos";
-import type { SpiceportGrainServices } from "@spacedb/grains/service-collection-extensions";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { createRelationship } from "@benedb/core/relationship";
+import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import type { DatastoreGcOptions } from "@benedb/grains/datastore-gc-options";
+import { GrainBackedDatastore } from "@benedb/grains/grain-backed-datastore";
+import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "@benedb/grains/i-datastore-grain";
+import { createIsolatedWatchHub } from "@benedb/grains/isolated-watch-hub";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
+import type { RelationshipUpdateWire } from "@benedb/grains/relationships-dtos";
+import type { SpiceportGrainServices } from "@benedb/grains/service-collection-extensions";
 import {
   addSpiceportGrainServices,
   SPICEPORT_GRAIN_REGISTRATIONS,
-} from "@spacedb/grains/service-collection-extensions";
-import type { WatchRequest, WatchResponse } from "@spacedb/protos/permissions";
-import { RelationshipUpdate_Operation } from "@spacedb/protos/permissions";
+} from "@benedb/grains/service-collection-extensions";
+import type { WatchRequest, WatchResponse } from "@benedb/protos/permissions";
+import { RelationshipUpdate_Operation } from "@benedb/protos/permissions";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
 import { describe, expect, it } from "vitest";
@@ -35,7 +35,7 @@ import { WatchGrpcService } from "./watch-grpc-service";
  *
  * PORT NOTES.
  *  - LEDGER DEVIATION: lands in `packages/api/src` rather than `packages/grains/src`, because
- *    `@spacedb/grains` does not depend on `@spacedb/api` (see `data-plane-grpc-service-tests.test.ts`
+ *    `@benedb/grains` does not depend on `@benedb/api` (see `data-plane-grpc-service-tests.test.ts`
  *    for the full note). It is DISTINCT from the S5 characterization file `watch-grpc-service.test.ts`,
  *    which pins the order of operations and proto translation over a scripted fake changefeed.
  *  - STREAMING SEAM. `IServerStreamWriter<T>` becomes the port-local `ServerStreamWriter<T>` and
@@ -57,7 +57,7 @@ import { WatchGrpcService } from "./watch-grpc-service";
  *    resolution (`((InProcessSiloHandle)cluster.Primary!).SiloHost.Services`) has no counterpart: the
  *    services record returned by `addSpiceportGrainServices` IS the silo's, and the SAME options
  *    object is handed to the silo and to the facade.
- *  - `ZedTokens.FromRevision` is `zedTokenFromRevision` from `@spacedb/core/zed-tokens`.
+ *  - `ZedTokens.FromRevision` is `zedTokenFromRevision` from `@benedb/core/zed-tokens`.
  *  - `await using` becomes an explicit `try { ... } finally { ... }` for the cluster AND the hub: a
  *    leaked hub leaves a live heartbeat loop running past the end of the test.
  */

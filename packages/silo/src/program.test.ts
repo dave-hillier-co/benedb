@@ -1,4 +1,4 @@
-import { CheckGrain } from "@spacedb/grains/check-grain";
+import { CheckGrain } from "@benedb/grains/check-grain";
 import { getGrainMetadata } from "@thresh/core/grain-metadata";
 import { SiloAddress } from "@thresh/core/silo-address";
 import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
@@ -66,7 +66,7 @@ function recordingBuilder(
   local: SiloAddress = new SiloAddress("silo-test", "uid-silo-test", "silo-test:11111"),
 ): { builder: SiloBuilder; calls: Call[] } {
   const target = createSilo({
-    clusterId: "spacedb-silo-test",
+    clusterId: "benedb-silo-test",
     local,
   });
   const calls: Call[] = [];
@@ -118,14 +118,14 @@ describe("configureSiloHost", () => {
 
     configureSiloHost(
       builder,
-      createConfiguration({ "ConnectionStrings:OrleansStorage": "postgres://localhost/spacedb" }),
+      createConfiguration({ "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb" }),
     );
 
     const durable = named(calls, "addPostgresStorage");
     expect(durable).toHaveLength(1);
     expect(durable[0]?.args[0]).toBe(DATASTORE_PROVIDER_NAME);
     expect(durable[0]?.args[1]).toMatchObject({
-      connectionString: "postgres://localhost/spacedb",
+      connectionString: "postgres://localhost/benedb",
     });
     expect(named(calls, "addStorage")).toHaveLength(0);
   });
@@ -174,7 +174,7 @@ describe("configureSiloHost", () => {
 
   it("wires the WebSocket transport and the whole configured view when clustered", () => {
     const configuration = createConfiguration({
-      "ConnectionStrings:OrleansStorage": "postgres://localhost/spacedb",
+      "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb",
       [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111,127.0.0.1:11112",
     });
     const clustering = resolveClustering(configuration);
@@ -196,7 +196,7 @@ describe("configureSiloHost", () => {
     expect(named(plain.calls, "requireObserverHosting")).toHaveLength(1);
 
     const configuration = createConfiguration({
-      "ConnectionStrings:OrleansStorage": "postgres://localhost/spacedb",
+      "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb",
       [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111",
     });
     const clustering = resolveClustering(configuration);

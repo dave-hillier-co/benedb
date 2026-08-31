@@ -2,21 +2,21 @@ import { status } from "@grpc/grpc-js";
 import {
   IRelationshipsGrain as IRelationshipsGrainDefinition,
   RELATIONSHIPS_GRAIN_KEY,
-} from "@spacedb/grains/i-relationships-grain";
-import { MutableSchemaProvider } from "@spacedb/grains/i-schema-provider";
+} from "@benedb/grains/i-relationships-grain";
+import { MutableSchemaProvider } from "@benedb/grains/i-schema-provider";
 import type {
   ReadSchemaReply,
   WriteSchemaArgs,
   WriteSchemaReply,
-} from "@spacedb/grains/relationships-dtos";
-import { SchemaWriteValidationException } from "@spacedb/grains/schema-write-validation-exception";
-import { SequencerOverloadedException } from "@spacedb/grains/sequencer-overloaded-exception";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { SchemaCompileException } from "@spacedb/schema/schema-compile-exception";
+} from "@benedb/grains/relationships-dtos";
+import { SchemaWriteValidationException } from "@benedb/grains/schema-write-validation-exception";
+import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
 import type {
   ReflectionSchemaDiff,
   ReflectionSchemaFilter,
-} from "@spacedb/protos/authzed/api/v1/schema_service";
+} from "@benedb/protos/authzed/api/v1/schema_service";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { describe, expect, it } from "vitest";
@@ -84,7 +84,7 @@ import { RpcError } from "./rpc-error";
  *     JS `Map` built by insertion would silently keep the last. The snapshot is already validated
  *     so a duplicate cannot occur, but the throw is reproduced rather than papered over - the
  *     ported `SchemaSnapshot` already does exactly this, so building the map through it is enough.
- *   * `ArgumentException` is `@spacedb/core`'s {@link InvalidArgumentError} - which is what the
+ *   * `ArgumentException` is `@benedb/core`'s {@link InvalidArgumentError} - which is what the
  *     ported `relationships-grain` actually rethrows a schema-compile failure as across the Thresh
  *     call boundary, so that is the type WriteSchema must catch.
  */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
 
 import { seedAsync } from "./seed-data";
 
@@ -15,7 +15,7 @@ import { seedAsync } from "./seed-data";
  *
  * PORT NOTES.
  *  - The C# suite lives in `Spiceport.Grains.Tests` but its subject is `Spiceport.Api`'s
- *    `SeedData`, so per the port ledger it lands beside `seed-data.ts` in `@spacedb/api`.
+ *    `SeedData`, so per the port ledger it lands beside `seed-data.ts` in `@benedb/api`.
  *  - `new RelationshipsFilter()` is an all-default C# record: the empty object literal `{}`.
  *  - `Assert.Equal(headAfterFirst, ...)` compares two `IRevision` VALUES, which in C# is record
  *    equality. TypeScript revisions are class instances with no value equality on `toBe`/`toEqual`

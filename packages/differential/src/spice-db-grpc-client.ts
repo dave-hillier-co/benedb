@@ -15,14 +15,14 @@ import {
   type ReadRelationshipsResponse,
   type WriteRelationshipsRequest,
   type WriteRelationshipsResponse,
-} from "@spacedb/protos/authzed/api/v1/permission_service";
+} from "@benedb/protos/authzed/api/v1/permission_service";
 import {
   SchemaServiceClient,
   type ReadSchemaRequest,
   type ReadSchemaResponse,
   type WriteSchemaRequest,
   type WriteSchemaResponse,
-} from "@spacedb/protos/authzed/api/v1/schema_service";
+} from "@benedb/protos/authzed/api/v1/schema_service";
 
 /**
  * Ported from Spiceport `tests/Spiceport.Differential.Tests/SpiceDbGrpcClient.cs`.
@@ -37,7 +37,7 @@ import {
  *  1. THE C#'s ENTIRE RATIONALE EVAPORATES. The C# hand-rolls `Method<TReq,TResp>` descriptors and
  *     reflection-built `Marshaller`s because `src/Spiceport.Protos` compiles the vendored protos
  *     with `GrpcServices="Server"` (no client stubs), and a second client-side proto compile would
- *     produce a SHADOWING duplicate set of message types. SpaceDB's protos are generated with
+ *     produce a SHADOWING duplicate set of message types. BeneDB's protos are generated with
  *     `outputServices=grpc-js`, so `PermissionsServiceClient` and `SchemaServiceClient` ALREADY
  *     EXIST and share their message types with the in-process service. They are used directly.
  *     Reproducing the descriptor machinery has no TypeScript counterpart and would be redesign in
@@ -56,7 +56,7 @@ import {
  *      - Client-streaming: write each batch IN ORDER (the C# awaits each `WriteAsync`), then
  *        `end()`, resolving/rejecting from the completion callback.
  *  4. ERROR SHAPE: the real-SpiceDB side yields a grpc-js `ServiceError` with a numeric `.code` and
- *     `.details` - the C#'s `ex.StatusCode` / `ex.Status.Detail`. That is NOT the SpaceDB in-process
+ *     `.details` - the C#'s `ex.StatusCode` / `ex.Status.Detail`. That is NOT the BeneDB in-process
  *     side's `RpcError`; every assertion must match its own side's shape.
  *  5. `Dispose()` -> {@link close}, closing BOTH clients (schema + permissions).
  *

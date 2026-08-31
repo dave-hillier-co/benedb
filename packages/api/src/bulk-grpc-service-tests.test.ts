@@ -1,12 +1,12 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
-import type { RelationshipUpdateWire } from "@spacedb/grains/relationships-dtos";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
+import type { RelationshipUpdateWire } from "@benedb/grains/relationships-dtos";
 import type {
   ExportBulkRelationshipsRequest,
   ExportBulkRelationshipsResponse,
   ImportBulkRelationshipsRequest,
   Relationship as ProtoRelationship,
-} from "@spacedb/protos/permissions";
+} from "@benedb/protos/permissions";
 import { describe, expect, it } from "vitest";
 
 import { BulkGrpcService } from "./bulk-grpc-service";
@@ -25,7 +25,7 @@ import type { ServerStreamWriter } from "./server-stream-writer";
  *
  * PORT NOTES.
  *  - LEDGER DEVIATION: lands in `packages/api/src` rather than `packages/grains/src`, because
- *    `@spacedb/grains` does not depend on `@spacedb/api` (see `data-plane-grpc-service-tests.test.ts`
+ *    `@benedb/grains` does not depend on `@benedb/api` (see `data-plane-grpc-service-tests.test.ts`
  *    for the full note). It is DISTINCT from the S5 characterization file `bulk-grpc-service.test.ts`,
  *    which pins the translation and stream control flow over fakes; neither restates the other.
  *  - STREAMING SEAMS. `IAsyncStreamReader<T>` becomes a plain `AsyncIterable<T>`, so `FakeStreamReader`

@@ -1,5 +1,5 @@
 {
-  "name": "@spacedb/differential",
+  "name": "@benedb/differential",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,12 +8,12 @@
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.1",
-    "@spacedb/api": "workspace:*",
-    "@spacedb/conformance": "workspace:*",
-    "@spacedb/core": "workspace:*",
-    "@spacedb/engine": "workspace:*",
-    "@spacedb/grains": "workspace:*",
-    "@spacedb/protos": "workspace:*",
+    "@benedb/api": "workspace:*",
+    "@benedb/conformance": "workspace:*",
+    "@benedb/core": "workspace:*",
+    "@benedb/engine": "workspace:*",
+    "@benedb/grains": "workspace:*",
+    "@benedb/protos": "workspace:*",
     "testcontainers": "^11.9.1"
   }
 }

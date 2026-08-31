@@ -2,19 +2,19 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { loadValidationFile } from "@spacedb/conformance/validation-file-loader";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { UpdateOperation } from "@spacedb/core/relationship-update";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import type { IGraphReader } from "@spacedb/datastore/i-graph-reader";
-import type { RelationshipsFilter } from "@spacedb/datastore/relationships-filter";
-import type { RevisionChange } from "@spacedb/datastore/watch";
-import { WatchContent } from "@spacedb/datastore/watch";
+import { loadValidationFile } from "@benedb/conformance/validation-file-loader";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import type { UpdateOperation } from "@benedb/core/relationship-update";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
+import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
+import type { RevisionChange } from "@benedb/datastore/watch";
+import { WatchContent } from "@benedb/datastore/watch";
 import type { GrainStorage, StateHolder } from "@thresh/core/grain-storage";
 import { grainReferenceIdentity } from "@thresh/core/grain-reference";
 import { JournaledGrain } from "@thresh/core/journaled-grain";
@@ -108,7 +108,7 @@ const requireFromHere = createRequire(import.meta.url);
 
 /** The conformance corpus directory - the C#'s linked `TestData` output folder. */
 const CORPUS_DIR = resolvePath(
-  dirname(requireFromHere.resolve("@spacedb/conformance/validation-file-loader")),
+  dirname(requireFromHere.resolve("@benedb/conformance/validation-file-loader")),
   "..",
   "corpus",
 );

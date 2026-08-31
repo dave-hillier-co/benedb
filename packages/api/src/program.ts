@@ -11,38 +11,38 @@ import type {
   sendUnaryData,
 } from "@grpc/grpc-js";
 import { Server, ServerCredentials, status } from "@grpc/grpc-js";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import type { DatastoreGcOptions } from "@spacedb/grains/datastore-gc-options";
-import { GrainBackedDatastore } from "@spacedb/grains/grain-backed-datastore";
-import type { IPermissionChecker } from "@spacedb/grains/i-permission-checker";
-import type { ISchemaProvider } from "@spacedb/grains/i-schema-provider";
-import type { RelationshipReads } from "@spacedb/grains/relationship-reads";
-import type { ReverseOps } from "@spacedb/grains/reverse-ops";
-import type { SpiceportGrainServices } from "@spacedb/grains/service-collection-extensions";
-import { addSpiceportGrainServices } from "@spacedb/grains/service-collection-extensions";
-import { addActivationMemoCollectionAge } from "@spacedb/grains/silo-builder-extensions";
-import { ExperimentalServiceService } from "@spacedb/protos/authzed/api/v1/experimental_service";
-import { PermissionsServiceService as AuthzedPermissionsServiceService } from "@spacedb/protos/authzed/api/v1/permission_service";
-import { SchemaServiceService } from "@spacedb/protos/authzed/api/v1/schema_service";
-import { WatchServiceService as AuthzedWatchServiceService } from "@spacedb/protos/authzed/api/v1/watch_service";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import type { DatastoreGcOptions } from "@benedb/grains/datastore-gc-options";
+import { GrainBackedDatastore } from "@benedb/grains/grain-backed-datastore";
+import type { IPermissionChecker } from "@benedb/grains/i-permission-checker";
+import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
+import type { RelationshipReads } from "@benedb/grains/relationship-reads";
+import type { ReverseOps } from "@benedb/grains/reverse-ops";
+import type { SpiceportGrainServices } from "@benedb/grains/service-collection-extensions";
+import { addSpiceportGrainServices } from "@benedb/grains/service-collection-extensions";
+import { addActivationMemoCollectionAge } from "@benedb/grains/silo-builder-extensions";
+import { ExperimentalServiceService } from "@benedb/protos/authzed/api/v1/experimental_service";
+import { PermissionsServiceService as AuthzedPermissionsServiceService } from "@benedb/protos/authzed/api/v1/permission_service";
+import { SchemaServiceService } from "@benedb/protos/authzed/api/v1/schema_service";
+import { WatchServiceService as AuthzedWatchServiceService } from "@benedb/protos/authzed/api/v1/watch_service";
 import {
   BulkServiceService,
   PermissionsServiceService,
   WatchServiceService,
-} from "@spacedb/protos/permissions";
-import type { ClusteringOptions } from "@spacedb/silo/clustering-config";
+} from "@benedb/protos/permissions";
+import type { ClusteringOptions } from "@benedb/silo/clustering-config";
 import {
   applyClustering,
   readConfiguredPort,
   resolveClustering,
-} from "@spacedb/silo/clustering-config";
-import type { Configuration } from "@spacedb/silo/datastore-storage-config";
+} from "@benedb/silo/clustering-config";
+import type { Configuration } from "@benedb/silo/datastore-storage-config";
 import {
   DATASTORE_PROVIDER_NAME,
   addDatastoreGrainStorage,
   configurationFromEnvironment,
-} from "@spacedb/silo/datastore-storage-config";
+} from "@benedb/silo/datastore-storage-config";
 import { SiloAddress } from "@thresh/core/silo-address";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
@@ -71,7 +71,7 @@ import { WatchGrpcService } from "./watch-grpc-service";
  * WITHOUT a host, and a {@link main} that composes them and is never called from a test.
  *
  *  1. THE SILO WIRING IS THE SILO HOST'S, MINUS NOTHING AND PLUS NOTHING - except that it compiles
- *     {@link SEED_SCHEMA_TEXT} and it seeds. See `@spacedb/silo/program` for why the duplication
+ *     {@link SEED_SCHEMA_TEXT} and it seeds. See `@benedb/silo/program` for why the duplication
  *     between the two hosts is deliberate rather than a missing helper, and for the transport /
  *     journaling / reminder substitutions, which are identical here - clustering (that file's port
  *     decision 6) included.
@@ -113,7 +113,7 @@ export const API_CLUSTER_ID = "spiceport";
 
 /**
  * This silo's name/address stem within that cluster, for the SINGLE-PROCESS host. A clustered silo
- * derives its whole identity from its endpoint - see `@spacedb/silo/program`'s port decision 6.
+ * derives its whole identity from its endpoint - see `@benedb/silo/program`'s port decision 6.
  */
 export const API_SILO_NAME = "spiceport-api";
 
@@ -158,7 +158,7 @@ export function resolveApiListenEndpoints(configuration: Configuration): ApiList
 }
 
 /**
- * See `@spacedb/silo/program`: the datastore grain and the `GrainBackedDatastore` facade MUST be
+ * See `@benedb/silo/program`: the datastore grain and the `GrainBackedDatastore` facade MUST be
  * handed the SAME options, or the facade's nominal GC window drifts from the grain's real floor.
  */
 const DATASTORE_GC_OPTIONS: DatastoreGcOptions | undefined = undefined;
@@ -398,7 +398,7 @@ export function addServices(
   return server;
 }
 
-/** The silo half of the host - identical to `@spacedb/silo/program` but for the schema constant. */
+/** The silo half of the host - identical to `@benedb/silo/program` but for the schema constant. */
 export function configureApiSilo(
   builder: SiloBuilder,
   configuration: Configuration,
@@ -522,7 +522,7 @@ export function createApiHost(
   configuration: Configuration = configurationFromEnvironment(),
 ): ApiHost {
   // Resolved BEFORE `createSilo`, because a clustered silo's own address is constructor input and
-  // is derived from its configured endpoint (`@spacedb/silo/program`'s port decision 6).
+  // is derived from its configured endpoint (`@benedb/silo/program`'s port decision 6).
   const clustering = resolveClustering(configuration);
   const builder = createSilo({
     clusterId: API_CLUSTER_ID,

@@ -1,6 +1,6 @@
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { Membership } from "@spacedb/engine/membership";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { Relationship } from "@benedb/core/relationship";
+import type { Membership } from "@benedb/engine/membership";
 
 /**
  * The typed model of a parsed SpiceDB validation/consistency file.

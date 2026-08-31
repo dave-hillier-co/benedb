@@ -149,12 +149,12 @@ describe("addDatastoreGrainStorage branch selection", () => {
 
   it("registers durable Postgres storage under the same provider name when the primary key is set", () => {
     const registration = register({
-      "ConnectionStrings:OrleansStorage": "postgres://localhost/spacedb",
+      "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb",
     });
 
     expect(registration.kind).toBe("postgres");
     expect(registration.name).toBe(DATASTORE_PROVIDER_NAME);
-    expect(registration.connectionString).toBe("postgres://localhost/spacedb");
+    expect(registration.connectionString).toBe("postgres://localhost/benedb");
   });
 
   it("registers durable Postgres storage from the fallback key", () => {

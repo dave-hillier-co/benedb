@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
 
 import { FULLY_CONSISTENT_WIRE } from "./consistency-wire";
 import { MeshTestCluster } from "./mesh-test-cluster";

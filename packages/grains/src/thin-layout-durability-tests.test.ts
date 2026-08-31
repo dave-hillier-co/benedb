@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { UpdateOperation } from "@spacedb/core/relationship-update";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import type { RevisionChange } from "@spacedb/datastore/watch";
-import { WatchContent } from "@spacedb/datastore/watch";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import type { UpdateOperation } from "@benedb/core/relationship-update";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import type { RevisionChange } from "@benedb/datastore/watch";
+import { WatchContent } from "@benedb/datastore/watch";
 import { grainReferenceIdentity } from "@thresh/core/grain-reference";
 import { GrainId } from "@thresh/core/grain-id";
 import { getGrainMetadata } from "@thresh/core/grain-metadata";
@@ -188,7 +188,7 @@ function datastoreGrainId(): GrainId {
 
 /** A per-test table name; `PostgresGrainStorage` demands a plain SQL identifier. */
 function freshTable(): string {
-  return `spacedb_thin_durability_${randomUUID().replace(/-/g, "")}`;
+  return `benedb_thin_durability_${randomUUID().replace(/-/g, "")}`;
 }
 
 /** `ReadRow<T>(cluster, stateName)` - through the SAME provider the grain uses (port decision 8). */

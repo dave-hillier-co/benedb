@@ -1,5 +1,5 @@
 {
-  "name": "@spacedb/grains",
+  "name": "@benedb/grains",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,11 +7,11 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "@spacedb/conformance": "workspace:*",
-    "@spacedb/core": "workspace:*",
-    "@spacedb/datastore": "workspace:*",
-    "@spacedb/engine": "workspace:*",
-    "@spacedb/schema": "workspace:*",
+    "@benedb/conformance": "workspace:*",
+    "@benedb/core": "workspace:*",
+    "@benedb/datastore": "workspace:*",
+    "@benedb/engine": "workspace:*",
+    "@benedb/schema": "workspace:*",
     "@thresh/client": "link:../../../thresh/packages/client",
     "@thresh/core": "link:../../../thresh/packages/core",
     "@thresh/hosting": "link:../../../thresh/packages/hosting",

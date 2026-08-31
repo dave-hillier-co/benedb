@@ -1,7 +1,7 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { IRevisionParser } from "@spacedb/core/i-revision-parser";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { IRevisionParser } from "@benedb/core/i-revision-parser";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
 
 import type { RegisteredCounter } from "./counters";
 import type { IGraphReader } from "./i-graph-reader";

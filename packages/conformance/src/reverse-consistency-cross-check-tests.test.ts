@@ -2,26 +2,26 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
 import {
   isPublicWildcard,
   objectAndRelationKey,
   type ObjectAndRelation,
-} from "@spacedb/core/object-and-relation";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { formatObjectAndRelation } from "@spacedb/core/tuple-strings";
-import type { IDatastoreReader } from "@spacedb/datastore/i-datastore";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
-import { CheckEngine } from "@spacedb/engine/check-engine";
-import { ExpandEngine } from "@spacedb/engine/expand-engine";
-import type { FoundSubject } from "@spacedb/engine/found-subject";
-import { LookupResourcesEngine } from "@spacedb/engine/lookup-resources-engine";
-import { LookupSubjectsEngine } from "@spacedb/engine/lookup-subjects-engine";
-import type { PermissionTreeNode, PermissionTreeSetOp } from "@spacedb/engine/permission-tree-node";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+} from "@benedb/core/object-and-relation";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { formatObjectAndRelation } from "@benedb/core/tuple-strings";
+import type { IDatastoreReader } from "@benedb/datastore/i-datastore";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import { CheckEngine } from "@benedb/engine/check-engine";
+import { ExpandEngine } from "@benedb/engine/expand-engine";
+import type { FoundSubject } from "@benedb/engine/found-subject";
+import { LookupResourcesEngine } from "@benedb/engine/lookup-resources-engine";
+import { LookupSubjectsEngine } from "@benedb/engine/lookup-subjects-engine";
+import type { PermissionTreeNode, PermissionTreeSetOp } from "@benedb/engine/permission-tree-node";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 
 import { loadResolvedValidationFile } from "./validation-file-loader";
 

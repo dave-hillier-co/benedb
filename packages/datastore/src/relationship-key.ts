@@ -1,11 +1,11 @@
-import type { Relationship } from "@spacedb/core/relationship";
+import type { Relationship } from "@benedb/core/relationship";
 
 /**
  * The full identity of a relationship for storage purposes: resource type/id/relation and
  * subject type/id/relation. Caveat, expiration and integrity are payload, not identity.
  *
  * The C# is an `internal readonly record struct`. `internal` has no TypeScript equivalent, so
- * this is exported normally; nothing outside `@spacedb/datastore` should import it.
+ * this is exported normally; nothing outside `@benedb/datastore` should import it.
  *
  * The C# uses the struct directly as a `Dictionary` key, as `HashSet` members and with `==`,
  * all of which rely on record value equality. A TypeScript `Map`/`Set` keys by REFERENCE, so

@@ -1,12 +1,12 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { systemClockNow } from "@spacedb/engine/clock";
-import type { IDispatcher } from "@spacedb/engine/i-dispatcher";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { systemClockNow } from "@benedb/engine/clock";
+import type { IDispatcher } from "@benedb/engine/i-dispatcher";
 import {
   visitKeyFromCanonicalString,
   visitKeyToCanonicalString,
-} from "@spacedb/engine/i-dispatcher";
-import { LocalDispatcher } from "@spacedb/engine/local-dispatcher";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
+} from "@benedb/engine/i-dispatcher";
+import { LocalDispatcher } from "@benedb/engine/local-dispatcher";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
 import { grain, reentrant } from "@thresh/core/decorators";
 import { Grain } from "@thresh/core/grain";
 

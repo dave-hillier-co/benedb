@@ -2,21 +2,21 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { AuthzedPermissionsV1Service } from "@spacedb/api/authzed-permissions-v1-service";
-import { CollectingStreamWriter } from "@spacedb/api/collecting-stream-writer";
-import { loadResolvedValidationFile } from "@spacedb/conformance/validation-file-loader";
-import type { AssertionExpectation, ParsedAssertion } from "@spacedb/conformance/validation-model";
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { Relationship as CoreRelationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate as CoreRelationshipUpdate } from "@spacedb/core/relationship-update";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
+import { AuthzedPermissionsV1Service } from "@benedb/api/authzed-permissions-v1-service";
+import { CollectingStreamWriter } from "@benedb/api/collecting-stream-writer";
+import { loadResolvedValidationFile } from "@benedb/conformance/validation-file-loader";
+import type { AssertionExpectation, ParsedAssertion } from "@benedb/conformance/validation-model";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { Relationship as CoreRelationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate as CoreRelationshipUpdate } from "@benedb/core/relationship-update";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import {
   RelationshipUpdate_Operation,
   type ObjectReference,
   type Relationship,
   type RelationshipUpdate,
   type SubjectReference,
-} from "@spacedb/protos/authzed/api/v1/core";
+} from "@benedb/protos/authzed/api/v1/core";
 import {
   CheckPermissionRequest,
   DeleteRelationshipsRequest,
@@ -25,8 +25,8 @@ import {
   WriteRelationshipsRequest,
   type LookupResourcesResponse,
   type LookupSubjectsResponse,
-} from "@spacedb/protos/authzed/api/v1/permission_service";
-import { WriteSchemaRequest } from "@spacedb/protos/authzed/api/v1/schema_service";
+} from "@benedb/protos/authzed/api/v1/permission_service";
+import { WriteSchemaRequest } from "@benedb/protos/authzed/api/v1/schema_service";
 
 import {
   formatIdSet,
@@ -44,7 +44,7 @@ import { SpiceDbGrpcClient } from "./spice-db-grpc-client";
 /**
  * Ported from Spiceport `tests/Spiceport.Differential.Tests/CorpusDifferentialTests.cs`.
  *
- * Replays the vendored SpiceDB conformance corpus through the SAME real-SpiceDB-vs-SpaceDB
+ * Replays the vendored SpiceDB conformance corpus through the SAME real-SpiceDB-vs-BeneDB
  * differential harness `differential-conformance-tests.test.ts` establishes for the random worlds:
  * one case per corpus file, writing the file's schema+relationships to a real SpiceDB container AND
  * to an in-process grain mesh, then cross-checking CheckPermission / LookupResources /
@@ -53,12 +53,12 @@ import { SpiceDbGrpcClient } from "./spice-db-grpc-client";
  * THIS FILE ONLY READS THE CORPUS. `packages/conformance/corpus` is the VERBATIM compatibility
  * corpus; it is never copied, regenerated, or written to from here.
  *
- * WHY THIS EXISTS ALONGSIDE `differential-conformance-tests.test.ts`: that suite proves SpaceDB
+ * WHY THIS EXISTS ALONGSIDE `differential-conformance-tests.test.ts`: that suite proves BeneDB
  * agrees with real SpiceDB over RANDOMLY GENERATED worlds built from a small template set. This one
  * replays the CURATED corpus SpiceDB's own maintainers wrote to pin down tricky semantics (caveats,
  * expiration, wildcard exclusion, arrow composition). Running that exact corpus against a real
  * SpiceDB binary catches two things a same-process oracle never can: (1) a shared misunderstanding
- * of the Zanzibar spec baked into `@spacedb/engine`, and (2) a vendored fixture whose recorded
+ * of the Zanzibar spec baked into `@benedb/engine`, and (2) a vendored fixture whose recorded
  * expected outcome has drifted from what the pinned upstream SpiceDB version returns today (the
  * `expectationNotes` below).
  *
@@ -68,7 +68,7 @@ import { SpiceDbGrpcClient } from "./spice-db-grpc-client";
  * narrow a relation that still has data). BEFORE `WriteSchema`, delete this file's own resource
  * types CONCAT the fixed `["group", "folder", "document"]`, distinct and ordinal - the fixed set is
  * there because `DifferentialConformanceTests` shares the collection with no ordering guarantee.
- * AFTER, in a `finally`, delete only THIS file's own types. The SpaceDB side needs no reset:
+ * AFTER, in a `finally`, delete only THIS file's own types. The BeneDB side needs no reset:
  * `MeshTestCluster.create` stands up a brand-new cluster (and datastore) per file.
  *
  * WILDCARD SUBJECTS: no suite in this repo drives the real V1 `LookupSubjects`/`CheckPermission`
@@ -98,7 +98,7 @@ import { SpiceDbGrpcClient } from "./spice-db-grpc-client";
  *     components with a separator that cannot occur in an identifier, and the group carries its
  *     parsed components alongside so nothing is re-split.
  *  5. THREE SEPARATE COLLECTIONS, AND THE SPLIT IS THE WHOLE POINT OF THIS GATE.
- *      - `failures`: SpaceDB-vs-real-SpiceDB divergence. FATAL.
+ *      - `failures`: BeneDB-vs-real-SpiceDB divergence. FATAL.
  *      - `expectationNotes`: the yaml's OWN recorded expectation disagreeing with what real SpiceDB
  *        returns today. PRINTED, NOT A FAILURE - a vendored expectation asserting something other
  *        than the real thing. Collapsing it into `failures` breaks green; deleting it hides the
@@ -121,7 +121,7 @@ import { SpiceDbGrpcClient } from "./spice-db-grpc-client";
  *     JavaScript `Date`, i.e. MILLISECOND resolution, so `Timestamp.FromDateTimeOffset`'s 100ns
  *     ticks have no counterpart on the wire here. Sub-MILLIsecond precision cannot survive the
  *     conversion; sub-SECOND precision does, and every expiration in this corpus is a whole second
- *     (`2023-12-01T00:00:00Z` and friends), so nothing in the compared set is affected. The SpaceDB
+ *     (`2023-12-01T00:00:00Z` and friends), so nothing in the compared set is affected. The BeneDB
  *     side is unaffected either way: it takes the `bigint` straight into the datastore.
  *  8. `SkippedFiles` IS PORTED EMPTY, WITH ITS HISTORY COMMENT - see `SKIPPED_FILES`. That comment
  *     is the justification for the v1.49.2 image pin; losing it loses the reason.
@@ -130,7 +130,7 @@ import { SpiceDbGrpcClient } from "./spice-db-grpc-client";
  *     against ONE container is genuinely long - that is expected, and is not a reason to sample,
  *     skip, or parallelise onto multiple containers.
  * 10. `FakeServerCallContext` disappears (trailing optional `AbortSignal`), and
- *     `CollectingStreamWriter<T>` is the shared `@spacedb/api` one, not a re-declared private copy.
+ *     `CollectingStreamWriter<T>` is the shared `@benedb/api` one, not a re-declared private copy.
  */
 
 /**
@@ -282,7 +282,7 @@ async function writeRelationships(
     );
   }
 
-  // SpaceDB side: straight into the datastore transaction (bypassing the gRPC proto round trip
+  // BeneDB side: straight into the datastore transaction (bypassing the gRPC proto round trip
   // entirely), so caveat context and expiration ride through as first-class Core fields with no
   // lossy proto conversion in between.
   const updates: CoreRelationshipUpdate[] = relationships.map((relationship) => ({
@@ -378,15 +378,15 @@ async function compareCheck(
     });
 
   const spiceDbResp = await spiceDbClient.checkPermission(buildRequest());
-  const spacedbResp = await permissionsService.checkPermission(buildRequest());
+  const benedbResp = await permissionsService.checkPermission(buildRequest());
 
   const spiceDbVerdict = normalizePermissionship(spiceDbResp.permissionship);
-  const spacedbVerdict = normalizePermissionship(spacedbResp.permissionship);
+  const benedbVerdict = normalizePermissionship(benedbResp.permissionship);
 
-  if (spiceDbVerdict !== spacedbVerdict) {
+  if (spiceDbVerdict !== benedbVerdict) {
     failures.push(
       `${fileName}: CheckPermission "${assertion.sourceText}" ` +
-        `spicedb=${spiceDbVerdict} spacedb=${spacedbVerdict}`,
+        `spicedb=${spiceDbVerdict} benedb=${benedbVerdict}`,
     );
   }
 
@@ -425,7 +425,7 @@ async function compareLookupResources(
   } catch (error) {
     if (!isGrpcError(error)) throw error;
     // Real SpiceDB rejects some subject shapes (e.g. a non-terminal subject relation) that this
-    // harness still enumerates from the assertion set; not a SpaceDB defect to chase, so it is
+    // harness still enumerates from the assertion set; not a BeneDB defect to chase, so it is
     // surfaced as a skipped comparison rather than a hard failure.
     skippedQueries.push(
       `LookupResources ${resourceType}#${permission}@${subjectType}:${subjectId} ` +
@@ -446,12 +446,12 @@ async function compareLookupResources(
     }),
     writer,
   );
-  const spacedbIds = new Set(writer.collected.map((r) => r.resourceObjectId));
+  const benedbIds = new Set(writer.collected.map((r) => r.resourceObjectId));
 
-  if (!setEquals(spiceDbIds, spacedbIds)) {
+  if (!setEquals(spiceDbIds, benedbIds)) {
     failures.push(
       `${fileName}: LookupResources ${resourceType}#${permission}@${subjectType}:${subjectId} ` +
-        `spicedb=[${formatIdSet(spiceDbIds)}] spacedb=[${formatIdSet(spacedbIds)}]`,
+        `spicedb=[${formatIdSet(spiceDbIds)}] benedb=[${formatIdSet(benedbIds)}]`,
     );
   }
 }
@@ -503,12 +503,12 @@ async function compareLookupSubjects(
     }),
     writer,
   );
-  const spacedbIds = new Set(writer.collected.map((r) => r.subject?.subjectObjectId ?? ""));
+  const benedbIds = new Set(writer.collected.map((r) => r.subject?.subjectObjectId ?? ""));
 
-  if (!setEquals(spiceDbIds, spacedbIds)) {
+  if (!setEquals(spiceDbIds, benedbIds)) {
     failures.push(
       `${fileName}: LookupSubjects ${resourceType}:${resourceId}#${permission}@${subjectType} ` +
-        `spicedb=[${formatIdSet(spiceDbIds)}] spacedb=[${formatIdSet(spacedbIds)}]`,
+        `spicedb=[${formatIdSet(spiceDbIds)}] benedb=[${formatIdSet(benedbIds)}]`,
     );
   }
 }
@@ -637,7 +637,7 @@ describe.sequential("CorpusDifferentialTests", () => {
 
       expect(
         failures.length === 0,
-        `Divergence(s) between real SpiceDB and SpaceDB in ${fileName}:\n${failures.join("\n")}`,
+        `Divergence(s) between real SpiceDB and BeneDB in ${fileName}:\n${failures.join("\n")}`,
       ).toBe(true);
     } finally {
       // Best-effort cleanup: if this file's own WriteSchema/WriteRelationships never completed (e.g.

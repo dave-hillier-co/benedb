@@ -3,10 +3,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { DispatchCheckRequest } from "@spacedb/engine/i-dispatcher";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship } from "@benedb/core/relationship";
+import type { DispatchCheckRequest } from "@benedb/engine/i-dispatcher";
 import { GrainCallAbortedError, GrainTaskCanceledError } from "@thresh/core/errors";
 
 import { setTestDispatchContext } from "./dispatch-context-test-helper";

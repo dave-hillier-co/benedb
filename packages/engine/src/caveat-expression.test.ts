@@ -1,4 +1,4 @@
-import type { ContextualizedCaveat } from "@spacedb/core/contextualized-caveat";
+import type { ContextualizedCaveat } from "@benedb/core/contextualized-caveat";
 import { describe, expect, it } from "vitest";
 
 import {

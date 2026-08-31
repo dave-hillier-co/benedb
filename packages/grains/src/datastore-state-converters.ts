@@ -3,7 +3,7 @@ import type {
   DatastoreState,
   SchemaVersion,
   StoredRelationship,
-} from "@spacedb/datastore/datastore-state";
+} from "@benedb/datastore/datastore-state";
 
 import type {
   CounterVersionWire,

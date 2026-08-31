@@ -1,5 +1,5 @@
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipReference } from "@spacedb/core/relationship-reference";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipReference } from "@benedb/core/relationship-reference";
 
 /**
  * The sort order a reverse query yields its relationships in.

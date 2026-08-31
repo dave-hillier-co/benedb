@@ -1,20 +1,20 @@
-import { allowedRelationSource } from "@spacedb/core/allowed-relation-identity";
+import { allowedRelationSource } from "@benedb/core/allowed-relation-identity";
 import {
   isAllowedRelationPublicWildcard,
   type AllowedRelation,
-} from "@spacedb/core/allowed-relation";
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { Relationship } from "@spacedb/core/relationship";
-import { formatRelationship } from "@spacedb/core/tuple-strings";
-import type { IDatastoreReader } from "@spacedb/datastore/i-datastore";
+} from "@benedb/core/allowed-relation";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { Relationship } from "@benedb/core/relationship";
+import { formatRelationship } from "@benedb/core/tuple-strings";
+import type { IDatastoreReader } from "@benedb/datastore/i-datastore";
 import type {
   CaveatNameFilter,
   RelationshipsFilter,
   SubjectRelationFilter,
-} from "@spacedb/datastore/relationships-filter";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
+} from "@benedb/datastore/relationships-filter";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 
 import type { ISnapshotScanner } from "./i-snapshot-scanner";
 import { computeSchemaDiff } from "./schema-diff";

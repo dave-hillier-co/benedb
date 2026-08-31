@@ -1,9 +1,9 @@
-import { isAllowedRelationPublicWildcard } from "@spacedb/core/allowed-relation";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { isPermission, type Relation } from "@spacedb/core/relation";
-import type { SetOperation, SetOperationChild } from "@spacedb/core/userset-rewrite";
+import { isAllowedRelationPublicWildcard } from "@benedb/core/allowed-relation";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { isPermission, type Relation } from "@benedb/core/relation";
+import type { SetOperation, SetOperationChild } from "@benedb/core/userset-rewrite";
 
 import type { ReachabilityGraph } from "./reachability-graph";
 import { relationReferenceKey, type RelationReference } from "./relation-reference";

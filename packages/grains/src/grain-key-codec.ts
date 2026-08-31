@@ -1,4 +1,4 @@
-import { FormatError } from "@spacedb/core/format-error";
+import { FormatError } from "@benedb/core/format-error";
 
 /**
  * Shared mechanics for the grain-key codecs (`GrainKey`, `SubjectFrontierKey`,

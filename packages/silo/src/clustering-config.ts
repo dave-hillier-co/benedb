@@ -1,4 +1,4 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import { SiloAddress } from "@thresh/core/silo-address";
 import type { SiloBuilder } from "@thresh/hosting/silo-builder";
 import { InProcessNetwork } from "@thresh/messaging/in-process-transport";

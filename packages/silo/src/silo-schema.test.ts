@@ -1,4 +1,4 @@
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import { SILO_SCHEMA_TEXT } from "./silo-schema";

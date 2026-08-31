@@ -1,11 +1,11 @@
-import { allowedRelationDirect } from "@spacedb/core/allowed-relation";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { allowedRelationDirect } from "@benedb/core/allowed-relation";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import {
   createNamespaceDefinition,
   type NamespaceDefinition,
-} from "@spacedb/core/namespace-definition";
-import { baseRelation, permission } from "@spacedb/core/relation";
-import { compile } from "@spacedb/schema/schema-compiler";
+} from "@benedb/core/namespace-definition";
+import { baseRelation, permission } from "@benedb/core/relation";
+import { compile } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import { buildMembershipCoverage, type MembershipCoverage } from "./membership-coverage";

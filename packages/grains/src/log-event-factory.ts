@@ -1,4 +1,4 @@
-import { changesAt, type DatastoreState } from "@spacedb/datastore/datastore-state";
+import { changesAt, type DatastoreState } from "@benedb/datastore/datastore-state";
 
 import type { CounterDeltaWire, LogEvent } from "./log-event";
 import type { RelationshipUpdateWire } from "./relationships-dtos";

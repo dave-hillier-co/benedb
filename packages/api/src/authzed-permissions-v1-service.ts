@@ -1,27 +1,27 @@
 import { status } from "@grpc/grpc-js";
-import type { CaveatEvaluationErrorKind } from "@spacedb/core/caveat-evaluation-exception";
-import { CaveatEvaluationException } from "@spacedb/core/caveat-evaluation-exception";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { FormatError } from "@spacedb/core/format-error";
-import { InvalidConsistencyTokenException } from "@spacedb/core/invalid-consistency-token-exception";
-import { MaxDepthExceededException } from "@spacedb/core/max-depth-exceeded-exception";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
-import type { ConsistencyWire } from "@spacedb/grains/consistency-wire";
+import type { CaveatEvaluationErrorKind } from "@benedb/core/caveat-evaluation-exception";
+import { CaveatEvaluationException } from "@benedb/core/caveat-evaluation-exception";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { FormatError } from "@benedb/core/format-error";
+import { InvalidConsistencyTokenException } from "@benedb/core/invalid-consistency-token-exception";
+import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
+import type { ConsistencyWire } from "@benedb/grains/consistency-wire";
 import {
   consistencyWireToRequirement,
   MINIMIZE_LATENCY_WIRE,
-} from "@spacedb/grains/consistency-wire";
-import { DispatchFailedException } from "@spacedb/grains/dispatch-failed-exception";
-import type { BatchCheckItem, IPermissionChecker } from "@spacedb/grains/i-permission-checker";
-import type { IRelationshipsGrain } from "@spacedb/grains/i-relationships-grain";
+} from "@benedb/grains/consistency-wire";
+import { DispatchFailedException } from "@benedb/grains/dispatch-failed-exception";
+import type { BatchCheckItem, IPermissionChecker } from "@benedb/grains/i-permission-checker";
+import type { IRelationshipsGrain } from "@benedb/grains/i-relationships-grain";
 import {
   IRelationshipsGrain as IRelationshipsGrainDefinition,
   RELATIONSHIPS_GRAIN_KEY,
-} from "@spacedb/grains/i-relationships-grain";
-import type { ISchemaProvider } from "@spacedb/grains/i-schema-provider";
-import { PreconditionFailedException } from "@spacedb/grains/precondition-failed-exception";
-import type { RelationshipReads } from "@spacedb/grains/relationship-reads";
+} from "@benedb/grains/i-relationships-grain";
+import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
+import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
+import type { RelationshipReads } from "@benedb/grains/relationship-reads";
 import type {
   PreconditionWire,
   RelationshipsFilterWire,
@@ -29,24 +29,24 @@ import type {
   RelationshipUpdateOpWire,
   RelationshipUpdateWire,
   RelationshipWire,
-} from "@spacedb/grains/relationships-dtos";
-import { relationshipStreamItemReadAtToken } from "@spacedb/grains/relationships-dtos";
-import type { ReverseOps } from "@spacedb/grains/reverse-ops";
+} from "@benedb/grains/relationships-dtos";
+import { relationshipStreamItemReadAtToken } from "@benedb/grains/relationships-dtos";
+import type { ReverseOps } from "@benedb/grains/reverse-ops";
 import type {
   ExpandSubjectWire,
   ExpandTreeNodeWire,
   Permissionship as PermissionshipWire,
   SetOpWire,
-} from "@spacedb/grains/reverse-ops-dtos";
+} from "@benedb/grains/reverse-ops-dtos";
 import {
   expandTreeReplyExpandedAtToken,
   foundResourceWireLookedUpAtToken,
   foundSubjectStreamItemLookedUpAtToken,
-} from "@spacedb/grains/reverse-ops-dtos";
-import { SequencerOverloadedException } from "@spacedb/grains/sequencer-overloaded-exception";
-import type { WriteConflictKind } from "@spacedb/grains/write-conflict-exception";
-import { WriteConflictException } from "@spacedb/grains/write-conflict-exception";
-import type { Membership } from "@spacedb/engine/membership";
+} from "@benedb/grains/reverse-ops-dtos";
+import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
+import type { WriteConflictKind } from "@benedb/grains/write-conflict-exception";
+import { WriteConflictException } from "@benedb/grains/write-conflict-exception";
+import type { Membership } from "@benedb/engine/membership";
 import type {
   ObjectReference,
   PartialCaveatInfo,
@@ -54,11 +54,11 @@ import type {
   Relationship as ProtoRelationship,
   RelationshipUpdate,
   SubjectReference,
-} from "@spacedb/protos/authzed/api/v1/core";
+} from "@benedb/protos/authzed/api/v1/core";
 import {
   AlgebraicSubjectSet_Operation,
   RelationshipUpdate_Operation,
-} from "@spacedb/protos/authzed/api/v1/core";
+} from "@benedb/protos/authzed/api/v1/core";
 import type {
   CheckBulkPermissionsRequest,
   CheckBulkPermissionsResponse,
@@ -85,14 +85,14 @@ import type {
   RelationshipFilter as ProtoRelationshipFilter,
   WriteRelationshipsRequest,
   WriteRelationshipsResponse,
-} from "@spacedb/protos/authzed/api/v1/permission_service";
+} from "@benedb/protos/authzed/api/v1/permission_service";
 import {
   CheckPermissionResponse_Permissionship,
   DeleteRelationshipsResponse_DeletionProgress,
   LookupPermissionship,
   Precondition_Operation,
-} from "@spacedb/protos/authzed/api/v1/permission_service";
-import type { Status as RpcStatus } from "@spacedb/protos/google/rpc/status";
+} from "@benedb/protos/authzed/api/v1/permission_service";
+import type { Status as RpcStatus } from "@benedb/protos/google/rpc/status";
 import { isCancellationError } from "@thresh/core/errors";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
@@ -128,7 +128,7 @@ import type { ServerStreamWriter } from "./server-stream-writer";
  *   * `catch (OperationCanceledException) when (ct.IsCancellationRequested)` becomes
  *     `isCancellationError(error) && signal?.aborted === true`, matched on the TYPE and paired with
  *     the same guard: a cancellation raised while the call was NOT cancelled still propagates.
- *   * `FormatException` (a malformed bulk-export cursor) is `@spacedb/core`'s {@link FormatError}.
+ *   * `FormatException` (a malformed bulk-export cursor) is `@benedb/core`'s {@link FormatError}.
  *   * `num_loaded` is uint64: a ts-proto STRING minted from the reply's `bigint`, never a JS
  *     `number`, which would round past 2^53.
  *   * `partial.Clone()` into the deprecated top-level `LookupSubjectsResponse.partial_caveat_info`

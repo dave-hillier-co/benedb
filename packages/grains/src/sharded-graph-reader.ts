@@ -1,17 +1,17 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { IGraphReader } from "@spacedb/datastore/i-graph-reader";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { Relationship } from "@benedb/core/relationship";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
 import {
   relationshipsFilterMatches,
   subjectsFilterMatches,
   type RelationshipsFilter,
   type SubjectsFilter,
-} from "@spacedb/datastore/relationships-filter";
+} from "@benedb/datastore/relationships-filter";
 import {
   compareReferencesBySubject,
   compareRelationshipsBySubject,
   type ReverseQueryOptions,
-} from "@spacedb/datastore/reverse-query-options";
+} from "@benedb/datastore/reverse-query-options";
 import type { GrainRuntime } from "@thresh/core/grain-runtime";
 
 import { graphShardGrainKeyBuild } from "./graph-shard-grain-key";

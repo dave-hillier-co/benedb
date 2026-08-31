@@ -1,21 +1,21 @@
 import { Server, type ServiceDefinition } from "@grpc/grpc-js";
-import { CheckGrain } from "@spacedb/grains/check-grain";
-import type { IPermissionChecker } from "@spacedb/grains/i-permission-checker";
-import type { ISchemaProvider } from "@spacedb/grains/i-schema-provider";
-import type { RelationshipReads } from "@spacedb/grains/relationship-reads";
-import type { ReverseOps } from "@spacedb/grains/reverse-ops";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import { ExperimentalServiceService } from "@spacedb/protos/authzed/api/v1/experimental_service";
-import { PermissionsServiceService as AuthzedPermissionsServiceService } from "@spacedb/protos/authzed/api/v1/permission_service";
-import { SchemaServiceService } from "@spacedb/protos/authzed/api/v1/schema_service";
-import { WatchServiceService as AuthzedWatchServiceService } from "@spacedb/protos/authzed/api/v1/watch_service";
+import { CheckGrain } from "@benedb/grains/check-grain";
+import type { IPermissionChecker } from "@benedb/grains/i-permission-checker";
+import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
+import type { RelationshipReads } from "@benedb/grains/relationship-reads";
+import type { ReverseOps } from "@benedb/grains/reverse-ops";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import { ExperimentalServiceService } from "@benedb/protos/authzed/api/v1/experimental_service";
+import { PermissionsServiceService as AuthzedPermissionsServiceService } from "@benedb/protos/authzed/api/v1/permission_service";
+import { SchemaServiceService } from "@benedb/protos/authzed/api/v1/schema_service";
+import { WatchServiceService as AuthzedWatchServiceService } from "@benedb/protos/authzed/api/v1/watch_service";
 import {
   BulkServiceService,
   PermissionsServiceService,
   WatchServiceService,
-} from "@spacedb/protos/permissions";
-import { CLUSTERING_SILOS_KEY, resolveClustering } from "@spacedb/silo/clustering-config";
-import { createConfiguration } from "@spacedb/silo/datastore-storage-config";
+} from "@benedb/protos/permissions";
+import { CLUSTERING_SILOS_KEY, resolveClustering } from "@benedb/silo/clustering-config";
+import { createConfiguration } from "@benedb/silo/datastore-storage-config";
 import { getGrainMetadata } from "@thresh/core/grain-metadata";
 import { SiloAddress } from "@thresh/core/silo-address";
 import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
@@ -298,7 +298,7 @@ describe("shutdownApiHost", () => {
 describe("configureApiSilo", () => {
   function builder(): SiloBuilder {
     return createSilo({
-      clusterId: "spacedb-api-test",
+      clusterId: "benedb-api-test",
       local: new SiloAddress("api-test", "uid-api-test", "api-test:11111"),
     });
   }
@@ -312,7 +312,7 @@ describe("configureApiSilo", () => {
     calls: { name: string; args: readonly unknown[] }[];
   } {
     const target = createSilo({
-      clusterId: "spacedb-api-test",
+      clusterId: "benedb-api-test",
       local: local ?? new SiloAddress("api-test", "uid-api-test", "api-test:11111"),
     });
     const calls: { name: string; args: readonly unknown[] }[] = [];
@@ -342,7 +342,7 @@ describe("configureApiSilo", () => {
   /** A clustered configuration and the options both the host and this suite resolve from it. */
   function clusteredConfiguration(silos: string) {
     const configuration = createConfiguration({
-      "ConnectionStrings:OrleansStorage": "postgres://localhost/spacedb",
+      "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb",
       [CLUSTERING_SILOS_KEY]: silos,
     });
     const clustering = resolveClustering(configuration);

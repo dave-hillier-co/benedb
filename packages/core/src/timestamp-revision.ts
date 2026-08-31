@@ -109,7 +109,7 @@ export class TimestampRevision implements IRevision {
 // receiver calls `compareTo` / `greaterThan` on it, so it needs a surrogate to survive as its own
 // class rather than a plain object. Importing this module performs the registration.
 registerSurrogate<TimestampRevision>({
-  tag: "spacedb.timestampRevision",
+  tag: "benedb.timestampRevision",
   test: (value) => value instanceof TimestampRevision,
   encode: (revision) => ({ timestampNanosSinceEpoch: revision.timestampNanosSinceEpoch }),
   decode: (fields) => new TimestampRevision(fields.timestampNanosSinceEpoch as bigint),

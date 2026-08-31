@@ -2,21 +2,21 @@ import {
   allowedRelationDirect,
   allowedRelationWildcard,
   type AllowedRelation,
-} from "@spacedb/core/allowed-relation";
-import type { CaveatDefinition } from "@spacedb/core/caveat-definition";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+} from "@benedb/core/allowed-relation";
+import type { CaveatDefinition } from "@benedb/core/caveat-definition";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import {
   createNamespaceDefinition,
   type NamespaceDefinition,
-} from "@spacedb/core/namespace-definition";
-import { baseRelation, permission, type Relation } from "@spacedb/core/relation";
+} from "@benedb/core/namespace-definition";
+import { baseRelation, permission, type Relation } from "@benedb/core/relation";
 import {
   computedUsersetOnResource,
   setOperationExclusion,
   setOperationIntersection,
   setOperationUnion,
   type SetOperationChild,
-} from "@spacedb/core/userset-rewrite";
+} from "@benedb/core/userset-rewrite";
 import { describe, expect, it } from "vitest";
 
 import { computeSchemaHash, computeSchemaHashFromNamespaceMap } from "./schema-hash";
@@ -65,7 +65,7 @@ import { computeSchemaHash, computeSchemaHashFromNamespaceMap } from "./schema-h
 //     verbatim in TypeScript is impossible and pointless, so the port renders the parameters and
 //     the expression bytes. `caveats differing only in the expression hash differently` below
 //     pins the divergence.
-//  2. ENUM CASING follows the SpaceDB string unions, not the .NET enum names: "union" not
+//  2. ENUM CASING follows the BeneDB string unions, not the .NET enum names: "union" not
 //     "Union", "tupleObject" not "TupleObject", "any" not "Any". No mapping layer is introduced
 //     just to restore PascalCase.
 //

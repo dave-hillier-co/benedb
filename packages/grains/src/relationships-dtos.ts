@@ -249,7 +249,7 @@ export class CounterOperationException extends Error {
 // message cross: unlike the datastore counter exceptions, the message is not derivable from the
 // carried data - the grain composes it from the datastore exception it caught.
 registerSurrogate<CounterOperationException>({
-  tag: "spacedb.counterOperationException",
+  tag: "benedb.counterOperationException",
   test: (value) => value instanceof CounterOperationException,
   encode: (error) => ({ kind: error.kind, message: error.message }),
   decode: (fields) =>

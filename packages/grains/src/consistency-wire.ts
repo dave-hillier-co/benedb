@@ -1,11 +1,11 @@
-import type { ConsistencyRequirement } from "@spacedb/core/consistency-requirement";
+import type { ConsistencyRequirement } from "@benedb/core/consistency-requirement";
 import {
   atExactSnapshot,
   atLeastAsFresh,
   MINIMIZE_LATENCY,
-} from "@spacedb/core/consistency-requirement";
-import { FULLY_CONSISTENT } from "@spacedb/core/consistency-requirement";
-import type { ZedToken } from "@spacedb/core/zed-token";
+} from "@benedb/core/consistency-requirement";
+import { FULLY_CONSISTENT } from "@benedb/core/consistency-requirement";
+import type { ZedToken } from "@benedb/core/zed-token";
 
 /**
  * The selected consistency mode on the wire.

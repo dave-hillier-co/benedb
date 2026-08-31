@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { MaxDepthExceededException } from "@spacedb/core/max-depth-exceeded-exception";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
-import { CheckEngine } from "@spacedb/engine/check-engine";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import { CheckEngine } from "@benedb/engine/check-engine";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 
 import { MeshTestCluster } from "./mesh-test-cluster";
 

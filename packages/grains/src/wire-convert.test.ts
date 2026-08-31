@@ -1,6 +1,6 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { RelationshipsFilter } from "@spacedb/datastore/relationships-filter";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { createRelationship } from "@benedb/core/relationship";
+import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 import { describe, expect, it } from "vitest";
 
 import type { FullRelationshipsFilterWire } from "./datastore-dtos";

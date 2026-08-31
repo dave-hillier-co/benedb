@@ -1,6 +1,6 @@
-import { FormatError } from "@spacedb/core/format-error";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { FormatError } from "@benedb/core/format-error";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 
 import { fromBase64String, toBase64String } from "./convert-base64";
 import { parseRevision } from "./revision-codec";

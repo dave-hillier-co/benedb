@@ -1,15 +1,15 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { Relationship } from "@spacedb/core/relationship";
-import { formatRelationship } from "@spacedb/core/tuple-strings";
-import { zedTokenFromRevision } from "@spacedb/core/zed-tokens";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { Relationship } from "@benedb/core/relationship";
+import { formatRelationship } from "@benedb/core/tuple-strings";
+import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
 import type {
   RelationshipsFilter,
   SubjectRelationFilter,
   SubjectsSelector,
-} from "@spacedb/datastore/relationships-filter";
-import { resolveRevision } from "@spacedb/datastore/revision-resolver";
+} from "@benedb/datastore/relationships-filter";
+import { resolveRevision } from "@benedb/datastore/revision-resolver";
 
 import { encodeBulkExportCursor, tryDecodeBulkExportCursor } from "./bulk-export-cursor";
 import { consistencyWireToRequirement, MINIMIZE_LATENCY_WIRE } from "./consistency-wire";

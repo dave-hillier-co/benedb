@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve as resolvePath, sep } from "node:path";
 import { isMap, isScalar, isSeq, parseDocument } from "yaml";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { FormatError } from "@spacedb/core/format-error";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { Relationship } from "@spacedb/core/relationship";
-import { parseObjectAndRelation, parseRelationship } from "@spacedb/core/tuple-strings";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { FormatError } from "@benedb/core/format-error";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { Relationship } from "@benedb/core/relationship";
+import { parseObjectAndRelation, parseRelationship } from "@benedb/core/tuple-strings";
 import type {
   AssertionExpectation,
   ExpectedSubject,

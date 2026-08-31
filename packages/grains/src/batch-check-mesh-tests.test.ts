@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
 
 import type { BatchCheckItem } from "./i-permission-checker";
 import { MeshTestCluster } from "./mesh-test-cluster";

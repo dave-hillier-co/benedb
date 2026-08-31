@@ -1,6 +1,6 @@
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import { isPublicWildcard, type ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { SetOperationType } from "@spacedb/core/userset-rewrite";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import { isPublicWildcard, type ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { SetOperationType } from "@benedb/core/userset-rewrite";
 import { describe, expect, it } from "vitest";
 
 import { caveatExpressionFromCaveat } from "./caveat-expression";
@@ -31,7 +31,7 @@ import {
 //   * `DirectSubject(Subject, Caveat = null)` has an optional second parameter; the factory leaves
 //     `caveat` absent rather than defaulting it to anything.
 //   * A public wildcard is represented by the subject ONR's object id being `"*"`. Nothing here
-//     re-tests that string: `isPublicWildcard` from @spacedb/core owns it.
+//     re-tests that string: `isPublicWildcard` from @benedb/core owns it.
 
 function onr(type: string, id: string, relation: string = ELLIPSIS): ObjectAndRelation {
   return { objectType: type, objectId: id, relation };
@@ -145,7 +145,7 @@ describe("PermissionTreeNode.SetOp", () => {
   });
 
   it.each<SetOperationType>(["union", "intersection", "exclusion"])(
-    "carries the %s operation verbatim from @spacedb/core",
+    "carries the %s operation verbatim from @benedb/core",
     (operation) => {
       const op = permissionTreeSetOp(onr("document", "doc1", "view"), operation, []);
 

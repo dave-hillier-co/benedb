@@ -1,22 +1,22 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import type { IGraphReader } from "@spacedb/datastore/i-graph-reader";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { CaveatExpression } from "@spacedb/engine/caveat-expression";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
+import type { Relationship } from "@benedb/core/relationship";
+import type { CaveatExpression } from "@benedb/engine/caveat-expression";
 import type {
   DispatchCheckRequest,
   DispatchCheckResult,
   IDispatcher,
-} from "@spacedb/engine/i-dispatcher";
+} from "@benedb/engine/i-dispatcher";
 import {
   DISPATCH_CHECK_DEFINITE_MEMBER,
   visitKeyOf,
   visitKeyToCanonicalString,
-} from "@spacedb/engine/i-dispatcher";
-import { computeSchemaHash } from "@spacedb/engine/schema-hash";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+} from "@benedb/engine/i-dispatcher";
+import { computeSchemaHash } from "@benedb/engine/schema-hash";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { TestCluster } from "@thresh/testing/test-cluster";
 import { RequestContext } from "@thresh/core/request-context";
 import { constructGrain } from "@thresh/runtime/construct-grain";

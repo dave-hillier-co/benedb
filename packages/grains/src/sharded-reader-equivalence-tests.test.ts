@@ -3,22 +3,22 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { loadValidationFile } from "@spacedb/conformance/validation-file-loader";
-import type { ValidationFile } from "@spacedb/conformance/validation-model";
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { RelationshipReference } from "@spacedb/core/relationship-reference";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import type { IGraphReader } from "@spacedb/datastore/i-graph-reader";
-import type { RelationshipsFilter, SubjectsFilter } from "@spacedb/datastore/relationships-filter";
+import { loadValidationFile } from "@benedb/conformance/validation-file-loader";
+import type { ValidationFile } from "@benedb/conformance/validation-model";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import type { RelationshipReference } from "@benedb/core/relationship-reference";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
+import type { RelationshipsFilter, SubjectsFilter } from "@benedb/datastore/relationships-filter";
 import {
   compareReferencesBySubject,
   type ReverseQueryOptions,
-} from "@spacedb/datastore/reverse-query-options";
+} from "@benedb/datastore/reverse-query-options";
 import type { Duration } from "@thresh/core/duration";
 
 import { graphShardGrainKeyBuild } from "./graph-shard-grain-key";
@@ -81,7 +81,7 @@ import { toRelationship } from "./wire-convert";
 const requireFromHere = createRequire(import.meta.url);
 
 const CORPUS_DIR = resolvePath(
-  dirname(requireFromHere.resolve("@spacedb/conformance/validation-file-loader")),
+  dirname(requireFromHere.resolve("@benedb/conformance/validation-file-loader")),
   "..",
   "corpus",
 );

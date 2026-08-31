@@ -1,4 +1,4 @@
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
 
 import { joinGrainKey, splitGrainKey } from "./grain-key-codec";
 

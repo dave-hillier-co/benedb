@@ -12,7 +12,7 @@
  * mints, so a whitespace byte that differs from Spiceport's is a TOKEN that differs from
  * Spiceport's.
  *
- * `SEED_SCHEMA_TEXT` (`@spacedb/api/seed-data`) is byte-identical to this constant today, but the
+ * `SEED_SCHEMA_TEXT` (`@benedb/api/seed-data`) is byte-identical to this constant today, but the
  * two are SEPARATE constants in separate C# files and drift independently by design. Neither is
  * expressed in terms of the other.
  */

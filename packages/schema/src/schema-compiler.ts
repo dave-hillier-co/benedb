@@ -3,12 +3,12 @@ import {
   allowedRelationWildcard,
   type AllowedCaveat,
   type AllowedRelation,
-} from "@spacedb/core/allowed-relation";
-import type { CaveatDefinition, CaveatTypeReference } from "@spacedb/core/caveat-definition";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { permission as permissionRelation, type Relation } from "@spacedb/core/relation";
+} from "@benedb/core/allowed-relation";
+import type { CaveatDefinition, CaveatTypeReference } from "@benedb/core/caveat-definition";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { permission as permissionRelation, type Relation } from "@benedb/core/relation";
 import {
   computedUsersetOnResource,
   setOperationUnion,
@@ -17,7 +17,7 @@ import {
   type SetOperationChild,
   type SetOperationType,
   type TupleToUsersetFunction,
-} from "@spacedb/core/userset-rewrite";
+} from "@benedb/core/userset-rewrite";
 
 import type {
   ArrowExpr,

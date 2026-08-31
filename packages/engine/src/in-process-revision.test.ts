@@ -1,4 +1,4 @@
-import { defaultGreaterThan, type IRevision } from "@spacedb/core/i-revision";
+import { defaultGreaterThan, type IRevision } from "@benedb/core/i-revision";
 import { describe, expect, it } from "vitest";
 
 import { IN_PROCESS_REVISION } from "./in-process-revision";

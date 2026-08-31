@@ -1,16 +1,16 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { Relationship } from "@spacedb/core/relationship";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { IGraphReader } from "@spacedb/datastore/i-graph-reader";
-import type { RelationshipsFilter, SubjectsFilter } from "@spacedb/datastore/relationships-filter";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { Relationship } from "@benedb/core/relationship";
+import { createRelationship } from "@benedb/core/relationship";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
+import type { RelationshipsFilter, SubjectsFilter } from "@benedb/datastore/relationships-filter";
 import {
   relationshipsFilterMatches,
   subjectsFilterMatches,
-} from "@spacedb/datastore/relationships-filter";
-import { computeSchemaHash } from "@spacedb/engine/schema-hash";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+} from "@benedb/datastore/relationships-filter";
+import { computeSchemaHash } from "@benedb/engine/schema-hash";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { TestCluster } from "@thresh/testing/test-cluster";
 import { constructGrain } from "@thresh/runtime/construct-grain";
 import { afterEach, describe, expect, it } from "vitest";

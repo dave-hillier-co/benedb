@@ -1,4 +1,4 @@
-import type { RelationshipReference } from "@spacedb/core/relationship-reference";
+import type { RelationshipReference } from "@benedb/core/relationship-reference";
 
 /**
  * One nesting level of a {@link LookupResourcesCursor}. Exactly one resume mechanism applies per

@@ -1,36 +1,33 @@
 import { status } from "@grpc/grpc-js";
-import { CaveatEvaluationException } from "@spacedb/core/caveat-evaluation-exception";
+import { CaveatEvaluationException } from "@benedb/core/caveat-evaluation-exception";
 import {
   FULLY_CONSISTENT,
   MINIMIZE_LATENCY,
   atExactSnapshot,
   atLeastAsFresh,
   type ConsistencyRequirement,
-} from "@spacedb/core/consistency-requirement";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { InvalidConsistencyTokenException } from "@spacedb/core/invalid-consistency-token-exception";
-import { MaxDepthExceededException } from "@spacedb/core/max-depth-exceeded-exception";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
-import type { ConsistencyWire } from "@spacedb/grains/consistency-wire";
+} from "@benedb/core/consistency-requirement";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { InvalidConsistencyTokenException } from "@benedb/core/invalid-consistency-token-exception";
+import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
+import type { ConsistencyWire } from "@benedb/grains/consistency-wire";
 import {
   DispatchFailedException,
   type DispatchErrorCode,
-} from "@spacedb/grains/dispatch-failed-exception";
+} from "@benedb/grains/dispatch-failed-exception";
 import type {
   BatchCheckItem,
   BatchCheckResult,
   IPermissionChecker,
   PermissionCheckResult,
-} from "@spacedb/grains/i-permission-checker";
-import {
-  IRelationshipsGrain,
-  RELATIONSHIPS_GRAIN_KEY,
-} from "@spacedb/grains/i-relationships-grain";
-import { PreconditionFailedException } from "@spacedb/grains/precondition-failed-exception";
-import type { RelationshipReads } from "@spacedb/grains/relationship-reads";
+} from "@benedb/grains/i-permission-checker";
+import { IRelationshipsGrain, RELATIONSHIPS_GRAIN_KEY } from "@benedb/grains/i-relationships-grain";
+import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
+import type { RelationshipReads } from "@benedb/grains/relationship-reads";
 import type {
   DeleteRelationshipsArgs,
   DeleteRelationshipsReply,
@@ -42,8 +39,8 @@ import type {
   WriteRelationshipsReply,
   WriteSchemaArgs,
   WriteSchemaReply,
-} from "@spacedb/grains/relationships-dtos";
-import type { ReverseOps } from "@spacedb/grains/reverse-ops";
+} from "@benedb/grains/relationships-dtos";
+import type { ReverseOps } from "@benedb/grains/reverse-ops";
 import type {
   ExpandTreeArgs,
   ExpandTreeNodeWire,
@@ -52,9 +49,9 @@ import type {
   FoundSubjectStreamItem,
   LookupResourcesArgs,
   LookupSubjectsArgs,
-} from "@spacedb/grains/reverse-ops-dtos";
-import { SchemaWriteValidationException } from "@spacedb/grains/schema-write-validation-exception";
-import { SequencerOverloadedException } from "@spacedb/grains/sequencer-overloaded-exception";
+} from "@benedb/grains/reverse-ops-dtos";
+import { SchemaWriteValidationException } from "@benedb/grains/schema-write-validation-exception";
+import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
 import {
   CheckPermissionRequest,
   CheckPermissionResponse_Permissionship,
@@ -72,8 +69,8 @@ import {
   RelationshipUpdate_Operation,
   WriteRelationshipsRequest,
   WriteSchemaRequest,
-} from "@spacedb/protos/permissions";
-import { SchemaCompileException } from "@spacedb/schema/schema-compile-exception";
+} from "@benedb/protos/permissions";
+import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { describe, expect, it } from "vitest";

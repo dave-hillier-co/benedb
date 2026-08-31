@@ -1,4 +1,4 @@
-import { visitKeyToCanonicalString } from "@spacedb/engine/i-dispatcher";
+import { visitKeyToCanonicalString } from "@benedb/engine/i-dispatcher";
 import { RequestContext } from "@thresh/core/request-context";
 import { beforeEach, describe, expect, it } from "vitest";
 

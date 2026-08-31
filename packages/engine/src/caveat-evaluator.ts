@@ -1,7 +1,7 @@
 import { CelError, CelUint, CelUnknown } from "@bufbuild/cel";
-import type { CaveatDefinition, CaveatTypeReference } from "@spacedb/core/caveat-definition";
-import { CaveatEvaluationException } from "@spacedb/core/caveat-evaluation-exception";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import type { CaveatDefinition, CaveatTypeReference } from "@benedb/core/caveat-definition";
+import { CaveatEvaluationException } from "@benedb/core/caveat-evaluation-exception";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 
 import { buildCaveatCelEnvironment } from "./caveat-cel-environment";
 import { toCelContextValue } from "./cel-context-value";

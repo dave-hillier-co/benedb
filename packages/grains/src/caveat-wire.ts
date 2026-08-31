@@ -1,4 +1,4 @@
-import type { CaveatExpression } from "@spacedb/engine/caveat-expression";
+import type { CaveatExpression } from "@benedb/engine/caveat-expression";
 
 import type { SerializedCaveat } from "./serialized-caveat";
 
@@ -8,7 +8,7 @@ import type { SerializedCaveat } from "./serialized-caveat";
  *
  * In Spiceport the abstractions assembly cannot reference the engine, so the wire form is a
  * structural mirror of the engine tree and this assembly (which references both) owns the round
- * trip. The port keeps that split: `@spacedb/grains` is the only package importing both.
+ * trip. The port keeps that split: `@benedb/grains` is the only package importing both.
  *
  * Both sides are discriminated unions, so each direction is a switch on `kind`. The C#'s default
  * arm THROWS `NotSupportedException` naming the node type, so this is one of the sites where the

@@ -1,5 +1,5 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 import { describe, expect, it } from "vitest";
 
 import { parseRevision } from "./revision-codec";

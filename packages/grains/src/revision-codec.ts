@@ -1,6 +1,6 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 
 /**
  * Parses the revision string carried in a grain key back into an `IRevision` so the grain can

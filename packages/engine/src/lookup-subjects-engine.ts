@@ -1,21 +1,21 @@
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
 import {
   isPublicWildcard,
   withRelation,
   type ObjectAndRelation,
-} from "@spacedb/core/object-and-relation";
-import type { Relation } from "@spacedb/core/relation";
-import type { Relationship } from "@spacedb/core/relationship";
+} from "@benedb/core/object-and-relation";
+import type { Relation } from "@benedb/core/relation";
+import type { Relationship } from "@benedb/core/relationship";
 import type {
   ComputedUserset,
   SetOperation,
   SetOperationChild,
   TupleToUsersetFunction,
-} from "@spacedb/core/userset-rewrite";
-import type { IGraphReader } from "@spacedb/datastore/i-graph-reader";
-import type { RelationshipsFilter } from "@spacedb/datastore/relationships-filter";
+} from "@benedb/core/userset-rewrite";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
+import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 
 import {
   caveatExpressionCombineAnd,

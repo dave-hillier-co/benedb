@@ -13,7 +13,7 @@ A wire-compatible SpiceDB implementation in TypeScript on **Thresh**, ported fro
 answers a question matters:
 
 - `../spiceport` — **the source being ported.** The design authority. Port from here.
-- `../thresh` — the virtual-actor runtime. SpaceDB is its first production use case, so
+- `../thresh` — the virtual-actor runtime. BeneDB is its first production use case, so
   expect to find bugs in it; fixing them there is part of the work, not a detour.
 - `../spicedb` — the Go original. Consult for intent when Spiceport is ambiguous.
 - `../orleans` — consult when a Thresh behaviour is in question and
@@ -28,7 +28,7 @@ pnpm test:conformance             # the SpiceDB conformance corpus
 pnpm test:differential            # against a real spicedb container; skips without Docker
 pnpm typecheck                    # tsc --noEmit over every package
 pnpm lint                         # eslint + prettier
-pnpm --filter @spacedb/api start  # run a host; attended and manual, never from a test or CI
+pnpm --filter @benedb/api start  # run a host; attended and manual, never from a test or CI
 ```
 
 - **Use pnpm for dependency changes** (`pnpm add`, `pnpm --filter <pkg> add`). Do not hand-edit
@@ -57,7 +57,7 @@ pnpm --filter @spacedb/api start  # run a host; attended and manual, never from 
   one is still worth a line, marked unreachable. Do not go hunting: this is for what a file you had
   to read anyway reveals. `sourceConcerns` in the port-stage workflow is the collection point.
 - **When the blocker is Thresh, fix Thresh.** Test-first, in that repo. Working around a Thresh
-  limitation here hides the bug that SpaceDB exists to surface.
+  limitation here hides the bug that BeneDB exists to surface.
 - Record every source file's target in [`docs/port-ledger.md`](docs/port-ledger.md), so that
   "what is left" is a query rather than a judgement.
 
@@ -70,7 +70,7 @@ pnpm --filter @spacedb/api start  # run a host; attended and manual, never from 
   limits: it covers only the shapes its cases exercise, both runs share the same engine, and it
   tests one static snapshot — no MVCC, revision, or write-race behaviour.
 - **The differential suite is the only external oracle.** It drives seeded random worlds through
-  both a real `authzed/spicedb` container and SpaceDB. It skips, never fails, without Docker.
+  both a real `authzed/spicedb` container and BeneDB. It skips, never fails, without Docker.
 - **Verify grains through Thresh's `TestCluster`**, not by booting a host.
 - A real `zed`/`grpcurl` smoke test against a booted host is valuable but **attended and
   manual**, with explicit teardown. Never start a host from a test or from CI — a backgrounded

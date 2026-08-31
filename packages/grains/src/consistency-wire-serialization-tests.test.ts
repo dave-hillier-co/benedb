@@ -2,9 +2,9 @@ import {
   MINIMIZE_LATENCY,
   type AtExactSnapshotRequirement,
   type AtLeastAsFreshRequirement,
-} from "@spacedb/core/consistency-requirement";
-import { atLeastAsFresh } from "@spacedb/core/consistency-requirement";
-import type { ZedToken } from "@spacedb/core/zed-token";
+} from "@benedb/core/consistency-requirement";
+import { atLeastAsFresh } from "@benedb/core/consistency-requirement";
+import type { ZedToken } from "@benedb/core/zed-token";
 import { deserializeValue, serializeValue } from "@thresh/core/value-codec";
 import { describe, expect, it } from "vitest";
 

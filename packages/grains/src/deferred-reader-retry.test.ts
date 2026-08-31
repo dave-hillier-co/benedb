@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { GrainKeyFor } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";

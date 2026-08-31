@@ -1,5 +1,5 @@
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 
 import { describe, expect, it } from "vitest";
 

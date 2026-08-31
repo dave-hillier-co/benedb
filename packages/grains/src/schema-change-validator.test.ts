@@ -2,21 +2,21 @@ import {
   allowedRelationDirect,
   allowedRelationWildcard,
   type AllowedRelation,
-} from "@spacedb/core/allowed-relation";
-import type { CaveatDefinition, CaveatTypeReference } from "@spacedb/core/caveat-definition";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import type { Relation } from "@spacedb/core/relation";
-import type { Relationship } from "@spacedb/core/relationship";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { parseRelationship } from "@spacedb/core/tuple-strings";
-import { setOperationUnion, type SetOperationChild } from "@spacedb/core/userset-rewrite";
-import type { IDatastoreReader } from "@spacedb/datastore/i-datastore";
+} from "@benedb/core/allowed-relation";
+import type { CaveatDefinition, CaveatTypeReference } from "@benedb/core/caveat-definition";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import type { Relation } from "@benedb/core/relation";
+import type { Relationship } from "@benedb/core/relationship";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { parseRelationship } from "@benedb/core/tuple-strings";
+import { setOperationUnion, type SetOperationChild } from "@benedb/core/userset-rewrite";
+import type { IDatastoreReader } from "@benedb/datastore/i-datastore";
 import {
   relationshipsFilterMatches,
   type RelationshipsFilter,
-} from "@spacedb/datastore/relationships-filter";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
+} from "@benedb/datastore/relationships-filter";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 import { describe, expect, it } from "vitest";
 
 import type { ISnapshotScanner } from "./i-snapshot-scanner";

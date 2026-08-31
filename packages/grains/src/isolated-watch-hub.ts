@@ -1,4 +1,4 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import type { Duration } from "@thresh/core/duration";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 

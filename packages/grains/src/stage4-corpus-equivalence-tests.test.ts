@@ -3,17 +3,17 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { loadValidationFile } from "@spacedb/conformance/validation-file-loader";
-import { PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
-import type { FoundResource } from "@spacedb/engine/found-resource";
-import { LookupResourcesEngine } from "@spacedb/engine/lookup-resources-engine";
-import type { Membership } from "@spacedb/engine/membership";
-import { buildMembershipCoverage } from "@spacedb/engine/membership-coverage";
-import { localClosure, toCoveredCandidates } from "@spacedb/engine/membership-walk";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import { loadValidationFile } from "@benedb/conformance/validation-file-loader";
+import { PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import type { FoundResource } from "@benedb/engine/found-resource";
+import { LookupResourcesEngine } from "@benedb/engine/lookup-resources-engine";
+import type { Membership } from "@benedb/engine/membership";
+import { buildMembershipCoverage } from "@benedb/engine/membership-coverage";
+import { localClosure, toCoveredCandidates } from "@benedb/engine/membership-walk";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 
 /**
  * Ported from Spiceport `tests/Spiceport.Grains.Tests/Stage4CorpusEquivalenceTests.cs`.
@@ -29,7 +29,7 @@ import { compileSchema } from "@spacedb/schema/schema-compiler";
  *
  * PORT NOTES.
  *  - `AppContext.BaseDirectory/TestData` is the vendored corpus at `packages/conformance/corpus`,
- *    resolved through the `@spacedb/conformance` package the way the other ported corpus suites do.
+ *    resolved through the `@benedb/conformance` package the way the other ported corpus suites do.
  *  - `Directory.EnumerateFiles(dir, "*.yaml")` is non-recursive, hence the `isFile()` filter (the
  *    corpus tree also holds `LoaderSuite/` and `Quarantine/` directories), and
  *    `.OrderBy(p => p, StringComparer.Ordinal)` is JavaScript's DEFAULT `Array.prototype.sort()`
@@ -50,9 +50,9 @@ import { compileSchema } from "@spacedb/schema/schema-compiler";
 
 const requireFromHere = createRequire(import.meta.url);
 
-/** The vendored corpus directory, resolved relative to the `@spacedb/conformance` package. */
+/** The vendored corpus directory, resolved relative to the `@benedb/conformance` package. */
 const CORPUS_DIR = resolvePath(
-  dirname(requireFromHere.resolve("@spacedb/conformance/validation-file-loader")),
+  dirname(requireFromHere.resolve("@benedb/conformance/validation-file-loader")),
   "..",
   "corpus",
 );

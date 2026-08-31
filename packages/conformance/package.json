@@ -1,5 +1,5 @@
 {
-  "name": "@spacedb/conformance",
+  "name": "@benedb/conformance",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,11 +7,11 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "@spacedb/core": "workspace:*",
-    "@spacedb/datastore": "workspace:*",
-    "@spacedb/engine": "workspace:*",
-    "@spacedb/grains": "workspace:*",
-    "@spacedb/schema": "workspace:*",
+    "@benedb/core": "workspace:*",
+    "@benedb/datastore": "workspace:*",
+    "@benedb/engine": "workspace:*",
+    "@benedb/grains": "workspace:*",
+    "@benedb/schema": "workspace:*",
     "yaml": "^2.8.1",
     "@thresh/testing": "link:../../../thresh/packages/testing"
   }

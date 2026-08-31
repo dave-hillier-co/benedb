@@ -1,11 +1,11 @@
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 import {
   CounterAlreadyRegisteredException,
   CounterNotRegisteredException,
   CreateRelationshipExistsException,
   RevisionNotFoundException,
-} from "@spacedb/datastore/datastore-exceptions";
-import { MvccReadWriteTransaction } from "@spacedb/datastore/mvcc-read-write-transaction";
+} from "@benedb/datastore/datastore-exceptions";
+import { MvccReadWriteTransaction } from "@benedb/datastore/mvcc-read-write-transaction";
 import { grain } from "@thresh/core/decorators";
 import type { Duration } from "@thresh/core/duration";
 import { durationToMs } from "@thresh/core/duration";

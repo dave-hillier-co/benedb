@@ -1,14 +1,14 @@
 import {
   isAllowedRelationPublicWildcard,
   type AllowedRelation,
-} from "@spacedb/core/allowed-relation";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { isPublicWildcard } from "@spacedb/core/object-and-relation";
-import { isPermission } from "@spacedb/core/relation";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
+} from "@benedb/core/allowed-relation";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { isPublicWildcard } from "@benedb/core/object-and-relation";
+import { isPermission } from "@benedb/core/relation";
+import type { Relationship } from "@benedb/core/relationship";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 
 /**
  * Mirrors SpiceDB's write-time `relationships.ValidateRelationshipsForCreateOrTouch`: a written

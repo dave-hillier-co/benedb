@@ -9,7 +9,7 @@ import { MaxDepthExceededException } from "./max-depth-exceeded-exception";
 //
 // LEDGER AMENDMENT. `docs/port-ledger.md` mapped `src/Spiceport.Server/MaxDepthExceededException.cs`
 // to `packages/grains/src/max-depth-exceeded-exception.ts` (S4). `LocalDispatcher` throws it, and
-// `@spacedb/engine` cannot import from `@spacedb/grains`, so the row is amended to S3 /
+// `@benedb/engine` cannot import from `@benedb/grains`, so the row is amended to S3 /
 // `packages/core/src/...`. The C# file already declares `namespace Spiceport.Core`, so core is
 // where it belonged all along; only the .cs file's directory said otherwise.
 describe("MaxDepthExceededException", () => {

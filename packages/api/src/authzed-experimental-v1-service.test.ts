@@ -2,8 +2,8 @@ import { status } from "@grpc/grpc-js";
 import {
   IRelationshipsGrain as IRelationshipsGrainDefinition,
   RELATIONSHIPS_GRAIN_KEY,
-} from "@spacedb/grains/i-relationships-grain";
-import { MutableSchemaProvider } from "@spacedb/grains/i-schema-provider";
+} from "@benedb/grains/i-relationships-grain";
+import { MutableSchemaProvider } from "@benedb/grains/i-schema-provider";
 import type {
   CountRelationshipsArgs,
   CountRelationshipsReply,
@@ -11,14 +11,14 @@ import type {
   RegisterCounterReply,
   UnregisterCounterArgs,
   UnregisterCounterReply,
-} from "@spacedb/grains/relationships-dtos";
+} from "@benedb/grains/relationships-dtos";
 import {
   CounterOperationException,
   REGISTER_COUNTER_REPLY,
   UNREGISTER_COUNTER_REPLY,
-} from "@spacedb/grains/relationships-dtos";
-import { SequencerOverloadedException } from "@spacedb/grains/sequencer-overloaded-exception";
-import type { RelationshipFilter } from "@spacedb/protos/authzed/api/v1/permission_service";
+} from "@benedb/grains/relationships-dtos";
+import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
+import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { describe, expect, it } from "vitest";

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { decodeRevision } from "@spacedb/core/zed-tokens";
-import { WatchContent, type RevisionChange } from "@spacedb/datastore/watch";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { decodeRevision } from "@benedb/core/zed-tokens";
+import { WatchContent, type RevisionChange } from "@benedb/datastore/watch";
 import { GrainCallAbortedError } from "@thresh/core/errors";
 
 import type { CommitPreconditionWire, CommitRequest, DeleteByFilterWire } from "./commit-contract";

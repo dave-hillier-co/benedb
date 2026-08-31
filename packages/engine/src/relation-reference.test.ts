@@ -4,7 +4,7 @@ import { relationReferenceKey, type RelationReference } from "./relation-referen
 
 // Characterization of Spiceport `Engine/Reachability/RelationReference.cs` (no covering C# test).
 //
-// NAME COLLISION, deliberately preserved: `@spacedb/core/relation-reference` also exports a
+// NAME COLLISION, deliberately preserved: `@benedb/core/relation-reference` also exports a
 // `RelationReference`, but its members are `{ objectType, relation }` while this engine record's
 // are `{ namespace, relation }` (matching the C# `RelationReference(string Namespace, string
 // Relation)`). The two types are therefore structurally INCOMPATIBLE, which is what we want -

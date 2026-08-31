@@ -1,8 +1,8 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { isPermission } from "@spacedb/core/relation";
-import type { SetOperation, SetOperationChild } from "@spacedb/core/userset-rewrite";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { isPermission } from "@benedb/core/relation";
+import type { SetOperation, SetOperationChild } from "@benedb/core/userset-rewrite";
 
 /**
  * Pure schema analysis for the Leopard membership accelerator: which `(resourceType,

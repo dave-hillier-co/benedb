@@ -7,7 +7,7 @@ import { createFixedClock, SYSTEM_CLOCK, systemClockNow, type IClock } from "./c
 // THE BINDING REPRESENTATION DECISION FOR THE WHOLE ENGINE STAGE, pinned here:
 //
 //   * `IClock.UtcNow` is a `DateTimeOffset` in C#, and every engine file compares it against
-//     `Relationship.OptionalExpiration`. `@spacedb/core/relationship` already fixes that member
+//     `Relationship.OptionalExpiration`. `@benedb/core/relationship` already fixes that member
 //     as `bigint` epoch-NANOSECONDS, so the evaluation "now" is `bigint` epoch-nanoseconds too -
 //     not a `Date`, not epoch-millis. Anything else makes `expiration <= now` in check-engine /
 //     local-dispatcher / expand-engine / lookup-*-engine either a type error or, worse, a silent

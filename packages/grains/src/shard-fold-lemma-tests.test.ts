@@ -1,5 +1,5 @@
-import type { SeededRandom } from "@spacedb/engine/seeded-random";
-import { createSeededRandom } from "@spacedb/engine/seeded-random";
+import type { SeededRandom } from "@benedb/engine/seeded-random";
+import { createSeededRandom } from "@benedb/engine/seeded-random";
 import { describe, expect, it } from "vitest";
 
 import type { StoredRelationshipWire } from "./datastore-dtos";
@@ -33,7 +33,7 @@ import { shardFoldApplyEvent, shardFoldIsReadableAt, shardFoldVisibleAt } from "
  * Port decisions:
  *   * `[MemberData]` over 24 seeds becomes `it.for` with the seed in the title.
  *   * `new Random(seed)` becomes the port's own `createSeededRandom`. The SEQUENCE deliberately
- *     differs from .NET's (nothing compares a SpaceDB run against a Spiceport run draw by draw);
+ *     differs from .NET's (nothing compares a BeneDB run against a Spiceport run draw by draw);
  *     what carries across is the property that made the C# gate worth having - the same seed
  *     yields the same log on every run, forever.
  *   * Expirations are `bigint` NANOS, not `DateTimeOffset`. The C#'s `NanosSinceEpoch` helper (and

@@ -1,5 +1,5 @@
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
 import { GrainCallAbortedError } from "@thresh/core/errors";
 import { describe, expect, it } from "vitest";
 

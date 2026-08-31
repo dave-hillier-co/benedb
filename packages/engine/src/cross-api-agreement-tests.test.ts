@@ -1,9 +1,9 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import type { IDatastoreReader } from "@spacedb/datastore/i-datastore";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import type { IDatastoreReader } from "@benedb/datastore/i-datastore";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import { CheckEngine } from "./check-engine";

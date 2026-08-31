@@ -1,23 +1,23 @@
 import {
   MINIMIZE_LATENCY,
   type ConsistencyRequirement,
-} from "@spacedb/core/consistency-requirement";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { ResolvedRevision } from "@spacedb/core/resolved-revision";
-import { zedTokenFromRevision } from "@spacedb/core/zed-tokens";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import { resolveRevision } from "@spacedb/datastore/revision-resolver";
-import { CheckEngine, DEFAULT_MAX_DEPTH } from "@spacedb/engine/check-engine";
+} from "@benedb/core/consistency-requirement";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { ResolvedRevision } from "@benedb/core/resolved-revision";
+import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import { resolveRevision } from "@benedb/datastore/revision-resolver";
+import { CheckEngine, DEFAULT_MAX_DEPTH } from "@benedb/engine/check-engine";
 import {
   visitKeyOf,
   visitKeyToCanonicalString,
   type DispatchCheckResult,
   type IDispatcher,
   type ResolverMeta,
-} from "@spacedb/engine/i-dispatcher";
-import type { Membership } from "@spacedb/engine/membership";
+} from "@benedb/engine/i-dispatcher";
+import type { Membership } from "@benedb/engine/membership";
 
 import type { ISchemaProvider, SchemaSnapshot } from "./i-schema-provider";
 import type { ISchemaSource } from "./i-schema-source";

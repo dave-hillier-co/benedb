@@ -1,5 +1,5 @@
-import { collectBelow, type CounterVersion } from "@spacedb/datastore/datastore-state";
-import { MvccReadWriteTransaction } from "@spacedb/datastore/mvcc-read-write-transaction";
+import { collectBelow, type CounterVersion } from "@benedb/datastore/datastore-state";
+import { MvccReadWriteTransaction } from "@benedb/datastore/mvcc-read-write-transaction";
 
 import type { ProposedWrite, SchemaVersionWire } from "./datastore-dtos";
 import type { DatastoreGrainState } from "./datastore-grain-state";

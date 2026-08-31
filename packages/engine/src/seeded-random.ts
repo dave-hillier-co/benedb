@@ -1,4 +1,4 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 
 /**
  * A tiny, self-contained, seedable pseudo-random number generator: the port's stand-in for
@@ -12,7 +12,7 @@ import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
  *
  * THE SEQUENCE DELIBERATELY DIFFERS FROM .NET'S. `System.Random(seed)` is a specific subtractive
  * generator; reproducing it byte for byte is neither possible in a small amount of code nor
- * useful, because nothing compares a SpaceDB run against a Spiceport run number by number. What
+ * useful, because nothing compares a BeneDB run against a Spiceport run number by number. What
  * must hold is the property .NET's `Random(seed)` gave the C#: the same seed yields the same
  * sequence on every run, on every machine, forever. That is pinned by `seeded-random.test.ts`,
  * which hardcodes exact draws - change the algorithm and those tests fail, which is the point.

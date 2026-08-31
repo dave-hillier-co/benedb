@@ -1,4 +1,4 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import type { SiloBuilder } from "@thresh/hosting/silo-builder";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 
@@ -24,7 +24,7 @@ import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
  *     `OrleansGrainStorageSerializer` explicitly, because the two provider defaults lose boxed
  *     `JsonElement` caveat context (in-memory returns `ValueKind.Undefined`; AdoNet's JSON default
  *     emits `{}`). Thresh's storage providers have no serializer seam: there is one storage codec,
- *     and the caveat-context round trip is solved upstream by `@spacedb/grains/json-element-
+ *     and the caveat-context round trip is solved upstream by `@benedb/grains/json-element-
  *     surrogate` and the state converters. So this file reduces to CHOOSING a provider, and
  *     `NpgsqlInvariant` - an AdoNet concept, with no `DbProviderFactories` reflection to replace -
  *     disappears with it.

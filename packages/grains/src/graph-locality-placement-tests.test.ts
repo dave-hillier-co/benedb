@@ -1,5 +1,5 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
 import { describe, expect, it } from "vitest";
 
 import { grainKeyBuild } from "./grain-key";

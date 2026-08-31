@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
 import {
   createRelationship,
   relationshipEquals,
   withCaveat,
   type Relationship,
-} from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
+} from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
 
 import {
   CreateRelationshipExistsException,
   RevisionNotFoundException,
   SerializationException,
 } from "./datastore-exceptions";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 
 import type { DeleteRelationshipsResult } from "./i-datastore";
 import { ReferenceDatastore } from "./reference-datastore";

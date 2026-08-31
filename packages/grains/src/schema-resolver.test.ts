@@ -1,10 +1,10 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import type { IDatastoreReader } from "@spacedb/datastore/i-datastore";
-import { computeSchemaHash } from "@spacedb/engine/schema-hash";
-import { SchemaCompileException } from "@spacedb/schema/schema-compile-exception";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import type { IDatastoreReader } from "@benedb/datastore/i-datastore";
+import { computeSchemaHash } from "@benedb/engine/schema-hash";
+import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import { SchemaSnapshot } from "./i-schema-provider";

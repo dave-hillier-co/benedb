@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { Relationship } from "@spacedb/core/relationship";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { RelationshipReference } from "@spacedb/core/relationship-reference";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { Relationship } from "@benedb/core/relationship";
+import { createRelationship } from "@benedb/core/relationship";
+import type { RelationshipReference } from "@benedb/core/relationship-reference";
 
 import { CounterNotRegisteredException, RevisionNotFoundException } from "./datastore-exceptions";
 import type {

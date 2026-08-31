@@ -1,15 +1,15 @@
-import type { CaveatDefinition } from "@spacedb/core/caveat-definition";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import type { ISchemaHashSource } from "@spacedb/engine/i-schema-hash-source";
+import type { CaveatDefinition } from "@benedb/core/caveat-definition";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import type { ISchemaHashSource } from "@benedb/engine/i-schema-hash-source";
 import {
   buildMembershipCoverage,
   type MembershipCoverage,
-} from "@spacedb/engine/membership-coverage";
-import { buildReachabilityGraph, type ReachabilityGraph } from "@spacedb/engine/reachability-graph";
-import { computeSchemaHash } from "@spacedb/engine/schema-hash";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+} from "@benedb/engine/membership-coverage";
+import { buildReachabilityGraph, type ReachabilityGraph } from "@benedb/engine/reachability-graph";
+import { computeSchemaHash } from "@benedb/engine/schema-hash";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 
 /**
  * Ported from Spiceport `Grains/ISchemaProvider.cs`, which declares THREE types in one file:

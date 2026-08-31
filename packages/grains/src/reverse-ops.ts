@@ -1,19 +1,19 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { isPublicWildcard, type ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { SetOperationType } from "@spacedb/core/userset-rewrite";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import { CaveatEvaluator } from "@spacedb/engine/caveat-evaluator";
-import type { CaveatExpression } from "@spacedb/engine/caveat-expression";
-import { ExpandEngine } from "@spacedb/engine/expand-engine";
-import type { FoundSubject } from "@spacedb/engine/found-subject";
-import { LookupResourcesEngine } from "@spacedb/engine/lookup-resources-engine";
-import { LookupSubjectsEngine } from "@spacedb/engine/lookup-subjects-engine";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { isPublicWildcard, type ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { SetOperationType } from "@benedb/core/userset-rewrite";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import { CaveatEvaluator } from "@benedb/engine/caveat-evaluator";
+import type { CaveatExpression } from "@benedb/engine/caveat-expression";
+import { ExpandEngine } from "@benedb/engine/expand-engine";
+import type { FoundSubject } from "@benedb/engine/found-subject";
+import { LookupResourcesEngine } from "@benedb/engine/lookup-resources-engine";
+import { LookupSubjectsEngine } from "@benedb/engine/lookup-subjects-engine";
 import type {
   DirectSubject,
   ExpandMode,
   PermissionTreeNode,
-} from "@spacedb/engine/permission-tree-node";
+} from "@benedb/engine/permission-tree-node";
 import type { GrainRuntime } from "@thresh/core/grain-runtime";
 
 import { frontierSubjectFromWire } from "./frontier-wire";

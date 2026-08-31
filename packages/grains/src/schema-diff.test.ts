@@ -2,17 +2,17 @@ import {
   allowedRelationDirect,
   allowedRelationWildcard,
   type AllowedRelation,
-} from "@spacedb/core/allowed-relation";
-import type { CaveatDefinition, CaveatTypeReference } from "@spacedb/core/caveat-definition";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import type { Relation } from "@spacedb/core/relation";
+} from "@benedb/core/allowed-relation";
+import type { CaveatDefinition, CaveatTypeReference } from "@benedb/core/caveat-definition";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import type { Relation } from "@benedb/core/relation";
 import {
   setOperationUnion,
   type SetOperationChild,
   type UsersetRewrite,
-} from "@spacedb/core/userset-rewrite";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
+} from "@benedb/core/userset-rewrite";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 import { describe, expect, it } from "vitest";
 
 import { computeSchemaDiff, rewriteEquals, sameAllowedType, type SchemaDelta } from "./schema-diff";

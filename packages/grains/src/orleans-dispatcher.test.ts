@@ -1,14 +1,14 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createFixedSchemaHashSource } from "@spacedb/engine/i-schema-hash-source";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createFixedSchemaHashSource } from "@benedb/engine/i-schema-hash-source";
 import {
   visitKeyOf,
   visitKeyToCanonicalString,
   type DispatchCheckRequest,
   type ResolverMeta,
-} from "@spacedb/engine/i-dispatcher";
+} from "@benedb/engine/i-dispatcher";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { GrainKeyFor } from "@thresh/core/key-kinds";
 import { RequestContext } from "@thresh/core/request-context";

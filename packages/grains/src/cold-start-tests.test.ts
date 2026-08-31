@@ -4,11 +4,11 @@ import { dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { loadValidationFile } from "@spacedb/conformance/validation-file-loader";
-import { assertionExpectedMembership } from "@spacedb/conformance/validation-model";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
+import { loadValidationFile } from "@benedb/conformance/validation-file-loader";
+import { assertionExpectedMembership } from "@benedb/conformance/validation-model";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
 import { IManagementGrain } from "@thresh/core/management-grain";
 
 import { MeshTestCluster } from "./mesh-test-cluster";
@@ -50,7 +50,7 @@ import type { RelationshipUpdateWire } from "./relationships-dtos";
 const requireFromHere = createRequire(import.meta.url);
 
 const CORPUS_DIR = resolvePath(
-  dirname(requireFromHere.resolve("@spacedb/conformance/validation-file-loader")),
+  dirname(requireFromHere.resolve("@benedb/conformance/validation-file-loader")),
   "..",
   "corpus",
 );
@@ -180,7 +180,7 @@ describe("ColdStartTests", () => {
       const survivors = retired.filter((name) => declared.has(name));
       expect(
         survivors,
-        `retired projection type(s) resurfaced in @spacedb/grains: ${survivors.join(", ")}`,
+        `retired projection type(s) resurfaced in @benedb/grains: ${survivors.join(", ")}`,
       ).toEqual([]);
     } finally {
       await cluster.dispose();

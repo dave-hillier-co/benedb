@@ -1,11 +1,11 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
-import type { RelationshipUpdateWire } from "@spacedb/grains/relationships-dtos";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
+import type { RelationshipUpdateWire } from "@benedb/grains/relationships-dtos";
 import {
   CheckPermissionRequest,
   CheckPermissionResponse_Permissionship,
   type Consistency,
-} from "@spacedb/protos/permissions";
+} from "@benedb/protos/permissions";
 import { describe, expect, it } from "vitest";
 
 import { PermissionsGrpcService } from "./permissions-grpc-service";
@@ -25,7 +25,7 @@ import { PermissionsGrpcService } from "./permissions-grpc-service";
  *
  * PORT NOTES.
  *  - LEDGER DEVIATION: lands in `packages/api/src` rather than `packages/grains/src`, because
- *    `@spacedb/grains` does not depend on `@spacedb/api`. See `data-plane-grpc-service-tests.test.ts`.
+ *    `@benedb/grains` does not depend on `@benedb/api`. See `data-plane-grpc-service-tests.test.ts`.
  *  - The `FakeContext : ServerCallContext` class DISAPPEARS: the ported methods take a trailing
  *    optional `AbortSignal`, so every call passes nothing.
  *  - The case mixes the two vocabularies deliberately: the seed goes through the WIRE DTOs

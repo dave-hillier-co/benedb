@@ -1,6 +1,6 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { FormatError } from "@spacedb/core/format-error";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { FormatError } from "@benedb/core/format-error";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
 import { describe, expect, it } from "vitest";
 
 import { subjectFrontierKeyBuild, subjectFrontierKeyParse } from "./subject-frontier-key";

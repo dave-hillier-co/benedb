@@ -3,7 +3,7 @@ export const meta = {
   description:
     "Port one Spiceport layer to TypeScript: dependency-order, tests first, gate, review",
   whenToUse:
-    "Run once per stage of the SpaceDB port (S1 core/schema, S2 datastore, S3 engine, S4 grains, S5 api). Pass args: { stage, targets: [package names], sources: [csharp paths], tests: [csharp test paths], batchCount }.",
+    "Run once per stage of the BeneDB port (S1 core/schema, S2 datastore, S3 engine, S4 grains, S5 api). Pass args: { stage, targets: [package names], sources: [csharp paths], tests: [csharp test paths], batchCount }.",
   phases: [
     { title: "Order", detail: "dependency-sort the stage's files into cohesive batches" },
     {
@@ -17,7 +17,7 @@ export const meta = {
 };
 
 const SPICEPORT = "/Users/davehillier/repos/spiceport";
-const SPACEDB = "/Users/davehillier/repos/spacedb";
+const BENEDB = "/Users/davehillier/repos/benedb";
 const GUIDE = "/Users/davehillier/repos/thresh/docs/orleans-to-thresh-port.md";
 
 const stage = args?.stage ?? "S1";
@@ -46,13 +46,13 @@ if (sources.length === 0 && !(portTests && tests.length > 0)) {
 }
 
 const CONTEXT = `
-You are porting Spiceport (.NET 10 + Orleans, at ${SPICEPORT}) to SpaceDB
-(TypeScript + Thresh, at ${SPACEDB}). Stage ${stage}, target packages ${targets.map((t) => `@spacedb/${t}`).join(", ")}
-(sources under ${SPACEDB}/packages/<name>/src). ${SPACEDB}/docs/port-ledger.md gives every
+You are porting Spiceport (.NET 10 + Orleans, at ${SPICEPORT}) to BeneDB
+(TypeScript + Thresh, at ${BENEDB}). Stage ${stage}, target packages ${targets.map((t) => `@benedb/${t}`).join(", ")}
+(sources under ${BENEDB}/packages/<name>/src). ${BENEDB}/docs/port-ledger.md gives every
 file's target path; use it rather than inventing one.
 
 Read ${GUIDE} before writing any code. It is the standing instruction for this work and its
-substitutions are not optional. Also honour the house rules in ${SPACEDB}/CLAUDE.md: no index.ts
+substitutions are not optional. Also honour the house rules in ${BENEDB}/CLAUDE.md: no index.ts
 barrels, no emojis, kebab-case filenames, one primary export per file, classic sociable TDD.
 
 The Go original is at /Users/davehillier/repos/spicedb and Orleans itself at
@@ -81,7 +81,7 @@ const FILE_SCHEMA = {
   type: "object",
   properties: {
     source: { type: "string", description: "C# path relative to the spiceport root" },
-    targetPath: { type: "string", description: "TS path relative to the spacedb root" },
+    targetPath: { type: "string", description: "TS path relative to the benedb root" },
     testSource: {
       type: "string",
       description: "covering C# test path, or empty if the C# has no direct test for it",
@@ -204,7 +204,7 @@ on earlier batches and on its own members, never on a later one. Group by module
 single test file would naturally cover, not by size. Small related value types belong in one
 batch; a large file with real logic can be a batch of one.
 
-For each file give the TypeScript target path from ${SPACEDB}/docs/port-ledger.md, and the
+For each file give the TypeScript target path from ${BENEDB}/docs/port-ledger.md, and the
 covering C# test path IF one genuinely exercises it. Do not guess: several Spiceport test
 projects are placeholders, and a file covered only indirectly from a higher layer has NO
 covering test — say so with an empty string rather than naming a test that does not test it.
@@ -323,7 +323,7 @@ The tests for this batch were just written and are expected to be failing.`,
   await agent(
     `${CONTEXT}
 
-Run, from ${SPACEDB}:
+Run, from ${BENEDB}:
   pnpm typecheck
   pnpm test
 

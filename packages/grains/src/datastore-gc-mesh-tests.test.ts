@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import type { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
-import type { IDatastore, IDatastoreReader } from "@spacedb/datastore/i-datastore";
-import { WatchContent, type RevisionChange } from "@spacedb/datastore/watch";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { createRelationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import type { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
+import type { IDatastore, IDatastoreReader } from "@benedb/datastore/i-datastore";
+import { WatchContent, type RevisionChange } from "@benedb/datastore/watch";
 import type { ClientNode } from "@thresh/client/client-node";
 import type { GrainId } from "@thresh/core/grain-id";
 import { grainReferenceIdentity } from "@thresh/core/grain-reference";

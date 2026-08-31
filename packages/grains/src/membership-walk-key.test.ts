@@ -1,5 +1,5 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { FormatError } from "@spacedb/core/format-error";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { FormatError } from "@benedb/core/format-error";
 import { describe, expect, it } from "vitest";
 
 import { membershipWalkKeyBuild, membershipWalkKeyParse } from "./membership-walk-key";

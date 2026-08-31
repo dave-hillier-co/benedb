@@ -1,14 +1,14 @@
-import { PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { zedTokenFromRevision } from "@spacedb/core/zed-tokens";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import { resolveRevision } from "@spacedb/datastore/revision-resolver";
-import type { CaveatEvaluator } from "@spacedb/engine/caveat-evaluator";
-import type { CaveatExpression } from "@spacedb/engine/caveat-expression";
-import { DEFAULT_MAX_DEPTH } from "@spacedb/engine/check-engine";
-import { systemClockNow } from "@spacedb/engine/clock";
-import { type ResourceNode, toCoveredCandidates } from "@spacedb/engine/membership-walk";
+import { PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import { resolveRevision } from "@benedb/datastore/revision-resolver";
+import type { CaveatEvaluator } from "@benedb/engine/caveat-evaluator";
+import type { CaveatExpression } from "@benedb/engine/caveat-expression";
+import { DEFAULT_MAX_DEPTH } from "@benedb/engine/check-engine";
+import { systemClockNow } from "@benedb/engine/clock";
+import { type ResourceNode, toCoveredCandidates } from "@benedb/engine/membership-walk";
 import type { GrainRuntime } from "@thresh/core/grain-runtime";
 
 import {

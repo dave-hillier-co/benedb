@@ -21,7 +21,7 @@ export class InvalidConsistencyTokenException extends Error {
 }
 
 registerSurrogate<InvalidConsistencyTokenException>({
-  tag: "spacedb.invalidConsistencyTokenException",
+  tag: "benedb.invalidConsistencyTokenException",
   test: (value) => value instanceof InvalidConsistencyTokenException,
   encode: (error) => ({ message: error.message }),
   decode: (fields) => new InvalidConsistencyTokenException(fields.message as string),

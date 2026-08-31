@@ -1,5 +1,5 @@
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
 
 import type { RegisteredCounter } from "./counters";
 import { relationshipKeyOf, relationshipKeyString } from "./relationship-key";
@@ -11,7 +11,7 @@ import type { RelationshipsFilter } from "./relationships-filter";
 //
 // The C# types are `internal`, visible to the grain layer and the gate tests through
 // `[InternalsVisibleTo]`. TypeScript has no friend-assembly grant, so they are exported normally;
-// nothing outside `@spacedb/datastore` and the grain layer should import them.
+// nothing outside `@benedb/datastore` and the grain layer should import them.
 //
 // Port decisions settled once, here:
 //

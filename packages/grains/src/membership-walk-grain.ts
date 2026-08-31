@@ -1,6 +1,6 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { directParents, subjectKeyToString } from "@spacedb/engine/membership-walk";
-import type { SubjectKey } from "@spacedb/engine/membership-walk";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { directParents, subjectKeyToString } from "@benedb/engine/membership-walk";
+import type { SubjectKey } from "@benedb/engine/membership-walk";
 import { grain, reentrant } from "@thresh/core/decorators";
 import { Grain } from "@thresh/core/grain";
 

@@ -1,12 +1,12 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipReference } from "@spacedb/core/relationship-reference";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { formatRelationship, parseRelationship } from "@spacedb/core/tuple-strings";
-import { InvalidRevisionException } from "@spacedb/datastore/datastore-exceptions";
-import type { RelationshipsFilter, SubjectsFilter } from "@spacedb/datastore/relationships-filter";
-import type { ReverseQueryOptions } from "@spacedb/datastore/reverse-query-options";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipReference } from "@benedb/core/relationship-reference";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { formatRelationship, parseRelationship } from "@benedb/core/tuple-strings";
+import { InvalidRevisionException } from "@benedb/datastore/datastore-exceptions";
+import type { RelationshipsFilter, SubjectsFilter } from "@benedb/datastore/relationships-filter";
+import type { ReverseQueryOptions } from "@benedb/datastore/reverse-query-options";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import { afterEach, describe, expect, it, vi } from "vitest";
 

@@ -5,14 +5,14 @@ import {
   atLeastAsFresh,
   FULLY_CONSISTENT,
   MINIMIZE_LATENCY,
-} from "@spacedb/core/consistency-requirement";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidConsistencyTokenException } from "@spacedb/core/invalid-consistency-token-exception";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import type { ZedToken } from "@spacedb/core/zed-token";
-import { decodeRevision, zedTokenFromRevision } from "@spacedb/core/zed-tokens";
+} from "@benedb/core/consistency-requirement";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidConsistencyTokenException } from "@benedb/core/invalid-consistency-token-exception";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import type { ZedToken } from "@benedb/core/zed-token";
+import { decodeRevision, zedTokenFromRevision } from "@benedb/core/zed-tokens";
 
 import { ReferenceDatastore } from "./reference-datastore";
 import { resolveRevision } from "./revision-resolver";

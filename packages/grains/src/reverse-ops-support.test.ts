@@ -1,19 +1,19 @@
-import { PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { IRevisionParser } from "@spacedb/core/i-revision-parser";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { zedTokenFromRevision } from "@spacedb/core/zed-tokens";
+import { PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { IRevisionParser } from "@benedb/core/i-revision-parser";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
 import type {
   IDatastore,
   IDatastoreReader,
   RevisionWithSchemaHash,
-} from "@spacedb/datastore/i-datastore";
-import { CaveatEvaluator } from "@spacedb/engine/caveat-evaluator";
-import { caveatExpressionFromCaveat } from "@spacedb/engine/caveat-expression";
-import { DEFAULT_MAX_DEPTH } from "@spacedb/engine/check-engine";
-import { computeSchemaHash } from "@spacedb/engine/schema-hash";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+} from "@benedb/datastore/i-datastore";
+import { CaveatEvaluator } from "@benedb/engine/caveat-evaluator";
+import { caveatExpressionFromCaveat } from "@benedb/engine/caveat-expression";
+import { DEFAULT_MAX_DEPTH } from "@benedb/engine/check-engine";
+import { computeSchemaHash } from "@benedb/engine/schema-hash";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

@@ -2,7 +2,7 @@ import { main } from "./program";
 
 /**
  * The API host's entry point: gRPC on `GRPC_LISTEN_ADDRESS` and the root HTTP endpoint on
- * `HTTP_LISTEN_PORT`. Run it with `pnpm --filter @spacedb/api start`.
+ * `HTTP_LISTEN_PORT`. Run it with `pnpm --filter @benedb/api start`.
  *
  * THIS FILE IS THE ENTRY POINT, and `program.ts` has none of its own. That split is deliberate and
  * has been wrong twice in the other direction.

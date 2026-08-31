@@ -5,7 +5,7 @@
  *
  * THE BINDING REPRESENTATION DECISION FOR THE ENGINE STAGE. The C# `IClock.UtcNow` is a
  * `DateTimeOffset`, and every engine file compares it against `Relationship.OptionalExpiration`.
- * `@spacedb/core/relationship` already fixes that member as `bigint` epoch-NANOSECONDS, so the
+ * `@benedb/core/relationship` already fixes that member as `bigint` epoch-NANOSECONDS, so the
  * evaluation "now" is `bigint` epoch-nanoseconds too - not a `Date`, not epoch-millis. Anything
  * else makes `expiration <= now` in check-engine / local-dispatcher / expand-engine /
  * lookup-*-engine either a type error or a silent comparison between incompatible

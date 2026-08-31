@@ -34,7 +34,7 @@ export class WriteConflictException extends Error {
 }
 
 registerSurrogate<WriteConflictException>({
-  tag: "spacedb.writeConflictException",
+  tag: "benedb.writeConflictException",
   test: (value) => value instanceof WriteConflictException,
   encode: (error) => ({ kind: error.kind, message: error.message }),
   decode: (fields) =>

@@ -1,6 +1,6 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { Relationship } from "@spacedb/core/relationship";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { Relationship } from "@benedb/core/relationship";
 
 /**
  * Whether to match relationships based on the presence of a caveat.

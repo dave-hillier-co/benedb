@@ -1,4 +1,4 @@
-import { FormatError } from "@spacedb/core/format-error";
+import { FormatError } from "@benedb/core/format-error";
 
 import { joinGrainKey, splitGrainKey } from "./grain-key-codec";
 import type { GraphShardDirection, GraphShardKeyWire } from "./graph-shard-key";

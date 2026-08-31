@@ -1,4 +1,4 @@
-import type { SetOperationType } from "@spacedb/core/userset-rewrite";
+import type { SetOperationType } from "@benedb/core/userset-rewrite";
 import { describe, expect, it } from "vitest";
 
 import type {

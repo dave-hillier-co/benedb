@@ -1,6 +1,6 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
 import {
   caveatFilterOptionFromWire,
   caveatFilterOptionToWire,
@@ -10,7 +10,7 @@ import {
   type ExpirationFilterOption,
   type RelationshipsFilter,
   type SubjectsSelector,
-} from "@spacedb/datastore/relationships-filter";
+} from "@benedb/datastore/relationships-filter";
 
 import type {
   CaveatNameFilterWire,

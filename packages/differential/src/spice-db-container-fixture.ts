@@ -11,8 +11,8 @@ import {
  * Ported from Spiceport `tests/Spiceport.Differential.Tests/SpiceDbContainerFixture.cs`.
  *
  * A disposable, real SpiceDB container (Testcontainers), for the differential conformance gate: the
- * only test suite in this repo that checks SpaceDB's engine against a genuine, independent SpiceDB
- * implementation rather than another view of SpaceDB's own engine.
+ * only test suite in this repo that checks BeneDB's engine against a genuine, independent SpiceDB
+ * implementation rather than another view of BeneDB's own engine.
  *
  * LEDGER DEVIATION: the ledger row targets `spice-db-container-fixture.test.ts`. This file is the
  * HARNESS and declares no cases, and a `*.test.ts` with no suite fails a vitest run outright, so it
@@ -27,7 +27,7 @@ import {
  *     that pin buys, and it is carried across unchanged.
  *  2. THE COMMAND ARGS ARE VERBATIM. `--enable-experimental-relationship-expiration` is
  *     load-bearing: without it every `use expiration` corpus file fails `WriteSchema` with
- *     "expiration trait is not allowed". SpaceDB supports expiration unconditionally (no
+ *     "expiration trait is not allowed". BeneDB supports expiration unconditionally (no
  *     server-side feature flag), so enabling it here is what makes those files an apples-to-apples
  *     comparison.
  *  3. THE WAIT STRATEGY IS LOAD-BEARING. The authzed/spicedb image is distroless (no shell), so any

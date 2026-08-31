@@ -1,5 +1,5 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { GrainKeyFor } from "@thresh/core/key-kinds";
 import { SiloAddress } from "@thresh/core/silo-address";

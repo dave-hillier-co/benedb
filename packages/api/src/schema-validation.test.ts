@@ -1,7 +1,7 @@
 import { status } from "@grpc/grpc-js";
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { SchemaSnapshot } from "@spacedb/grains/i-schema-provider";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { SchemaSnapshot } from "@benedb/grains/i-schema-provider";
 import { describe, expect, it } from "vitest";
 
 import { RpcError } from "./rpc-error";

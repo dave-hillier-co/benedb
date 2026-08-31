@@ -1,5 +1,5 @@
-import { DeleteRelationshipsRequest } from "@spacedb/protos/authzed/api/v1/permission_service";
-import { ReadSchemaRequest } from "@spacedb/protos/authzed/api/v1/schema_service";
+import { DeleteRelationshipsRequest } from "@benedb/protos/authzed/api/v1/permission_service";
+import { ReadSchemaRequest } from "@benedb/protos/authzed/api/v1/schema_service";
 
 import type { SpiceDbGrpcClient } from "./spice-db-grpc-client";
 

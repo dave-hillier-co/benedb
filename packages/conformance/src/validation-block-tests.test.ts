@@ -3,14 +3,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
-import type { FoundSubject } from "@spacedb/engine/found-subject";
-import { LookupSubjectsEngine } from "@spacedb/engine/lookup-subjects-engine";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import type { FoundSubject } from "@benedb/engine/found-subject";
+import { LookupSubjectsEngine } from "@benedb/engine/lookup-subjects-engine";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 
 import { loadResolvedValidationFile } from "./validation-file-loader";
 import {

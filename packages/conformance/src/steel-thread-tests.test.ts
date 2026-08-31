@@ -3,27 +3,27 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { formatRelationship, parseRelationship } from "@spacedb/core/tuple-strings";
-import type { IDatastoreReader } from "@spacedb/datastore/i-datastore";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
-import type { RelationshipsFilter } from "@spacedb/datastore/relationships-filter";
-import { SUBJECT_RELATION_FILTER_ANY } from "@spacedb/datastore/relationships-filter";
-import { CheckEngine } from "@spacedb/engine/check-engine";
-import type { FoundResource } from "@spacedb/engine/found-resource";
-import type { FoundSubject } from "@spacedb/engine/found-subject";
-import type { LookupResourcesCursor } from "@spacedb/engine/lookup-resources-cursor";
-import { LookupResourcesEngine } from "@spacedb/engine/lookup-resources-engine";
-import { LookupSubjectsEngine } from "@spacedb/engine/lookup-subjects-engine";
-import type { Membership } from "@spacedb/engine/membership";
-import { SchemaWriteValidationException } from "@spacedb/grains/schema-write-validation-exception";
-import { validate } from "@spacedb/grains/schema-change-validator";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { formatRelationship, parseRelationship } from "@benedb/core/tuple-strings";
+import type { IDatastoreReader } from "@benedb/datastore/i-datastore";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
+import { SUBJECT_RELATION_FILTER_ANY } from "@benedb/datastore/relationships-filter";
+import { CheckEngine } from "@benedb/engine/check-engine";
+import type { FoundResource } from "@benedb/engine/found-resource";
+import type { FoundSubject } from "@benedb/engine/found-subject";
+import type { LookupResourcesCursor } from "@benedb/engine/lookup-resources-cursor";
+import { LookupResourcesEngine } from "@benedb/engine/lookup-resources-engine";
+import { LookupSubjectsEngine } from "@benedb/engine/lookup-subjects-engine";
+import type { Membership } from "@benedb/engine/membership";
+import { SchemaWriteValidationException } from "@benedb/grains/schema-write-validation-exception";
+import { validate } from "@benedb/grains/schema-change-validator";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 
 import { loadValidationFile } from "./validation-file-loader";
 
@@ -31,7 +31,7 @@ import { loadValidationFile } from "./validation-file-loader";
  * Differential suite over SpiceDB's steelthreadtesting corpus, ported from Spiceport
  * `tests/Spiceport.Conformance.Tests/SteelThread/SteelThreadTests.cs`. Each case names a datafile
  * and a list of operations; the golden outputs (steelresults/*.yaml) are reproduced through
- * SpaceDB's engines and datastore. Cursored lookup-resources is compared UNION-ONLY (dispatch-order
+ * BeneDB's engines and datastore. Cursored lookup-resources is compared UNION-ONLY (dispatch-order
  * page partitions are not byte-stable); everything else is compared exactly.
  *
  * Port decisions:
@@ -693,11 +693,11 @@ async function runBulkImportExport(datafile: string, o: BulkImportExportOp): Pro
   // Export order is datastore-internal; compare order-insensitively.
   exported.sort();
 
-  // Known internal divergence: SpaceDB's `formatRelationship` renders expiration with a fixed
+  // Known internal divergence: BeneDB's `formatRelationship` renders expiration with a fixed
   // 7-digit fractional-second suffix (e.g. ...:15.0000000Z) whereas SpiceDB emits minimal RFC3339
   // (...:15Z). Confirmed still true for the port: `tuple-strings.ts` documents the format as
   // `yyyy-MM-ddTHH:mm:ss.fffffff'Z'` and always emits seven digits, so the normalization is still
-  // load-bearing here. It is a SpaceDB-internal string format (the gRPC wire carries a proto
+  // load-bearing here. It is a BeneDB-internal string format (the gRPC wire carries a proto
   // Timestamp, so it does not affect zed compatibility). Normalize both sides' trailing-zero
   // fraction so the comparison stays meaningful over the exported relationship SET, caveats and
   // filters.

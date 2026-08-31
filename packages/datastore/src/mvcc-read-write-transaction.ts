@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { validateRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { formatRelationship } from "@spacedb/core/tuple-strings";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { IRevision } from "@benedb/core/i-revision";
+import { validateRelationship, type Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { formatRelationship } from "@benedb/core/tuple-strings";
 
 import type { RegisteredCounter } from "./counters";
 import {

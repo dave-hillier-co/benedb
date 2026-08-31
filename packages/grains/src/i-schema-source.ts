@@ -1,7 +1,7 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { InvalidRevisionException } from "@spacedb/datastore/datastore-exceptions";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { InvalidRevisionException } from "@benedb/datastore/datastore-exceptions";
 import type { GrainRuntime } from "@thresh/core/grain-runtime";
 
 import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "./i-datastore-grain";

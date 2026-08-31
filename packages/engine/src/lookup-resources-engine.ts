@@ -1,17 +1,14 @@
-import type { CaveatDefinition } from "@spacedb/core/caveat-definition";
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipReference } from "@spacedb/core/relationship-reference";
-import type { IGraphReader } from "@spacedb/datastore/i-graph-reader";
-import type {
-  SubjectRelationFilter,
-  SubjectsFilter,
-} from "@spacedb/datastore/relationships-filter";
-import { SUBJECT_RELATION_FILTER_ANY } from "@spacedb/datastore/relationships-filter";
-import type { ReverseQueryOptions } from "@spacedb/datastore/reverse-query-options";
+import type { CaveatDefinition } from "@benedb/core/caveat-definition";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipReference } from "@benedb/core/relationship-reference";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
+import type { SubjectRelationFilter, SubjectsFilter } from "@benedb/datastore/relationships-filter";
+import { SUBJECT_RELATION_FILTER_ANY } from "@benedb/datastore/relationships-filter";
+import type { ReverseQueryOptions } from "@benedb/datastore/reverse-query-options";
 
 import { CaveatEvaluator } from "./caveat-evaluator";
 import { CheckEngine } from "./check-engine";

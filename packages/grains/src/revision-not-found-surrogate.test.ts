@@ -1,6 +1,6 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
+import type { IRevision } from "@benedb/core/i-revision";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
 import { deserializeValue, serializeValue } from "@thresh/core/value-codec";
 import { describe, expect, it } from "vitest";
 
@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 // exactly as `datastore-exceptions.ts` registers the other four.
 import "./revision-not-found-surrogate";
 
-// No covering C# test. `RevisionNotFoundException` lives in @spacedb/datastore and must NOT take a
+// No covering C# test. `RevisionNotFoundException` lives in @benedb/datastore and must NOT take a
 // Thresh dependency, yet it crosses the grain boundary whenever `IDatastoreLog.readFrom` rejects a
 // cursor older than the GC window - so the surrogate lives here, in the grains layer, instead.
 //
@@ -70,7 +70,7 @@ describe("revision not found surrogate", () => {
     expect((revived.revision as TimestampRevision).timestampNanosSinceEpoch).toBe(0n);
   });
 
-  it("does not shadow the sibling datastore exceptions registered in @spacedb/datastore", () => {
+  it("does not shadow the sibling datastore exceptions registered in @benedb/datastore", () => {
     // Registration order matters to the codec (later registrations are tested first), and
     // RevisionNotFoundException shares a base class with them. A `test` predicate written against
     // the base would swallow every datastore exception into this tag.

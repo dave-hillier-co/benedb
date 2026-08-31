@@ -44,25 +44,25 @@ importers:
       '@grpc/grpc-js':
         specifier: ^1.14.1
         version: 1.14.4
-      '@spacedb/core':
+      '@benedb/core':
         specifier: workspace:*
         version: link:../core
-      '@spacedb/datastore':
+      '@benedb/datastore':
         specifier: workspace:*
         version: link:../datastore
-      '@spacedb/engine':
+      '@benedb/engine':
         specifier: workspace:*
         version: link:../engine
-      '@spacedb/grains':
+      '@benedb/grains':
         specifier: workspace:*
         version: link:../grains
-      '@spacedb/protos':
+      '@benedb/protos':
         specifier: workspace:*
         version: link:../protos
-      '@spacedb/schema':
+      '@benedb/schema':
         specifier: workspace:*
         version: link:../schema
-      '@spacedb/silo':
+      '@benedb/silo':
         specifier: workspace:*
         version: link:../silo
       '@thresh/client':
@@ -86,19 +86,19 @@ importers:
 
   packages/conformance:
     dependencies:
-      '@spacedb/core':
+      '@benedb/core':
         specifier: workspace:*
         version: link:../core
-      '@spacedb/datastore':
+      '@benedb/datastore':
         specifier: workspace:*
         version: link:../datastore
-      '@spacedb/engine':
+      '@benedb/engine':
         specifier: workspace:*
         version: link:../engine
-      '@spacedb/grains':
+      '@benedb/grains':
         specifier: workspace:*
         version: link:../grains
-      '@spacedb/schema':
+      '@benedb/schema':
         specifier: workspace:*
         version: link:../schema
       '@thresh/testing':
@@ -116,7 +116,7 @@ importers:
 
   packages/datastore:
     dependencies:
-      '@spacedb/core':
+      '@benedb/core':
         specifier: workspace:*
         version: link:../core
       '@thresh/core':
@@ -128,22 +128,22 @@ importers:
       '@grpc/grpc-js':
         specifier: ^1.14.1
         version: 1.14.4
-      '@spacedb/api':
+      '@benedb/api':
         specifier: workspace:*
         version: link:../api
-      '@spacedb/conformance':
+      '@benedb/conformance':
         specifier: workspace:*
         version: link:../conformance
-      '@spacedb/core':
+      '@benedb/core':
         specifier: workspace:*
         version: link:../core
-      '@spacedb/engine':
+      '@benedb/engine':
         specifier: workspace:*
         version: link:../engine
-      '@spacedb/grains':
+      '@benedb/grains':
         specifier: workspace:*
         version: link:../grains
-      '@spacedb/protos':
+      '@benedb/protos':
         specifier: workspace:*
         version: link:../protos
       testcontainers:
@@ -158,31 +158,31 @@ importers:
       '@bufbuild/protobuf':
         specifier: ^2.10.1
         version: 2.14.0
-      '@spacedb/core':
+      '@benedb/core':
         specifier: workspace:*
         version: link:../core
-      '@spacedb/datastore':
+      '@benedb/datastore':
         specifier: workspace:*
         version: link:../datastore
-      '@spacedb/schema':
+      '@benedb/schema':
         specifier: workspace:*
         version: link:../schema
 
   packages/grains:
     dependencies:
-      '@spacedb/conformance':
+      '@benedb/conformance':
         specifier: workspace:*
         version: link:../conformance
-      '@spacedb/core':
+      '@benedb/core':
         specifier: workspace:*
         version: link:../core
-      '@spacedb/datastore':
+      '@benedb/datastore':
         specifier: workspace:*
         version: link:../datastore
-      '@spacedb/engine':
+      '@benedb/engine':
         specifier: workspace:*
         version: link:../engine
-      '@spacedb/schema':
+      '@benedb/schema':
         specifier: workspace:*
         version: link:../schema
       '@thresh/client':
@@ -238,22 +238,22 @@ importers:
 
   packages/schema:
     dependencies:
-      '@spacedb/core':
+      '@benedb/core':
         specifier: workspace:*
         version: link:../core
 
   packages/silo:
     dependencies:
-      '@spacedb/core':
+      '@benedb/core':
         specifier: workspace:*
         version: link:../core
-      '@spacedb/datastore':
+      '@benedb/datastore':
         specifier: workspace:*
         version: link:../datastore
-      '@spacedb/grains':
+      '@benedb/grains':
         specifier: workspace:*
         version: link:../grains
-      '@spacedb/schema':
+      '@benedb/schema':
         specifier: workspace:*
         version: link:../schema
       '@thresh/core':

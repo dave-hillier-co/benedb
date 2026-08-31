@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { createRelationship } from "@spacedb/core/relationship";
-import { WatchContent, type RevisionChange } from "@spacedb/datastore/watch";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { createRelationship } from "@benedb/core/relationship";
+import { WatchContent, type RevisionChange } from "@benedb/datastore/watch";
 import { GrainCallAbortedError } from "@thresh/core/errors";
 
 import { MeshTestCluster } from "./mesh-test-cluster";

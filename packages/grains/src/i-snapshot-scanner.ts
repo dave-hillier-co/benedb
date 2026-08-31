@@ -1,11 +1,11 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { Relationship } from "@spacedb/core/relationship";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import type { RegisteredCounter } from "@spacedb/datastore/counters";
-import { InvalidRevisionException } from "@spacedb/datastore/datastore-exceptions";
-import { MvccSnapshotReader } from "@spacedb/datastore/mvcc-snapshot-reader";
-import type { RelationshipsFilter } from "@spacedb/datastore/relationships-filter";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { Relationship } from "@benedb/core/relationship";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import type { RegisteredCounter } from "@benedb/datastore/counters";
+import { InvalidRevisionException } from "@benedb/datastore/datastore-exceptions";
+import { MvccSnapshotReader } from "@benedb/datastore/mvcc-snapshot-reader";
+import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 import type { GrainRuntime } from "@thresh/core/grain-runtime";
 
 import { toMemoryState } from "./datastore-state-converters";

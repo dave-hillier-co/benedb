@@ -1,5 +1,5 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { MaxDepthExceededException } from "@spacedb/core/max-depth-exceeded-exception";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
 import type {
   GrainCallContext,
   IncomingGrainCallFilter,

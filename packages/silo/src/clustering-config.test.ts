@@ -32,7 +32,7 @@ function recordingBuilder(local: SiloAddress): {
   builder: SiloBuilder;
   calls: { name: string; args: readonly unknown[] }[];
 } {
-  const target = createSilo({ clusterId: "spacedb-clustering-test", local });
+  const target = createSilo({ clusterId: "benedb-clustering-test", local });
   const calls: { name: string; args: readonly unknown[] }[] = [];
   const proxy: SiloBuilder = new Proxy(target, {
     get(receiver, property) {
@@ -54,7 +54,7 @@ function addressFor(endpoint: string): SiloAddress {
 }
 
 /** Everything a clustered configuration needs beyond the silo list. */
-const DURABLE = { "ConnectionStrings:OrleansStorage": "postgres://localhost/spacedb" };
+const DURABLE = { "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb" };
 
 describe("resolveClustering", () => {
   it("resolves to the single-process default when Clustering:Silos is absent", () => {
@@ -155,7 +155,7 @@ describe("resolveClustering", () => {
   it("reads the `__` environment spelling of every key, case-insensitively", () => {
     const options = resolveClustering(
       createConfiguration({
-        ConnectionStrings__OrleansStorage: "postgres://localhost/spacedb",
+        ConnectionStrings__OrleansStorage: "postgres://localhost/benedb",
         clustering__silos: "127.0.0.1:11111,127.0.0.1:11112",
         CLUSTERING__SILOPORT: "11112",
         Clustering__AdvertisedHost: "127.0.0.1",

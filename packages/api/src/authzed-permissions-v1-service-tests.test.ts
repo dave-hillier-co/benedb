@@ -1,26 +1,26 @@
 import { status } from "@grpc/grpc-js";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
 import {
   DispatchFailedException,
   type DispatchErrorCode,
-} from "@spacedb/grains/dispatch-failed-exception";
+} from "@benedb/grains/dispatch-failed-exception";
 import type {
   BatchCheckItem,
   BatchCheckResult,
   IPermissionChecker,
   PermissionCheckResult,
-} from "@spacedb/grains/i-permission-checker";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
+} from "@benedb/grains/i-permission-checker";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import {
   AlgebraicSubjectSet_Operation,
   RelationshipUpdate_Operation,
   type PermissionRelationshipTree,
   type SubjectReference,
-} from "@spacedb/protos/authzed/api/v1/core";
+} from "@benedb/protos/authzed/api/v1/core";
 import {
   CheckBulkPermissionsRequest,
   CheckPermissionRequest,
@@ -40,7 +40,7 @@ import {
   type LookupResourcesResponse,
   type LookupSubjectsResponse,
   type ReadRelationshipsResponse,
-} from "@spacedb/protos/authzed/api/v1/permission_service";
+} from "@benedb/protos/authzed/api/v1/permission_service";
 import { describe, expect, it } from "vitest";
 
 import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
@@ -59,7 +59,7 @@ import { RpcError } from "./rpc-error";
  *
  * PORT NOTES.
  *  - LEDGER DEVIATION: lands in `packages/api/src` rather than `packages/grains/src`, because
- *    `@spacedb/grains` does not depend on `@spacedb/api`. Same deviation as the sibling
+ *    `@benedb/grains` does not depend on `@benedb/api`. Same deviation as the sibling
  *    `*-tests.test.ts` files in this directory.
  *  - DISTINCT FROM `authzed-permissions-v1-service.test.ts`, the S5 characterization file over
  *    fakes. Both are kept: that one pins the translation/guard-order/limit arithmetic over fake

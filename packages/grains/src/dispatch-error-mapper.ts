@@ -1,8 +1,8 @@
-import { CaveatEvaluationException } from "@spacedb/core/caveat-evaluation-exception";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { InvalidConsistencyTokenException } from "@spacedb/core/invalid-consistency-token-exception";
-import { MaxDepthExceededException } from "@spacedb/core/max-depth-exceeded-exception";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
+import { CaveatEvaluationException } from "@benedb/core/caveat-evaluation-exception";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { InvalidConsistencyTokenException } from "@benedb/core/invalid-consistency-token-exception";
+import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
 import {
   GrainCallAbortedError,
   GrainCallError,

@@ -1,5 +1,5 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
 
 /**
  * What a `Watch` stream should carry.

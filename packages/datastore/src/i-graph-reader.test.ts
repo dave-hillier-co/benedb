@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
 
 import type { IGraphReader } from "./i-graph-reader";
 import {

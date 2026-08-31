@@ -1,12 +1,12 @@
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { parseRelationship } from "@spacedb/core/tuple-strings";
-import type { IGraphReader } from "@spacedb/datastore/i-graph-reader";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { parseRelationship } from "@benedb/core/tuple-strings";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import { describe, expect, it } from "vitest";
 

@@ -1,8 +1,8 @@
 export const meta = {
   name: "thresh-issues",
-  description: "Fix a set of open Thresh GitHub issues test-first, gating both Thresh and SpaceDB",
+  description: "Fix a set of open Thresh GitHub issues test-first, gating both Thresh and BeneDB",
   whenToUse:
-    "Run when a batch of Thresh findings raised by the SpaceDB port needs fixing. Pass args: { issues: [numbers], notes }.",
+    "Run when a batch of Thresh findings raised by the BeneDB port needs fixing. Pass args: { issues: [numbers], notes }.",
   phases: [
     { title: "Triage", detail: "read each issue and the code, group by file overlap" },
     { title: "Fix", detail: "failing test first, then the change" },
@@ -12,7 +12,7 @@ export const meta = {
 };
 
 const THRESH = "/Users/davehillier/repos/thresh";
-const SPACEDB = "/Users/davehillier/repos/spacedb";
+const BENEDB = "/Users/davehillier/repos/benedb";
 const ORLEANS = "/Users/davehillier/repos/orleans";
 
 const issues = args?.issues ?? [];
@@ -24,11 +24,11 @@ You are fixing open issues in Thresh (${THRESH}), a TypeScript virtual-actor run
 Microsoft Orleans 10 parity. Orleans itself is at ${ORLEANS} — consult it whenever "what should
 this do?" is in question, and prefer its answer over an invention.
 
-Every one of these issues was raised by SpaceDB (${SPACEDB}), a wire-compatible SpiceDB
-implementation that is Thresh's first production consumer. SpaceDB links Thresh from source, so a
+Every one of these issues was raised by BeneDB (${BENEDB}), a wire-compatible SpiceDB
+implementation that is Thresh's first production consumer. BeneDB links Thresh from source, so a
 change here takes effect there IMMEDIATELY. That cuts both ways:
-  * A Thresh change that breaks SpaceDB is not done. Both repos must be green.
-  * SpaceDB is the evidence. When an issue says "SpaceDB needed X", read the consumer it names.
+  * A Thresh change that breaks BeneDB is not done. Both repos must be green.
+  * BeneDB is the evidence. When an issue says "BeneDB needed X", read the consumer it names.
 
 Read ${THRESH}/docs/orleans-to-thresh-port.md (the standing Orleans->Thresh translation guide) and
 ${THRESH}/docs/deviations.md (where Thresh knowingly differs from Orleans) BEFORE changing
@@ -59,7 +59,7 @@ const TRIAGE_SCHEMA = {
           risk: {
             type: "string",
             description:
-              "what could break in SpaceDB or in Thresh's own suite, and which existing tests encode the CURRENT behaviour",
+              "what could break in BeneDB or in Thresh's own suite, and which existing tests encode the CURRENT behaviour",
           },
         },
         required: ["name", "issues", "files", "rationale", "risk"],
@@ -84,7 +84,7 @@ const FIX_SCHEMA = {
     behaviourChanges: {
       type: "array",
       items: { type: "string" },
-      description: "observable changes a consumer could notice, including SpaceDB",
+      description: "observable changes a consumer could notice, including BeneDB",
     },
     deferred: {
       type: "array",
@@ -107,7 +107,7 @@ the same subsystem, because these are fixed sequentially and a later batch inher
 one's edits. Order the batches so the broadest / most depended-upon change lands first.
 
 For each batch, name the files you expect to touch, and in "risk" name the EXISTING tests that
-encode the behaviour you are about to change — in Thresh and in SpaceDB. Some Thresh tests
+encode the behaviour you are about to change — in Thresh and in BeneDB. Some Thresh tests
 deliberately document a current limitation (for example a test asserting that only RejectionError
 survives the wire with its subtype). Those are not obstacles to route around, but changing one is a
 deliberate act that has to be justified, so find them now rather than discovering them mid-fix.
@@ -177,16 +177,16 @@ ${manifest}
 
 Run, and get every one of them green:
   cd ${THRESH}   && pnpm typecheck && pnpm test && pnpm lint
-  cd ${SPACEDB}  && pnpm typecheck && pnpm test && pnpm test:conformance && pnpm lint
+  cd ${BENEDB}  && pnpm typecheck && pnpm test && pnpm test:conformance && pnpm lint
 
-BOTH repos. SpaceDB links Thresh from source, so a Thresh change lands there instantly — that is
-the whole point of running its suite here, and a SpaceDB failure is this batch's failure.
+BOTH repos. BeneDB links Thresh from source, so a Thresh change lands there instantly — that is
+the whole point of running its suite here, and a BeneDB failure is this batch's failure.
 
 Do NOT run pnpm test:differential (it needs Docker and a real spicedb container), and never start
 a silo host: a backgrounded host orphans and runs forever.
 
 Two rules. Fix the code, not the assertion — if a test fails, the change is wrong until you have
-read Orleans and proved otherwise. And never edit ${SPACEDB}/packages/conformance/corpus: it is a
+read Orleans and proved otherwise. And never edit ${BENEDB}/packages/conformance/corpus: it is a
 verbatim compatibility corpus and weakening a case to get green is the one unrecoverable mistake
 here.
 
@@ -209,7 +209,7 @@ const LENSES = [
     key: "blast-radius",
     prompt:
       "Blast radius. These are runtime changes under a live consumer. For each change, find every " +
-      "caller (in Thresh AND in SpaceDB) and check none silently changed meaning: a widened type " +
+      "caller (in Thresh AND in BeneDB) and check none silently changed meaning: a widened type " +
       "that now accepts something it should reject, a new base class that makes an existing " +
       "instanceof match more than it did, a default that shifted, an error that now escapes where " +
       "it was previously swallowed. Serialization changes deserve particular suspicion: anything " +

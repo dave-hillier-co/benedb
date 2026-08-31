@@ -1,5 +1,5 @@
 import { status } from "@grpc/grpc-js";
-import { ReflectionSchemaFilter } from "@spacedb/protos/authzed/api/v1/schema_service";
+import { ReflectionSchemaFilter } from "@benedb/protos/authzed/api/v1/schema_service";
 import { describe, expect, it } from "vitest";
 
 import { RpcError } from "./rpc-error";

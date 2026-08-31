@@ -1,5 +1,5 @@
-import { FormatError } from "@spacedb/core/format-error";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import { FormatError } from "@benedb/core/format-error";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 import { describe, expect, it } from "vitest";
 
 import { encodeBulkExportCursor, tryDecodeBulkExportCursor } from "./bulk-export-cursor";

@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { isAllowedRelationPublicWildcard } from "@spacedb/core/allowed-relation";
-import type { CaveatTypeReference } from "@spacedb/core/caveat-definition";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { isPermission, type Relation } from "@spacedb/core/relation";
+import { isAllowedRelationPublicWildcard } from "@benedb/core/allowed-relation";
+import type { CaveatTypeReference } from "@benedb/core/caveat-definition";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { isPermission, type Relation } from "@benedb/core/relation";
 import type {
   ComputedUsersetChild,
   NestedRewriteChild,
   SetOperation,
   SetOperationChild,
   TupleToUsersetChild,
-} from "@spacedb/core/userset-rewrite";
+} from "@benedb/core/userset-rewrite";
 
 import { compile, compileSchema } from "./schema-compiler";
 import { SchemaCompileException } from "./schema-compile-exception";

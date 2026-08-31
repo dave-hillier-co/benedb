@@ -1,4 +1,4 @@
-import type { Relationship } from "@spacedb/core/relationship";
+import type { Relationship } from "@benedb/core/relationship";
 
 import type { RelationshipsFilter, SubjectsFilter } from "./relationships-filter";
 import type { ReverseQueryOptions } from "./reverse-query-options";

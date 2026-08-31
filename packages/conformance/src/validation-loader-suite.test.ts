@@ -2,17 +2,17 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { FormatError } from "@spacedb/core/format-error";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { formatRelationship } from "@spacedb/core/tuple-strings";
-import { CreateRelationshipExistsException } from "@spacedb/datastore/datastore-exceptions";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
-import { SchemaTypeException } from "@spacedb/engine/schema-type-exception";
-import { validateSchemaTypes } from "@spacedb/engine/schema-type-validator";
-import { SchemaCompileException } from "@spacedb/schema/schema-compile-exception";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import { FormatError } from "@benedb/core/format-error";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { formatRelationship } from "@benedb/core/tuple-strings";
+import { CreateRelationshipExistsException } from "@benedb/datastore/datastore-exceptions";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import { SchemaTypeException } from "@benedb/engine/schema-type-exception";
+import { validateSchemaTypes } from "@benedb/engine/schema-type-validator";
+import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 
 import {
   RelationshipTypeException,

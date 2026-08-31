@@ -3,13 +3,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
-import { CheckEngine } from "@spacedb/engine/check-engine";
-import type { CheckResult } from "@spacedb/engine/membership";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import { CheckEngine } from "@benedb/engine/check-engine";
+import type { CheckResult } from "@benedb/engine/membership";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 
 import { loadResolvedValidationFile } from "./validation-file-loader";
 import { assertionExpectedMembership, type ParsedAssertion } from "./validation-model";
@@ -39,7 +39,7 @@ import type { ValidationFile } from "./validation-model";
  *     second, grain-mesh run lives in its own harness. The body here is written against the
  *     {@link ConformanceBackend} seam so the mesh run is a second entry in {@link BACKENDS}
  *     rather than a copy of the body. Only the reference backend exists until S4 lands
- *     `@spacedb/grains`.
+ *     `@benedb/grains`.
  */
 
 /**
@@ -71,7 +71,7 @@ interface ConformanceChecker {
 
 /**
  * One way of answering a corpus file's assertions. The reference datastore is the only backend
- * until `@spacedb/grains` exists; the grain mesh becomes a second element of {@link BACKENDS}
+ * until `@benedb/grains` exists; the grain mesh becomes a second element of {@link BACKENDS}
  * and re-runs this file's body unchanged.
  */
 interface ConformanceBackend {

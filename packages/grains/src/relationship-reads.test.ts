@@ -1,18 +1,18 @@
-import { FormatError } from "@spacedb/core/format-error";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { IRevisionParser } from "@spacedb/core/i-revision-parser";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { Relationship } from "@spacedb/core/relationship";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { formatRelationship, parseRelationship } from "@spacedb/core/tuple-strings";
-import { zedTokenFromRevision } from "@spacedb/core/zed-tokens";
-import type { RegisteredCounter } from "@spacedb/datastore/counters";
+import { FormatError } from "@benedb/core/format-error";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { IRevisionParser } from "@benedb/core/i-revision-parser";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { Relationship } from "@benedb/core/relationship";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { formatRelationship, parseRelationship } from "@benedb/core/tuple-strings";
+import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
+import type { RegisteredCounter } from "@benedb/datastore/counters";
 import type {
   IDatastore,
   IDatastoreReader,
   RevisionWithSchemaHash,
-} from "@spacedb/datastore/i-datastore";
-import type { RelationshipsFilter } from "@spacedb/datastore/relationships-filter";
+} from "@benedb/datastore/i-datastore";
+import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 import { describe, expect, it } from "vitest";
 
 import { encodeBulkExportCursor } from "./bulk-export-cursor";

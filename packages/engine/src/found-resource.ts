@@ -1,4 +1,4 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 
 import type { LookupResourcesCursor } from "./lookup-resources-cursor";
 import type { Membership } from "./membership";

@@ -17,7 +17,7 @@ an S4 file, so pulling it forward would break the leaves-first ordering. It also
 `SteelThread/TestData` and `SteelThread/Results` golden trees vendored, which the corpus under
 `packages/conformance/corpus` does not carry.
 
-| Stage | Spiceport                                                                                                                                     | SpaceDB                                                                              |
+| Stage | Spiceport                                                                                                                                     | BeneDB                                                                               |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | S1    | `src/Spiceport.Core/CaveatEvaluationException.cs`                                                                                             | `packages/core/src/caveat-evaluation-exception.ts`                                   |
 | S1    | `src/Spiceport.Core/Common/ContextualizedCaveat.cs`                                                                                           | `packages/core/src/contextualized-caveat.ts`                                         |
@@ -310,7 +310,7 @@ an S4 file, so pulling it forward would break the leaves-first ordering. It also
 | S5    | `tests/Spiceport.Differential.Tests/WriteSchemaWildcardTransitivityTests.cs`                                                                  | `packages/differential/src/write-schema-wildcard-transitivity-tests.test.ts`         |
 | S5    | `tests/Spiceport.Grains.Tests/SeedDataTests.cs`                                                                                               | `packages/api/src/seed-data-tests.test.ts`                                           |
 
-## Spiceport files with no SpaceDB target
+## Spiceport files with no BeneDB target
 
 C# constructs that carry no code across. Listed so the ledger still accounts for every source
 file, rather than leaving them to look overlooked.
@@ -325,7 +325,7 @@ file, rather than leaving them to look overlooked.
 Types the port introduced because .NET supplies them and TypeScript does not. They have no C#
 counterpart, so they have no row above.
 
-| SpaceDB                                       | Stands in for                                                                                                                                                                                                                                                                                |
+| BeneDB                                        | Stands in for                                                                                                                                                                                                                                                                                |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/core/src/invalid-argument-error.ts` | `ArgumentException` / `ArgumentNullException`                                                                                                                                                                                                                                                |
 | `packages/core/src/format-error.ts`           | `FormatException`                                                                                                                                                                                                                                                                            |

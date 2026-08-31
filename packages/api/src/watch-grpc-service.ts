@@ -1,24 +1,24 @@
 import { status } from "@grpc/grpc-js";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { decodeRevision, zedTokenFromRevision } from "@spacedb/core/zed-tokens";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { decodeRevision, zedTokenFromRevision } from "@benedb/core/zed-tokens";
 import {
   RevisionNotFoundException,
   WatchDisabledException,
-} from "@spacedb/datastore/datastore-exceptions";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import type { RevisionChange, WatchContent, WatchOptions } from "@spacedb/datastore/watch";
-import { WatchContent as WatchContentFlags } from "@spacedb/datastore/watch";
-import type { ISchemaProvider } from "@spacedb/grains/i-schema-provider";
+} from "@benedb/datastore/datastore-exceptions";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import type { RevisionChange, WatchContent, WatchOptions } from "@benedb/datastore/watch";
+import { WatchContent as WatchContentFlags } from "@benedb/datastore/watch";
+import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
 import type {
   Relationship as ProtoRelationship,
   RelationshipUpdate as ProtoRelationshipUpdate,
   WatchRequest,
   WatchResponse,
-} from "@spacedb/protos/permissions";
-import { RelationshipUpdate_Operation, WatchKind } from "@spacedb/protos/permissions";
+} from "@benedb/protos/permissions";
+import { RelationshipUpdate_Operation, WatchKind } from "@benedb/protos/permissions";
 import { isCancellationError } from "@thresh/core/errors";
 
 import { RpcError } from "./rpc-error";

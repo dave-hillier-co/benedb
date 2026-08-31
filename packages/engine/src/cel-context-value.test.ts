@@ -5,7 +5,7 @@ import { buildCaveatCelEnvironment } from "./caveat-cel-environment";
 import { toCelContextValue } from "./cel-context-value";
 
 /**
- * Regression cover for the CEL missing-key semantics SpaceDB depends on. There is no C# original:
+ * Regression cover for the CEL missing-key semantics BeneDB depends on. There is no C# original:
  * Cel.NET and cel-go both yield CEL's "no such key" ERROR value for an absent map key, and the
  * absorbing `&&`/`||` operators then collapse it against a definite operand. `@bufbuild/cel`
  * 0.2.0's `CelMap.accessByName` instead calls `adapter.toCel(undefined)` on a miss, which THROWS

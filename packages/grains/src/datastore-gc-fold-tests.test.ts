@@ -1,7 +1,7 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { Relationship } from "@spacedb/core/relationship";
-import { createRelationship } from "@spacedb/core/relationship";
-import { collectBelow } from "@spacedb/datastore/datastore-state";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { Relationship } from "@benedb/core/relationship";
+import { createRelationship } from "@benedb/core/relationship";
+import { collectBelow } from "@benedb/datastore/datastore-state";
 import { describe, expect, it } from "vitest";
 
 import type { DatastoreGrainState } from "./datastore-grain-state";

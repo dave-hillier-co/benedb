@@ -1,26 +1,26 @@
-import { FULLY_CONSISTENT } from "@spacedb/core/consistency-requirement";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { zedTokenFromRevision } from "@spacedb/core/zed-tokens";
+import { FULLY_CONSISTENT } from "@benedb/core/consistency-requirement";
+import type { IRevision } from "@benedb/core/i-revision";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
 import {
   CounterAlreadyRegisteredException,
   CounterNotRegisteredException,
   CreateRelationshipExistsException,
   SerializationException,
-} from "@spacedb/datastore/datastore-exceptions";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
+} from "@benedb/datastore/datastore-exceptions";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
 import type {
   RelationshipsFilter,
   SubjectRelationFilter,
   SubjectsSelector,
-} from "@spacedb/datastore/relationships-filter";
-import { resolveRevision } from "@spacedb/datastore/revision-resolver";
-import { SchemaTypeException } from "@spacedb/engine/schema-type-exception";
-import { validateSchemaTypes } from "@spacedb/engine/schema-type-validator";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
-import { SchemaCompileException } from "@spacedb/schema/schema-compile-exception";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+} from "@benedb/datastore/relationships-filter";
+import { resolveRevision } from "@benedb/datastore/revision-resolver";
+import { SchemaTypeException } from "@benedb/engine/schema-type-exception";
+import { validateSchemaTypes } from "@benedb/engine/schema-type-validator";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
+import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { grain } from "@thresh/core/decorators";
 import { Grain } from "@thresh/core/grain";
 

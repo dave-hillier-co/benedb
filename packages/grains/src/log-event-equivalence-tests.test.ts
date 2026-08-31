@@ -1,6 +1,6 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { changesAt, schemaChangedAt } from "@spacedb/datastore/datastore-state";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { changesAt, schemaChangedAt } from "@benedb/datastore/datastore-state";
 import { describe, expect, it } from "vitest";
 
 import type { DatastoreGrainState } from "./datastore-grain-state";

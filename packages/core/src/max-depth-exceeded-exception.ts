@@ -10,7 +10,7 @@ import { registerSurrogate } from "@thresh/core/value-codec";
  * Ported from Spiceport `src/Spiceport.Server/MaxDepthExceededException.cs`.
  *
  * LEDGER AMENDMENT. `docs/port-ledger.md` originally targeted `packages/grains/src/...` (S4).
- * `LocalDispatcher` throws this and `@spacedb/engine` may not import from `@spacedb/grains`, so the
+ * `LocalDispatcher` throws this and `@benedb/engine` may not import from `@benedb/grains`, so the
  * row is amended to S3 / `packages/core/src/...`. The C# file already declares
  * `namespace Spiceport.Core`; only its directory said otherwise.
  *
@@ -41,7 +41,7 @@ export class MaxDepthExceededException extends Error {
 }
 
 registerSurrogate<MaxDepthExceededException>({
-  tag: "spacedb.maxDepthExceededException",
+  tag: "benedb.maxDepthExceededException",
   test: (value) => value instanceof MaxDepthExceededException,
   encode: (error) => ({ message: error.message }),
   decode: (fields) => new MaxDepthExceededException(fields.message as string),

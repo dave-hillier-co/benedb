@@ -1,34 +1,34 @@
 import { status } from "@grpc/grpc-js";
-import type { CaveatEvaluationErrorKind } from "@spacedb/core/caveat-evaluation-exception";
-import { CaveatEvaluationException } from "@spacedb/core/caveat-evaluation-exception";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { InvalidConsistencyTokenException } from "@spacedb/core/invalid-consistency-token-exception";
-import { MaxDepthExceededException } from "@spacedb/core/max-depth-exceeded-exception";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
-import type { ConsistencyWire } from "@spacedb/grains/consistency-wire";
+import type { CaveatEvaluationErrorKind } from "@benedb/core/caveat-evaluation-exception";
+import { CaveatEvaluationException } from "@benedb/core/caveat-evaluation-exception";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { InvalidConsistencyTokenException } from "@benedb/core/invalid-consistency-token-exception";
+import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
+import type { ConsistencyWire } from "@benedb/grains/consistency-wire";
 import {
   consistencyWireToRequirement,
   MINIMIZE_LATENCY_WIRE,
-} from "@spacedb/grains/consistency-wire";
-import { DispatchFailedException } from "@spacedb/grains/dispatch-failed-exception";
-import type { BatchCheckItem, IPermissionChecker } from "@spacedb/grains/i-permission-checker";
-import type { IRelationshipsGrain } from "@spacedb/grains/i-relationships-grain";
+} from "@benedb/grains/consistency-wire";
+import { DispatchFailedException } from "@benedb/grains/dispatch-failed-exception";
+import type { BatchCheckItem, IPermissionChecker } from "@benedb/grains/i-permission-checker";
+import type { IRelationshipsGrain } from "@benedb/grains/i-relationships-grain";
 import {
   IRelationshipsGrain as IRelationshipsGrainDefinition,
   RELATIONSHIPS_GRAIN_KEY,
-} from "@spacedb/grains/i-relationships-grain";
-import { PreconditionFailedException } from "@spacedb/grains/precondition-failed-exception";
-import type { RelationshipReads } from "@spacedb/grains/relationship-reads";
+} from "@benedb/grains/i-relationships-grain";
+import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
+import type { RelationshipReads } from "@benedb/grains/relationship-reads";
 import type {
   PreconditionWire,
   RelationshipsFilterWire,
   RelationshipUpdateOpWire,
   RelationshipUpdateWire,
   RelationshipWire,
-} from "@spacedb/grains/relationships-dtos";
-import type { ReverseOps } from "@spacedb/grains/reverse-ops";
+} from "@benedb/grains/relationships-dtos";
+import type { ReverseOps } from "@benedb/grains/reverse-ops";
 import type {
   ExpandModeWire,
   ExpandSubjectWire,
@@ -37,9 +37,9 @@ import type {
   FoundSubjectWire,
   Permissionship as PermissionshipWire,
   SetOpWire,
-} from "@spacedb/grains/reverse-ops-dtos";
-import { SchemaWriteValidationException } from "@spacedb/grains/schema-write-validation-exception";
-import { SequencerOverloadedException } from "@spacedb/grains/sequencer-overloaded-exception";
+} from "@benedb/grains/reverse-ops-dtos";
+import { SchemaWriteValidationException } from "@benedb/grains/schema-write-validation-exception";
+import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
 import type {
   BatchCheckPermissionRequest,
   BatchCheckPermissionResponse,
@@ -71,7 +71,7 @@ import type {
   WriteRelationshipsResponse,
   WriteSchemaRequest,
   WriteSchemaResponse,
-} from "@spacedb/protos/permissions";
+} from "@benedb/protos/permissions";
 import {
   CheckPermissionResponse_Permissionship,
   ExpandPermissionTreeRequest_ExpandMode,
@@ -79,9 +79,9 @@ import {
   Permissionship_Kind,
   Precondition_Operation,
   RelationshipUpdate_Operation,
-} from "@spacedb/protos/permissions";
-import type { Membership } from "@spacedb/engine/membership";
-import { SchemaCompileException } from "@spacedb/schema/schema-compile-exception";
+} from "@benedb/protos/permissions";
+import type { Membership } from "@benedb/engine/membership";
+import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
 import { RpcError } from "./rpc-error";

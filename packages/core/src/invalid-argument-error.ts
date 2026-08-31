@@ -22,7 +22,7 @@ export class InvalidArgumentError extends Error {
 
 // The message is the sole distinguishing state.
 registerSurrogate<InvalidArgumentError>({
-  tag: "spacedb.invalidArgumentError",
+  tag: "benedb.invalidArgumentError",
   test: (value) => value instanceof InvalidArgumentError,
   encode: (error) => ({ message: error.message }),
   decode: (fields) => new InvalidArgumentError(fields.message as string),

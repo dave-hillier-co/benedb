@@ -1,5 +1,5 @@
 import { status } from "@grpc/grpc-js";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import {
   CheckPermissionRequest,
   CheckPermissionResponse_Permissionship,
@@ -10,7 +10,7 @@ import {
   RelationshipUpdate_Operation,
   WriteRelationshipsRequest,
   WriteSchemaRequest,
-} from "@spacedb/protos/permissions";
+} from "@benedb/protos/permissions";
 import { describe, expect, it } from "vitest";
 
 import { PermissionsGrpcService } from "./permissions-grpc-service";
@@ -27,8 +27,8 @@ import { RpcError } from "./rpc-error";
  * mapping end to end across the real grain mesh.
  *
  * PORT NOTES.
- *  - LEDGER DEVIATION: the ledger row targets `packages/grains/src/...`, but `@spacedb/grains` does
- *    NOT depend on `@spacedb/api` (the dependency runs api -> grains), so a suite driving
+ *  - LEDGER DEVIATION: the ledger row targets `packages/grains/src/...`, but `@benedb/grains` does
+ *    NOT depend on `@benedb/api` (the dependency runs api -> grains), so a suite driving
  *    `PermissionsGrpcService` cannot live in grains without inverting the graph. It lands here and
  *    the ledger row is amended - the same deviation `mesh-test-cluster.ts` already took.
  *  - The `FakeContext : ServerCallContext` class DISAPPEARS: the ported methods take a trailing

@@ -1,33 +1,33 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { IRevisionParser } from "@spacedb/core/i-revision-parser";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import type { RegisteredCounter } from "@spacedb/datastore/counters";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { IRevisionParser } from "@benedb/core/i-revision-parser";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import type { RegisteredCounter } from "@benedb/datastore/counters";
 import {
   InvalidRevisionException,
   RevisionNotFoundException,
   SerializationException,
-} from "@spacedb/datastore/datastore-exceptions";
-import type { DatastoreState } from "@spacedb/datastore/datastore-state";
+} from "@benedb/datastore/datastore-exceptions";
+import type { DatastoreState } from "@benedb/datastore/datastore-state";
 import type {
   IDatastore,
   IDatastoreReader,
   IReadWriteTransaction,
   RevisionWithSchemaHash,
-} from "@spacedb/datastore/i-datastore";
-import { MvccReadWriteTransaction } from "@spacedb/datastore/mvcc-read-write-transaction";
-import { MvccSnapshotReader } from "@spacedb/datastore/mvcc-snapshot-reader";
-import type { RelationshipsFilter, SubjectsFilter } from "@spacedb/datastore/relationships-filter";
-import type { ReverseQueryOptions } from "@spacedb/datastore/reverse-query-options";
-import { TimestampRevisionParser } from "@spacedb/datastore/timestamp-revision-parser";
+} from "@benedb/datastore/i-datastore";
+import { MvccReadWriteTransaction } from "@benedb/datastore/mvcc-read-write-transaction";
+import { MvccSnapshotReader } from "@benedb/datastore/mvcc-snapshot-reader";
+import type { RelationshipsFilter, SubjectsFilter } from "@benedb/datastore/relationships-filter";
+import type { ReverseQueryOptions } from "@benedb/datastore/reverse-query-options";
+import { TimestampRevisionParser } from "@benedb/datastore/timestamp-revision-parser";
 import {
   watchOptionsContent,
   WatchContent,
   type RevisionChange,
   type WatchOptions,
-} from "@spacedb/datastore/watch";
+} from "@benedb/datastore/watch";
 import { durationToMs, type Duration } from "@thresh/core/duration";
 import { GrainCallAbortedError } from "@thresh/core/errors";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";

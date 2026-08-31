@@ -1,5 +1,5 @@
-import type { Relationship } from "@spacedb/core/relationship";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import type { Relationship } from "@benedb/core/relationship";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 
 import type { RegisteredCounter } from "./counters";
 import { CounterNotRegisteredException, RevisionNotFoundException } from "./datastore-exceptions";

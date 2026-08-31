@@ -1,10 +1,10 @@
-import type { AllowedRelation } from "@spacedb/core/allowed-relation";
-import { allowedRelationDirect, allowedRelationWildcard } from "@spacedb/core/allowed-relation";
-import type { CaveatDefinition, CaveatTypeReference } from "@spacedb/core/caveat-definition";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { createNamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { baseRelation, permission } from "@spacedb/core/relation";
-import { setOperationUnion } from "@spacedb/core/userset-rewrite";
+import type { AllowedRelation } from "@benedb/core/allowed-relation";
+import { allowedRelationDirect, allowedRelationWildcard } from "@benedb/core/allowed-relation";
+import type { CaveatDefinition, CaveatTypeReference } from "@benedb/core/caveat-definition";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { createNamespaceDefinition } from "@benedb/core/namespace-definition";
+import { baseRelation, permission } from "@benedb/core/relation";
+import { setOperationUnion } from "@benedb/core/userset-rewrite";
 import { describe, expect, it } from "vitest";
 
 import {

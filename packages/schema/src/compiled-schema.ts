@@ -1,5 +1,5 @@
-import type { CaveatDefinition } from "@spacedb/core/caveat-definition";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
+import type { CaveatDefinition } from "@benedb/core/caveat-definition";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
 
 /**
  * The full result of compiling a schema: both object-type namespace definitions and caveat

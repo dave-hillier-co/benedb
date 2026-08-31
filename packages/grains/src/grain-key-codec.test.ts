@@ -1,4 +1,4 @@
-import { FormatError } from "@spacedb/core/format-error";
+import { FormatError } from "@benedb/core/format-error";
 import { describe, expect, it } from "vitest";
 
 import { joinGrainKey, splitGrainKey } from "./grain-key-codec";

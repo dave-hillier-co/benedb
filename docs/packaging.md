@@ -6,8 +6,8 @@ invariant a host has to satisfy before it can be deployed at all.
 ## Running a host
 
 ```sh
-pnpm --filter @spacedb/api start    # gRPC on 50051, plain GET / on 8080
-pnpm --filter @spacedb/silo start   # silo only, no gRPC surface
+pnpm --filter @benedb/api start    # gRPC on 50051, plain GET / on 8080
+pnpm --filter @benedb/silo start   # silo only, no gRPC surface
 ```
 
 Each host has a `src/start.ts` that calls its `main()` explicitly, and `program.ts` has **no
@@ -68,12 +68,12 @@ Two silos on one machine — an API host and a silo-only host, in two terminals:
 ```sh
 Clustering__Silos=127.0.0.1:11111,127.0.0.1:11112 \
 Clustering__AllowInMemoryStorage=true \
-  pnpm --filter @spacedb/api start
+  pnpm --filter @benedb/api start
 
 Clustering__Silos=127.0.0.1:11111,127.0.0.1:11112 \
 Clustering__SiloPort=11112 \
 Clustering__AllowInMemoryStorage=true \
-  pnpm --filter @spacedb/silo start
+  pnpm --filter @benedb/silo start
 ```
 
 Every clustered silo needs the storage opt-in or a connection string, this one included:
@@ -167,13 +167,13 @@ container image. A spike established that bundling works and what shape it shoul
 The constraint that decides the shape is `@thresh/*`: it is unpublished and reached through
 `link:../../../thresh/packages/*`, a relative path into a sibling checkout, so it can never be
 installed at a deployment target. It has to be inlined. Publishing it instead would put a registry
-between the two repositories, and the absence of one is currently load-bearing — SpaceDB exists to
+between the two repositories, and the absence of one is currently load-bearing — BeneDB exists to
 surface Thresh bugs, and a Thresh fix taking effect here immediately is what makes that work.
 
 So: **bundle, do not publish.** A vite SSR build with `unplugin-swc` produces a single file that
 runs on plain `node`, with no vite, no TypeScript and no workspace. SWC must own the transformation:
 esbuild and Oxc do not support the standard TC39 decorators the Thresh interop surface uses. Inline
-`@spacedb/*` and `@thresh/*` via `ssr.noExternal`; leave real npm packages external, since they are
+`@benedb/*` and `@thresh/*` via `ssr.noExternal`; leave real npm packages external, since they are
 installable and bundling `pg` breaks its optional `pg-native` require. `ws` is external for the same
 reason and is not optional for a clustered host — `useWebSocketTransport()` needs it at runtime. Import `defineConfig` from
 `vitest/config` rather than `vite`, which is not a direct dependency under pnpm's strict layout.

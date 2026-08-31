@@ -63,7 +63,7 @@ export class DispatchFailedException extends Error {
 // through so its code survives further hops, and a lost code would silently degrade a retriable
 // `unavailable` to a fatal `internal` at the front door.
 registerSurrogate<DispatchFailedException>({
-  tag: "spacedb.dispatchFailedException",
+  tag: "benedb.dispatchFailedException",
   test: (value) => value instanceof DispatchFailedException,
   encode: (error) => ({ code: error.code, message: error.message }),
   decode: (fields) =>

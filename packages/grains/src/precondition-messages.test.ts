@@ -1,4 +1,4 @@
-import type { RelationshipsFilter } from "@spacedb/datastore/relationships-filter";
+import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 import { describe, expect, it } from "vitest";
 
 import type { PreconditionFailureKind } from "./precondition-failed-exception";

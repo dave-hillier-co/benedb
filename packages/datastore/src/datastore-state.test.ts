@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { Relationship } from "@spacedb/core/relationship";
-import { createRelationship } from "@spacedb/core/relationship";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { Relationship } from "@benedb/core/relationship";
+import { createRelationship } from "@benedb/core/relationship";
 
 import {
   changesAt,

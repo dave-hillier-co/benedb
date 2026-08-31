@@ -1,4 +1,4 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import { deserializeValue, serializeValue } from "@thresh/core/value-codec";
 import { describe, expect, it } from "vitest";
 

@@ -1,25 +1,25 @@
 import { status } from "@grpc/grpc-js";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { isPermission } from "@spacedb/core/relation";
-import type { RelationReference } from "@spacedb/engine/relation-reference";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { isPermission } from "@benedb/core/relation";
+import type { RelationReference } from "@benedb/engine/relation-reference";
 import {
   computablePermissions as introspectComputablePermissions,
   dependentRelations as introspectDependentRelations,
-} from "@spacedb/engine/schema-introspection";
-import { SchemaIntrospectionException } from "@spacedb/engine/schema-introspection-exception";
-import { SchemaTypeException } from "@spacedb/engine/schema-type-exception";
-import { validateSchemaTypes } from "@spacedb/engine/schema-type-validator";
-import type { IRelationshipsGrain } from "@spacedb/grains/i-relationships-grain";
+} from "@benedb/engine/schema-introspection";
+import { SchemaIntrospectionException } from "@benedb/engine/schema-introspection-exception";
+import { SchemaTypeException } from "@benedb/engine/schema-type-exception";
+import { validateSchemaTypes } from "@benedb/engine/schema-type-validator";
+import type { IRelationshipsGrain } from "@benedb/grains/i-relationships-grain";
 import {
   IRelationshipsGrain as IRelationshipsGrainDefinition,
   RELATIONSHIPS_GRAIN_KEY,
-} from "@spacedb/grains/i-relationships-grain";
-import type { ISchemaProvider } from "@spacedb/grains/i-schema-provider";
-import type { SchemaDelta } from "@spacedb/grains/schema-diff";
-import { computeSchemaDiff } from "@spacedb/grains/schema-diff";
-import { SchemaWriteValidationException } from "@spacedb/grains/schema-write-validation-exception";
-import { SequencerOverloadedException } from "@spacedb/grains/sequencer-overloaded-exception";
+} from "@benedb/grains/i-relationships-grain";
+import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
+import type { SchemaDelta } from "@benedb/grains/schema-diff";
+import { computeSchemaDiff } from "@benedb/grains/schema-diff";
+import { SchemaWriteValidationException } from "@benedb/grains/schema-write-validation-exception";
+import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
 import type {
   ComputablePermissionsRequest,
   ComputablePermissionsResponse,
@@ -36,10 +36,10 @@ import type {
   ReflectSchemaResponse,
   WriteSchemaRequest,
   WriteSchemaResponse,
-} from "@spacedb/protos/authzed/api/v1/schema_service";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
-import { SchemaCompileException } from "@spacedb/schema/schema-compile-exception";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+} from "@benedb/protos/authzed/api/v1/schema_service";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
+import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
 import {
@@ -80,7 +80,7 @@ import { schemaFiltersFromRequest } from "./schema-filters";
  *     insertion would silently keep the last; {@link namespacesByName} reproduces the throw, as
  *     `check-grain.ts` and `i-schema-provider.ts` do.
  *   * `catch (ex is SchemaCompileException or ArgumentException)`: the ported `relationships-grain`
- *     rethrows a schema-compile failure as `@spacedb/core`'s {@link InvalidArgumentError} so it
+ *     rethrows a schema-compile failure as `@benedb/core`'s {@link InvalidArgumentError} so it
  *     survives the Thresh call boundary, so that is what the `ArgumentException` arm catches.
  *     DiffSchema's filter adds `SchemaTypeException`, thrown by the up-front validator.
  *   * `string.IsNullOrWhiteSpace` is `trim() === ""` (JS `trim` and .NET whitespace differ on a

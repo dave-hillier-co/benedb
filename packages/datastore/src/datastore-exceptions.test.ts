@@ -1,4 +1,4 @@
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 import { deserializeValue, serializeValue } from "@thresh/core/value-codec";
 import { describe, expect, it } from "vitest";
 

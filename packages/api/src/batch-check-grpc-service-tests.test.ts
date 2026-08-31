@@ -1,13 +1,13 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import {
   BatchCheckPermissionRequest,
   BatchCheckPermissionRequestItem,
   CheckPermissionResponse_Permissionship,
-} from "@spacedb/protos/permissions";
+} from "@benedb/protos/permissions";
 import { describe, expect, it } from "vitest";
 
 import { PermissionsGrpcService } from "./permissions-grpc-service";
@@ -24,7 +24,7 @@ import { PermissionsGrpcService } from "./permissions-grpc-service";
  *
  * PORT NOTES.
  *  - LEDGER DEVIATION: lands in `packages/api/src` rather than `packages/grains/src`, because
- *    `@spacedb/grains` does not depend on `@spacedb/api`. See `data-plane-grpc-service-tests.test.ts`.
+ *    `@benedb/grains` does not depend on `@benedb/api`. See `data-plane-grpc-service-tests.test.ts`.
  *  - The `FakeBatchContext : ServerCallContext` class DISAPPEARS: the ported method takes a trailing
  *    optional `AbortSignal`, so the call passes nothing.
  *  - `Assert.Equal(request.Items[i], resp.Pairs[i].Request)` is protobuf STRUCTURAL equality, so it

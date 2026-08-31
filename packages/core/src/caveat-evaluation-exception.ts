@@ -34,7 +34,7 @@ export class CaveatEvaluationException extends Error {
 }
 
 registerSurrogate<CaveatEvaluationException>({
-  tag: "spacedb.caveatEvaluationException",
+  tag: "benedb.caveatEvaluationException",
   test: (value) => value instanceof CaveatEvaluationException,
   encode: (error) => ({ kind: error.kind, message: error.message }),
   decode: (fields) =>

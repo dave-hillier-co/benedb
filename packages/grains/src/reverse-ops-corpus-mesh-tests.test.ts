@@ -3,14 +3,14 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { loadValidationFile } from "@spacedb/conformance/validation-file-loader";
-import type { ValidationFile } from "@spacedb/conformance/validation-model";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
-import { LookupResourcesEngine } from "@spacedb/engine/lookup-resources-engine";
-import { LookupSubjectsEngine } from "@spacedb/engine/lookup-subjects-engine";
+import { loadValidationFile } from "@benedb/conformance/validation-file-loader";
+import type { ValidationFile } from "@benedb/conformance/validation-model";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
+import { LookupResourcesEngine } from "@benedb/engine/lookup-resources-engine";
+import { LookupSubjectsEngine } from "@benedb/engine/lookup-subjects-engine";
 
 import { MeshTestCluster } from "./mesh-test-cluster";
 import type {
@@ -61,9 +61,9 @@ import type {
 
 const requireFromHere = createRequire(import.meta.url);
 
-/** The vendored corpus directory, resolved relative to the `@spacedb/conformance` package. */
+/** The vendored corpus directory, resolved relative to the `@benedb/conformance` package. */
 const CORPUS_DIR = resolvePath(
-  dirname(requireFromHere.resolve("@spacedb/conformance/validation-file-loader")),
+  dirname(requireFromHere.resolve("@benedb/conformance/validation-file-loader")),
   "..",
   "corpus",
 );

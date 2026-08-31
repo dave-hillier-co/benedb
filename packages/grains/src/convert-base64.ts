@@ -1,4 +1,4 @@
-import { FormatError } from "@spacedb/core/format-error";
+import { FormatError } from "@benedb/core/format-error";
 
 /**
  * `System.Convert`'s base64 pair, hand-rolled because the JavaScript equivalents differ in the one

@@ -1,5 +1,5 @@
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 import { raceSignal } from "@thresh/core/abort";
 
 import type { DatastoreGrainState } from "./datastore-grain-state";

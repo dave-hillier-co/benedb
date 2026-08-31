@@ -1,6 +1,6 @@
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { IRevisionParser } from "@spacedb/core/i-revision-parser";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { IRevisionParser } from "@benedb/core/i-revision-parser";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
 
 /**
  * Decodes the timestamp revision string form (integer nanos) back into a `TimestampRevision`.

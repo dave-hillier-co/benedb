@@ -1,6 +1,6 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { systemClockNow } from "@spacedb/engine/clock";
-import { LookupSubjectsEngine } from "@spacedb/engine/lookup-subjects-engine";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { systemClockNow } from "@benedb/engine/clock";
+import { LookupSubjectsEngine } from "@benedb/engine/lookup-subjects-engine";
 import { grain } from "@thresh/core/decorators";
 import { Grain } from "@thresh/core/grain";
 

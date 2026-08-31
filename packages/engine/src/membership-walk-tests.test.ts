@@ -1,11 +1,11 @@
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import type { IDatastoreReader } from "@spacedb/datastore/i-datastore";
-import { ReferenceDatastore } from "@spacedb/datastore/reference-datastore";
-import { compile } from "@spacedb/schema/schema-compiler";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import type { IDatastoreReader } from "@benedb/datastore/i-datastore";
+import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import { compile } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import { buildMembershipCoverage, type MembershipCoverage } from "./membership-coverage";

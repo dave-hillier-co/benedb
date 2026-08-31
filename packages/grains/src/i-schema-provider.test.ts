@@ -1,9 +1,9 @@
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { computeSchemaHash } from "@spacedb/engine/schema-hash";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
-import { SchemaCompileException } from "@spacedb/schema/schema-compile-exception";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { computeSchemaHash } from "@benedb/engine/schema-hash";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
+import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import { MutableSchemaProvider, SchemaSnapshot } from "./i-schema-provider";

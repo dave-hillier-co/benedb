@@ -1,6 +1,6 @@
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import { validateRelationship, type Relationship } from "@spacedb/core/relationship";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import { validateRelationship, type Relationship } from "@benedb/core/relationship";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import {

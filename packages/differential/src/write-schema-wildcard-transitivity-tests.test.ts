@@ -1,11 +1,11 @@
 import { status } from "@grpc/grpc-js";
 import { describe, expect, it } from "vitest";
-import { AuthzedSchemaV1Service } from "@spacedb/api/authzed-schema-v1-service";
-import { RpcError } from "@spacedb/api/rpc-error";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
-import { RelationshipUpdate_Operation } from "@spacedb/protos/authzed/api/v1/core";
-import { WriteRelationshipsRequest } from "@spacedb/protos/authzed/api/v1/permission_service";
-import { WriteSchemaRequest } from "@spacedb/protos/authzed/api/v1/schema_service";
+import { AuthzedSchemaV1Service } from "@benedb/api/authzed-schema-v1-service";
+import { RpcError } from "@benedb/api/rpc-error";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
+import { RelationshipUpdate_Operation } from "@benedb/protos/authzed/api/v1/core";
+import { WriteRelationshipsRequest } from "@benedb/protos/authzed/api/v1/permission_service";
+import { WriteSchemaRequest } from "@benedb/protos/authzed/api/v1/schema_service";
 
 import {
   spiceDbAvailable,
@@ -25,7 +25,7 @@ import { resetSpiceDb } from "./spice-db-reset";
  * schema shapes chosen to pin the accept/reject boundary the type validator has to reproduce
  * exactly.
  *
- * Each case writes the SAME schema text to a real SpiceDB container and to SpaceDB's in-process
+ * Each case writes the SAME schema text to a real SpiceDB container and to BeneDB's in-process
  * `AuthzedSchemaV1Service` (over the real grain mesh, via `MeshTestCluster`), and asserts both
  * sides reach the same accept/reject verdict - and, when rejecting, the same gRPC status code
  * (`FAILED_PRECONDITION`).
@@ -41,7 +41,7 @@ import { resetSpiceDb } from "./spice-db-reset";
  *     container and each mutates its schema, so the file is `describe.sequential` and
  *     {@link resetSpiceDb} runs BEFORE each `WriteSchema`, never after.
  *  4. ERROR SHAPES DIFFER BY SIDE: the real-SpiceDB side rejects with a grpc-js `ServiceError`
- *     (numeric `.code`), the SpaceDB side with an `RpcError`. Each is asserted against its own
+ *     (numeric `.code`), the BeneDB side with an `RpcError`. Each is asserted against its own
  *     shape; a shared matcher would silently pass on one of them.
  */
 
@@ -126,7 +126,7 @@ async function caught(promise: Promise<unknown>): Promise<unknown> {
 
 describe.sequential("WriteSchemaWildcardTransitivityTests", () => {
   for (const [label, schema] of RejectedShapes) {
-    it(`Rejected by real SpiceDB is also rejected by SpaceDB [${label}]`, async (ctx) => {
+    it(`Rejected by real SpiceDB is also rejected by BeneDB [${label}]`, async (ctx) => {
       ctx.skip(!spiceDbAvailable, spiceDbSkipReason);
 
       const spiceDbClient = new SpiceDbGrpcClient(fixture().address, fixture().preSharedKey);
@@ -148,11 +148,11 @@ describe.sequential("WriteSchemaWildcardTransitivityTests", () => {
       try {
         const service = new AuthzedSchemaV1Service(cluster.grainFactory, cluster.schemaProvider);
 
-        const spacedbError = await caught(service.writeSchema({ schema }));
-        expect(spacedbError, `[${label}] expected SpaceDB to reject`).toBeInstanceOf(RpcError);
+        const benedbError = await caught(service.writeSchema({ schema }));
+        expect(benedbError, `[${label}] expected BeneDB to reject`).toBeInstanceOf(RpcError);
         expect(
-          (spacedbError as RpcError).code,
-          `[${label}] expected FAILED_PRECONDITION, got ${(spacedbError as RpcError).code}: ${(spacedbError as RpcError).details}`,
+          (benedbError as RpcError).code,
+          `[${label}] expected FAILED_PRECONDITION, got ${(benedbError as RpcError).code}: ${(benedbError as RpcError).details}`,
         ).toBe(status.FAILED_PRECONDITION);
       } finally {
         await cluster.dispose();
@@ -161,7 +161,7 @@ describe.sequential("WriteSchemaWildcardTransitivityTests", () => {
   }
 
   for (const [label, schema] of AcceptedShapes) {
-    it(`Accepted by real SpiceDB is also accepted by SpaceDB [${label}]`, async (ctx) => {
+    it(`Accepted by real SpiceDB is also accepted by BeneDB [${label}]`, async (ctx) => {
       ctx.skip(!spiceDbAvailable, spiceDbSkipReason);
 
       const spiceDbClient = new SpiceDbGrpcClient(fixture().address, fixture().preSharedKey);
@@ -181,7 +181,7 @@ describe.sequential("WriteSchemaWildcardTransitivityTests", () => {
 
         expect(
           error === undefined,
-          `[${label}] expected SpaceDB to accept, got: ${String(error)}`,
+          `[${label}] expected BeneDB to accept, got: ${String(error)}`,
         ).toBe(true);
       } finally {
         await cluster.dispose();

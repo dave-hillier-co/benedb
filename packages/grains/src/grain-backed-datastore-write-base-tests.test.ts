@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { CreateRelationshipExistsException } from "@spacedb/datastore/datastore-exceptions";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { CreateRelationshipExistsException } from "@benedb/datastore/datastore-exceptions";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { GrainKeyFor } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";

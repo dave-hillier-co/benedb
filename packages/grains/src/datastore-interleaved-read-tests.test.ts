@@ -1,6 +1,6 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { ObjectAndRelation } from "@spacedb/core/object-and-relation";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
 import type { GrainId } from "@thresh/core/grain-id";
 import type { GrainStorage, StateHolder } from "@thresh/core/grain-storage";
 import { grainReferenceIdentity } from "@thresh/core/grain-reference";

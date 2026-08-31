@@ -1,5 +1,5 @@
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
 import { registerSurrogate } from "@thresh/core/value-codec";
 
 /**
@@ -8,7 +8,7 @@ import { registerSurrogate } from "@thresh/core/value-codec";
  * The datastore-layer `RevisionNotFoundException` is a domain exception that must NOT take a Thresh
  * dependency, yet it crosses the grain boundary when `IDatastoreLog.readFrom` rejects a cursor older
  * than the GC window. So the registration lives here, in the grains layer, rather than alongside the
- * four siblings registered in `@spacedb/datastore/datastore-exceptions`.
+ * four siblings registered in `@benedb/datastore/datastore-exceptions`.
  *
  * The consequence is load-bearing: `dispatch-error-mapper` treats RevisionNotFoundException as a
  * DOMAIN exception (caller-facing InvalidArgument). If it did not come back as its own class the
@@ -24,7 +24,7 @@ import { registerSurrogate } from "@thresh/core/value-codec";
 // datastore's revision type simply does not survive this hop and arrives as nanos 0. `long` becomes
 // `bigint` end to end - the nanos run past 2^53.
 registerSurrogate<RevisionNotFoundException>({
-  tag: "spacedb.revisionNotFoundException",
+  tag: "benedb.revisionNotFoundException",
   // Narrow to the concrete class, never to the `DatastoreException` base: registration order means
   // later registrations are tested first, so a base-class predicate here would swallow every
   // datastore exception into this tag.

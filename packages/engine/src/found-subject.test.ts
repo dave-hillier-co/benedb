@@ -1,4 +1,4 @@
-import { PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
+import { PUBLIC_WILDCARD } from "@benedb/core/core-constants";
 import { describe, expect, it } from "vitest";
 
 import { caveatExpressionFromCaveat } from "./caveat-expression";

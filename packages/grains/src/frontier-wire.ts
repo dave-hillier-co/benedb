@@ -1,4 +1,4 @@
-import type { FoundSubject } from "@spacedb/engine/found-subject";
+import type { FoundSubject } from "@benedb/engine/found-subject";
 
 import { caveatFromWire, caveatToWire } from "./caveat-wire";
 import type { FrontierSubjectWire } from "./subject-frontier-dtos";

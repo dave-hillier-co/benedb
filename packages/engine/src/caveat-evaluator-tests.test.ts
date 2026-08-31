@@ -1,5 +1,5 @@
-import type { CaveatDefinition, CaveatTypeReference } from "@spacedb/core/caveat-definition";
-import { CaveatEvaluationException } from "@spacedb/core/caveat-evaluation-exception";
+import type { CaveatDefinition, CaveatTypeReference } from "@benedb/core/caveat-definition";
+import { CaveatEvaluationException } from "@benedb/core/caveat-evaluation-exception";
 import { describe, expect, it } from "vitest";
 
 import { CaveatEvaluator } from "./caveat-evaluator";

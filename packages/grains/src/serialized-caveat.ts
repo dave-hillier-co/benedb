@@ -2,7 +2,7 @@
  * A serializable mirror of the engine's `CaveatExpression` tree, used to carry a pre-context
  * gating caveat across the grain boundary.
  *
- * The engine's `CaveatExpression` lives in `@spacedb/engine`, which this layer deliberately does
+ * The engine's `CaveatExpression` lives in `@benedb/engine`, which this layer deliberately does
  * not reference. This tree is the wire form: a leaf names a caveat (with its
  * relationship-supplied context from `ContextualizedCaveat`, a core type), and composites combine
  * children with OR / AND / NOT. The dispatcher maps between this and the engine's tree.

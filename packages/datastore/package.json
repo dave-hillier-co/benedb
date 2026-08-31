@@ -1,5 +1,5 @@
 {
-  "name": "@spacedb/datastore",
+  "name": "@benedb/datastore",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "@spacedb/core": "workspace:*",
+    "@benedb/core": "workspace:*",
     "@thresh/core": "link:../../../thresh/packages/core"
   }
 }

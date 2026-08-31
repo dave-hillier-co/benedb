@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { IRevisionParser } from "@spacedb/core/i-revision-parser";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import type { ZedToken } from "@spacedb/core/zed-token";
-import { decodeRevision, zedTokenFromRevision } from "@spacedb/core/zed-tokens";
+import type { IRevisionParser } from "@benedb/core/i-revision-parser";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import type { ZedToken } from "@benedb/core/zed-token";
+import { decodeRevision, zedTokenFromRevision } from "@benedb/core/zed-tokens";
 
 import { TimestampRevisionParser } from "./timestamp-revision-parser";
 

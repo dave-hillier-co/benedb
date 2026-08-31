@@ -1,4 +1,4 @@
-import { CheckPermissionResponse_Permissionship } from "@spacedb/protos/authzed/api/v1/permission_service";
+import { CheckPermissionResponse_Permissionship } from "@benedb/protos/authzed/api/v1/permission_service";
 
 /**
  * The comparison scaffolding shared by the two broad-sweep differential suites,
@@ -27,7 +27,7 @@ import { CheckPermissionResponse_Permissionship } from "@spacedb/protos/authzed/
  *     is written out explicitly and used everywhere. The ordering only ever appears inside a
  *     FAILURE MESSAGE, which is exactly why it must be stable: a human diffs those two lists.
  *  2. `SetEquals` COMPARES SIZE FIRST, THEN MEMBERSHIP. A subset check alone would silently pass
- *     when SpaceDB returns EXTRA ids that real SpiceDB does not - the exact shape of an
+ *     when BeneDB returns EXTRA ids that real SpiceDB does not - the exact shape of an
  *     over-permissive bug this gate exists to catch.
  */
 

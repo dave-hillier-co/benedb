@@ -4,13 +4,13 @@ import {
   Relationship,
   RelationshipUpdate,
   RelationshipUpdate_Operation,
-} from "@spacedb/protos/authzed/api/v1/core";
+} from "@benedb/protos/authzed/api/v1/core";
 import {
   Precondition,
   Precondition_Operation,
   WriteRelationshipsRequest,
-} from "@spacedb/protos/authzed/api/v1/permission_service";
-import { Struct } from "@spacedb/protos/google/protobuf/struct";
+} from "@benedb/protos/authzed/api/v1/permission_service";
+import { Struct } from "@benedb/protos/google/protobuf/struct";
 import { describe, expect, it } from "vitest";
 
 import {

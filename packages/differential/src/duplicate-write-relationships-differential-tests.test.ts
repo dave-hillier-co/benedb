@@ -1,12 +1,12 @@
 import { status } from "@grpc/grpc-js";
 import { describe, expect, it } from "vitest";
-import { AuthzedPermissionsV1Service } from "@spacedb/api/authzed-permissions-v1-service";
-import { RpcError } from "@spacedb/api/rpc-error";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
-import type { Relationship, RelationshipUpdate } from "@spacedb/protos/authzed/api/v1/core";
-import { RelationshipUpdate_Operation } from "@spacedb/protos/authzed/api/v1/core";
-import { WriteRelationshipsRequest } from "@spacedb/protos/authzed/api/v1/permission_service";
-import { WriteSchemaRequest } from "@spacedb/protos/authzed/api/v1/schema_service";
+import { AuthzedPermissionsV1Service } from "@benedb/api/authzed-permissions-v1-service";
+import { RpcError } from "@benedb/api/rpc-error";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
+import type { Relationship, RelationshipUpdate } from "@benedb/protos/authzed/api/v1/core";
+import { RelationshipUpdate_Operation } from "@benedb/protos/authzed/api/v1/core";
+import { WriteRelationshipsRequest } from "@benedb/protos/authzed/api/v1/permission_service";
+import { WriteSchemaRequest } from "@benedb/protos/authzed/api/v1/schema_service";
 
 import {
   spiceDbAvailable,
@@ -23,7 +23,7 @@ import { resetSpiceDb } from "./spice-db-reset";
  * Directed differential regression for spiceport issue #34: a request with two updates for the same
  * relationship (varying only operation kind and/or caveat) must be rejected as `INVALID_ARGUMENT`,
  * not silently tolerated. Runs the SAME requests against a real `authzed/spicedb` container and
- * against SpaceDB's in-process `AuthzedPermissionsV1Service` and asserts both reject with the SAME
+ * against BeneDB's in-process `AuthzedPermissionsV1Service` and asserts both reject with the SAME
  * gRPC status.
  *
  * Real SpiceDB (authzed/spicedb v1.49.2), empirically observed by driving `WriteRelationships`
@@ -42,7 +42,7 @@ import { resetSpiceDb } from "./spice-db-reset";
  * NOT apply this same-request dedup check: two identical rows in one streamed batch instead surface
  * as a CREATE-conflict `AlreadyExists` ("could not CREATE relationship ..., as it already
  * existed"), because SpiceDB's bulk-import path applies each row with create semantics rather than
- * pre-validating the whole batch for duplicates. SpaceDB's `importBulkRelationships` matches that
+ * pre-validating the whole batch for duplicates. BeneDB's `importBulkRelationships` matches that
  * CREATE-style bulk import (issue #35); `import-bulk-relationships-differential-tests.test.ts` is
  * the differential gate for it.
  *
@@ -55,7 +55,7 @@ import { resetSpiceDb } from "./spice-db-reset";
  *     `context`. The C#'s `Struct`/`Value.ForNumber` API has no counterpart and hand-building
  *     `{ fields: { value: { numberValue: 1 } } }` would be wrong.
  *  3. ERROR SHAPES DIFFER BY SIDE: real SpiceDB yields a grpc-js `ServiceError` (numeric `.code`,
- *     `.details`); SpaceDB throws `RpcError`. Each is asserted against its own shape.
+ *     `.details`); BeneDB throws `RpcError`. Each is asserted against its own shape.
  *  4. `[Collection(SpiceDbCollection.Name)]` -> `useSpiceDbContainer` + `describe.sequential`, with
  *     `resetSpiceDb` then `WriteSchema` before each case. Clusters dispose in an explicit `finally`
  *     (TypeScript has no `await using`).
@@ -183,10 +183,10 @@ describe.sequential("DuplicateWriteRelationshipsDifferentialTests", () => {
           cluster.schemaProvider,
         );
 
-        const spacedbError = await caught(permissionsService.writeRelationships(buildRequest()));
-        expect(spacedbError).toBeInstanceOf(RpcError);
-        expect((spacedbError as RpcError).code).toBe(status.INVALID_ARGUMENT);
-        expect((spacedbError as RpcError).details).toContain(
+        const benedbError = await caught(permissionsService.writeRelationships(buildRequest()));
+        expect(benedbError).toBeInstanceOf(RpcError);
+        expect((benedbError as RpcError).code).toBe(status.INVALID_ARGUMENT);
+        expect((benedbError as RpcError).details).toContain(
           "more than one update with relationship",
         );
       } finally {

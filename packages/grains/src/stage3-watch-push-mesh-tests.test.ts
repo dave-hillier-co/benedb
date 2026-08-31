@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { RelationshipUpdate } from "@spacedb/core/relationship-update";
-import { WatchContent, type RevisionChange } from "@spacedb/datastore/watch";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { createRelationship } from "@benedb/core/relationship";
+import type { RelationshipUpdate } from "@benedb/core/relationship-update";
+import { WatchContent, type RevisionChange } from "@benedb/datastore/watch";
 import { createClient, type ClientNode } from "@thresh/client/client-node";
 import { IManagementGrain } from "@thresh/core/management-grain";
 import { SiloAddress } from "@thresh/core/silo-address";

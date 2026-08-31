@@ -1,20 +1,20 @@
-import { allowedRelationSource } from "@spacedb/core/allowed-relation-identity";
-import type { AllowedRelation } from "@spacedb/core/allowed-relation";
+import { allowedRelationSource } from "@benedb/core/allowed-relation-identity";
+import type { AllowedRelation } from "@benedb/core/allowed-relation";
 import {
   caveatTypeReferenceEquals,
   type CaveatDefinition,
   type CaveatTypeReference,
-} from "@spacedb/core/caveat-definition";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { isPermission, type Relation } from "@spacedb/core/relation";
+} from "@benedb/core/caveat-definition";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { isPermission, type Relation } from "@benedb/core/relation";
 import {
   setOperationChildEquals,
   type SetOperation,
   type SetOperationChild,
   type UsersetRewrite,
-} from "@spacedb/core/userset-rewrite";
-import type { CompiledSchema } from "@spacedb/schema/compiled-schema";
+} from "@benedb/core/userset-rewrite";
+import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 
 /**
  * Ported from Spiceport `Grains/SchemaDiff.cs` - the pure, datastore-free diff engine shared by

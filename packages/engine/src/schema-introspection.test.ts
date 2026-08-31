@@ -1,10 +1,10 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { allowedRelationDirect } from "@spacedb/core/allowed-relation";
-import { createNamespaceDefinition } from "@spacedb/core/namespace-definition";
-import type { NamespaceDefinition } from "@spacedb/core/namespace-definition";
-import { baseRelation, permission } from "@spacedb/core/relation";
-import { setOperationUnion } from "@spacedb/core/userset-rewrite";
-import { compileSchema } from "@spacedb/schema/schema-compiler";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { allowedRelationDirect } from "@benedb/core/allowed-relation";
+import { createNamespaceDefinition } from "@benedb/core/namespace-definition";
+import type { NamespaceDefinition } from "@benedb/core/namespace-definition";
+import { baseRelation, permission } from "@benedb/core/relation";
+import { setOperationUnion } from "@benedb/core/userset-rewrite";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import { buildReachabilityGraph } from "./reachability-graph";

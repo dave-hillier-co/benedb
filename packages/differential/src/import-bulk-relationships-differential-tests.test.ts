@@ -1,16 +1,16 @@
 import { status } from "@grpc/grpc-js";
 import { describe, expect, it } from "vitest";
-import { AuthzedPermissionsV1Service } from "@spacedb/api/authzed-permissions-v1-service";
-import { RpcError } from "@spacedb/api/rpc-error";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
-import type { Relationship, SubjectReference } from "@spacedb/protos/authzed/api/v1/core";
+import { AuthzedPermissionsV1Service } from "@benedb/api/authzed-permissions-v1-service";
+import { RpcError } from "@benedb/api/rpc-error";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
+import type { Relationship, SubjectReference } from "@benedb/protos/authzed/api/v1/core";
 import {
   CheckPermissionRequest,
   CheckPermissionResponse_Permissionship,
   ImportBulkRelationshipsRequest,
   ReadRelationshipsRequest,
-} from "@spacedb/protos/authzed/api/v1/permission_service";
-import { WriteSchemaRequest } from "@spacedb/protos/authzed/api/v1/schema_service";
+} from "@benedb/protos/authzed/api/v1/permission_service";
+import { WriteSchemaRequest } from "@benedb/protos/authzed/api/v1/schema_service";
 
 import {
   spiceDbAvailable,
@@ -26,7 +26,7 @@ import { resetSpiceDb } from "./spice-db-reset";
  *
  * Directed differential gate for spiceport issue #35: `ImportBulkRelationships` applies CREATE
  * semantics. Runs the SAME import streams against a real `authzed/spicedb` container and against
- * SpaceDB's in-process `AuthzedPermissionsV1Service` and asserts both agree.
+ * BeneDB's in-process `AuthzedPermissionsV1Service` and asserts both agree.
  *
  * Real SpiceDB (authzed/spicedb v1.49.2), empirically observed by driving the client-streaming
  * `ImportBulkRelationships` directly over gRPC:
@@ -46,19 +46,19 @@ import { resetSpiceDb } from "./spice-db-reset";
  *     becomes `toBe("3")`, and the cross-system check compares string to string. NEVER `Number(...)`
  *     or `parseInt` on either side - a revision or count quantised through a float64 is a silent
  *     corruption.
- *  2. `FakeAsyncStreamReader<T>` has NO counterpart: SpaceDB's `importBulkRelationships` takes a
+ *  2. `FakeAsyncStreamReader<T>` has NO counterpart: BeneDB's `importBulkRelationships` takes a
  *     plain `AsyncIterable<T>` plus a trailing optional `AbortSignal` instead of
  *     `IAsyncStreamReader` + `ServerCallContext` - the deviation already recorded in
  *     `authzed-permissions-v1-service-tests.test.ts`, whose `asyncStream` replay helper this reuses
  *     in shape rather than reinventing as a class.
  *  3. `Batches()` STAYS A FUNCTION returning a fresh array on each call, because the same batches
- *     are consumed twice (real side, then SpaceDB side) and a stateful reader or a reused async
+ *     are consumed twice (real side, then BeneDB side) and a stateful reader or a reused async
  *     generator would silently deliver nothing the second time.
- *  4. The SpiceDB side goes through the client-streaming WIRE; the SpaceDB side goes through the
+ *  4. The SpiceDB side goes through the client-streaming WIRE; the BeneDB side goes through the
  *     in-process service. Both get the same batch boundaries - the (2 rows, then 1) split is
  *     deliberate for the cross-batch case.
  *  5. ERROR SHAPES DIFFER BY SIDE: real SpiceDB yields a grpc-js `ServiceError` (numeric `.code`,
- *     `.details`); SpaceDB throws `RpcError`. Each is asserted against its own shape.
+ *     `.details`); BeneDB throws `RpcError`. Each is asserted against its own shape.
  *  6. `[Collection(SpiceDbCollection.Name)]` -> `useSpiceDbContainer` + `describe.sequential`, with
  *     `resetSpiceDb` then `WriteSchema` per test, and an explicit `finally` cluster dispose.
  */
@@ -151,11 +151,11 @@ describe.sequential("ImportBulkRelationshipsDifferentialTests", () => {
     try {
       const svc = service(cluster);
 
-      const spacedbError = await caught(svc.importBulkRelationships(asyncStream(batches())));
-      expect(spacedbError).toBeInstanceOf(RpcError);
-      expect((spacedbError as RpcError).code).toBe(status.ALREADY_EXISTS);
-      expect((spacedbError as RpcError).details).toContain("could not CREATE relationship");
-      expect((spacedbError as RpcError).details).toContain("document:d1#viewer@user:alice");
+      const benedbError = await caught(svc.importBulkRelationships(asyncStream(batches())));
+      expect(benedbError).toBeInstanceOf(RpcError);
+      expect((benedbError as RpcError).code).toBe(status.ALREADY_EXISTS);
+      expect((benedbError as RpcError).details).toContain("could not CREATE relationship");
+      expect((benedbError as RpcError).details).toContain("document:d1#viewer@user:alice");
 
       // Same whole-stream atomicity: batch 1's clean row is not visible after the failed import.
       const check = await svc.checkPermission(
@@ -200,12 +200,12 @@ describe.sequential("ImportBulkRelationshipsDifferentialTests", () => {
 
     const cluster = await MeshTestCluster.create(Schema);
     try {
-      const spacedbError = await caught(
+      const benedbError = await caught(
         service(cluster).importBulkRelationships(asyncStream(batches())),
       );
-      expect(spacedbError).toBeInstanceOf(RpcError);
-      expect((spacedbError as RpcError).code).toBe(status.ALREADY_EXISTS);
-      expect((spacedbError as RpcError).details).toContain("could not CREATE relationship");
+      expect(benedbError).toBeInstanceOf(RpcError);
+      expect((benedbError as RpcError).code).toBe(status.ALREADY_EXISTS);
+      expect((benedbError as RpcError).details).toContain("could not CREATE relationship");
     } finally {
       await cluster.dispose();
     }
@@ -235,8 +235,8 @@ describe.sequential("ImportBulkRelationshipsDifferentialTests", () => {
 
     const cluster = await MeshTestCluster.create(Schema);
     try {
-      const spacedbResp = await service(cluster).importBulkRelationships(asyncStream(batches()));
-      expect(spacedbResp.numLoaded).toBe(spiceDbNumLoaded);
+      const benedbResp = await service(cluster).importBulkRelationships(asyncStream(batches()));
+      expect(benedbResp.numLoaded).toBe(spiceDbNumLoaded);
     } finally {
       await cluster.dispose();
     }

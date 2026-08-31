@@ -1,24 +1,24 @@
-import { FULLY_CONSISTENT } from "@spacedb/core/consistency-requirement";
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import type { IRevisionParser } from "@spacedb/core/i-revision-parser";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { zedTokenFromRevision } from "@spacedb/core/zed-tokens";
-import type { RegisteredCounter } from "@spacedb/datastore/counters";
+import { FULLY_CONSISTENT } from "@benedb/core/consistency-requirement";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import type { IRevisionParser } from "@benedb/core/i-revision-parser";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
+import type { RegisteredCounter } from "@benedb/datastore/counters";
 import {
   CounterAlreadyRegisteredException,
   CounterNotRegisteredException,
   CreateRelationshipExistsException,
   SerializationException,
-} from "@spacedb/datastore/datastore-exceptions";
+} from "@benedb/datastore/datastore-exceptions";
 import type {
   IDatastore,
   IDatastoreReader,
   RevisionWithSchemaHash,
-} from "@spacedb/datastore/i-datastore";
-import type { RelationshipsFilter } from "@spacedb/datastore/relationships-filter";
+} from "@benedb/datastore/i-datastore";
+import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 import { grain } from "@thresh/core/decorators";
 import { Grain } from "@thresh/core/grain";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";

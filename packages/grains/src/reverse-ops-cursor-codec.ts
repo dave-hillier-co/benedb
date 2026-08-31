@@ -1,9 +1,9 @@
-import { FormatError } from "@spacedb/core/format-error";
-import type { RelationshipReference } from "@spacedb/core/relationship-reference";
+import { FormatError } from "@benedb/core/format-error";
+import type { RelationshipReference } from "@benedb/core/relationship-reference";
 import type {
   LookupResourcesCursor,
   LookupResourcesCursorSection,
-} from "@spacedb/engine/lookup-resources-cursor";
+} from "@benedb/engine/lookup-resources-cursor";
 
 import { fromBase64String, toBase64String } from "./convert-base64";
 import { escapeDataString, unescapeDataString } from "./grain-key-codec";

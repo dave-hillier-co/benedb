@@ -1,6 +1,6 @@
 import { status } from "@grpc/grpc-js";
-import { decodeRevision, zedTokenFromRevision } from "@spacedb/core/zed-tokens";
-import { MeshTestCluster } from "@spacedb/grains/mesh-test-cluster";
+import { decodeRevision, zedTokenFromRevision } from "@benedb/core/zed-tokens";
+import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import {
   CheckPermissionRequest,
   CheckPermissionResponse_Permissionship,
@@ -9,7 +9,7 @@ import {
   WriteRelationshipsRequest,
   type Consistency,
   type ZedToken,
-} from "@spacedb/protos/permissions";
+} from "@benedb/protos/permissions";
 import { describe, expect, it } from "vitest";
 
 import { PermissionsGrpcService } from "./permissions-grpc-service";
@@ -27,7 +27,7 @@ import { RpcError } from "./rpc-error";
  *
  * PORT NOTES.
  *  - LEDGER DEVIATION: lands in `packages/api/src` rather than `packages/grains/src`, because
- *    `@spacedb/grains` does not depend on `@spacedb/api`. See `data-plane-grpc-service-tests.test.ts`.
+ *    `@benedb/grains` does not depend on `@benedb/api`. See `data-plane-grpc-service-tests.test.ts`.
  *  - The `FakeContext : ServerCallContext` class DISAPPEARS: the ported methods take a trailing
  *    optional `AbortSignal`, so every call passes nothing.
  *  - `ZedTokens.FromRevision` / `ZedTokens.DecodeRevision` become the free functions

@@ -1,5 +1,5 @@
 import { CelError, type CelEnv } from "@bufbuild/cel";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 
 import { buildCaveatCelEnvironment } from "./caveat-cel-environment";
 

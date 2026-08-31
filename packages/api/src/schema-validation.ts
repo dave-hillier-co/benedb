@@ -1,7 +1,7 @@
 import { status } from "@grpc/grpc-js";
-import { ELLIPSIS, PUBLIC_WILDCARD } from "@spacedb/core/core-constants";
-import type { SchemaSnapshot } from "@spacedb/grains/i-schema-provider";
-import type { Status as RpcStatus } from "@spacedb/protos/google/rpc/status";
+import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
+import type { SchemaSnapshot } from "@benedb/grains/i-schema-provider";
+import type { Status as RpcStatus } from "@benedb/protos/google/rpc/status";
 
 import { RpcError } from "./rpc-error";
 

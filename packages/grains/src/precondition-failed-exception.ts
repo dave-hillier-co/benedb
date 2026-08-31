@@ -47,7 +47,7 @@ export class PreconditionFailedException extends Error {
 // the one an inline evaluation would have thrown - so the message is distinguishing state, not a
 // derivable convenience.
 registerSurrogate<PreconditionFailedException>({
-  tag: "spacedb.preconditionFailedException",
+  tag: "benedb.preconditionFailedException",
   test: (value) => value instanceof PreconditionFailedException,
   encode: (error) => ({
     kind: error.kind,

@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import type { IRevision } from "@spacedb/core/i-revision";
-import { createRelationship, type Relationship } from "@spacedb/core/relationship";
-import { TimestampRevision } from "@spacedb/core/timestamp-revision";
-import { RevisionNotFoundException } from "@spacedb/datastore/datastore-exceptions";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import type { IRevision } from "@benedb/core/i-revision";
+import { createRelationship, type Relationship } from "@benedb/core/relationship";
+import { TimestampRevision } from "@benedb/core/timestamp-revision";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
 import type { GrainStorage } from "@thresh/core/grain-storage";
 import { PostgresGrainStorage } from "@thresh/persistence/postgres-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
@@ -149,7 +149,7 @@ async function buildCluster(
 
 /** A per-test table name (port decision 2); `PostgresGrainStorage` demands a plain identifier. */
 function freshTable(): string {
-  return `spacedb_durability_${randomUUID().replace(/-/g, "")}`;
+  return `benedb_durability_${randomUUID().replace(/-/g, "")}`;
 }
 
 function nanos(revision: IRevision): bigint {

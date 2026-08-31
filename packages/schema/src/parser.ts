@@ -1,4 +1,4 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
+import { ELLIPSIS } from "@benedb/core/core-constants";
 
 import type {
   CaveatNode,

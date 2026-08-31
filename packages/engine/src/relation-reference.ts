@@ -2,7 +2,7 @@
  * A reference to a relation (or permission) within a namespace. Port of SpiceDB's
  * `core.RelationReference`, via Spiceport `Engine/Reachability/RelationReference.cs`.
  *
- * NAME COLLISION, deliberately preserved: `@spacedb/core/relation-reference` also exports a
+ * NAME COLLISION, deliberately preserved: `@benedb/core/relation-reference` also exports a
  * `RelationReference`, but its members are `{ objectType, relation }` while this engine record's
  * are `{ namespace, relation }` (matching the C# `RelationReference(string Namespace, string
  * Relation)`). The two types are therefore structurally INCOMPATIBLE, which is what we want -

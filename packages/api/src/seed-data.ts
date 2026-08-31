@@ -1,7 +1,7 @@
-import { ELLIPSIS } from "@spacedb/core/core-constants";
-import { InvalidArgumentError } from "@spacedb/core/invalid-argument-error";
-import { createRelationship } from "@spacedb/core/relationship";
-import type { IDatastore } from "@spacedb/datastore/i-datastore";
+import { ELLIPSIS } from "@benedb/core/core-constants";
+import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
+import { createRelationship } from "@benedb/core/relationship";
+import type { IDatastore } from "@benedb/datastore/i-datastore";
 
 /**
  * Ported from Spiceport `src/Spiceport.Api/SeedData.cs`.
