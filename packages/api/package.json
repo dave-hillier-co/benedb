@@ -6,6 +6,9 @@
   "exports": {
     "./*": "./src/*.ts"
   },
+  "scripts": {
+    "start": "vite-node --config ../../vitest.config.ts --root . src/start.ts"
+  },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.1",
     "@spacedb/core": "workspace:*",

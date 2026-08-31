@@ -6,6 +6,9 @@
   "exports": {
     "./*": "./src/*.ts"
   },
+  "scripts": {
+    "start": "vite-node --config ../../vitest.config.ts --root . src/start.ts"
+  },
   "dependencies": {
     "@spacedb/core": "workspace:*",
     "@spacedb/datastore": "workspace:*",
