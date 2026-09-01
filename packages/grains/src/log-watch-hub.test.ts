@@ -1,8 +1,9 @@
+import type { GrainKeyKind } from "@thresh/core/grain-key";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GrainCallAbortedError } from "@thresh/core/errors";
 import type { GrainInterface } from "@thresh/core/grain-interface";
-import type { GrainKeyFor } from "@thresh/core/key-kinds";
+import type { KeyTypeOf } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
 import type { CommitReply, CommitRequest } from "./commit-contract";
@@ -124,7 +125,7 @@ class RecordingFactory implements GrainFactoryAccess {
 
   constructor(private readonly grain: IDatastoreGrain) {}
 
-  getGrain<T>(_def: GrainInterface<T>, _key: GrainKeyFor<T>): T {
+  getGrain<T, K extends GrainKeyKind>(_def: GrainInterface<T, K>, _key: KeyTypeOf<K>): T {
     return this.grain as unknown as T;
   }
 

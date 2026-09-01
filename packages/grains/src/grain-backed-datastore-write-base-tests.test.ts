@@ -1,3 +1,4 @@
+import type { GrainKeyKind } from "@thresh/core/grain-key";
 import { describe, expect, it } from "vitest";
 
 import { ELLIPSIS } from "@benedb/core/core-constants";
@@ -6,7 +7,7 @@ import { createRelationship, type Relationship } from "@benedb/core/relationship
 import type { RelationshipUpdate } from "@benedb/core/relationship-update";
 import { CreateRelationshipExistsException } from "@benedb/datastore/datastore-exceptions";
 import type { GrainInterface } from "@thresh/core/grain-interface";
-import type { GrainKeyFor } from "@thresh/core/key-kinds";
+import type { KeyTypeOf } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
 import type { CommitReply, CommitRequest } from "./commit-contract";
@@ -168,7 +169,7 @@ class CountingFakeGrain implements IDatastoreGrain {
 class SingleGrainFactory implements GrainFactoryAccess {
   constructor(private readonly grain: IDatastoreGrain) {}
 
-  getGrain<T>(_def: GrainInterface<T>, _key: GrainKeyFor<T>): T {
+  getGrain<T, K extends GrainKeyKind>(_def: GrainInterface<T, K>, _key: KeyTypeOf<K>): T {
     return this.grain as unknown as T;
   }
 

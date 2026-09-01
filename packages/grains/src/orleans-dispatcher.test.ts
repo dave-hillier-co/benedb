@@ -1,3 +1,4 @@
+import type { GrainKeyKind } from "@thresh/core/grain-key";
 import { ELLIPSIS } from "@benedb/core/core-constants";
 import type { IRevision } from "@benedb/core/i-revision";
 import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
@@ -10,7 +11,7 @@ import {
   type ResolverMeta,
 } from "@benedb/engine/i-dispatcher";
 import type { GrainInterface } from "@thresh/core/grain-interface";
-import type { GrainKeyFor } from "@thresh/core/key-kinds";
+import type { KeyTypeOf } from "@thresh/core/key-kinds";
 import { RequestContext } from "@thresh/core/request-context";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -87,7 +88,7 @@ class RecordingGrainFactory {
     cycleCut: false,
   });
 
-  getGrain<T>(definition: GrainInterface<T>, key: GrainKeyFor<T>): T {
+  getGrain<T, K extends GrainKeyKind>(definition: GrainInterface<T, K>, key: KeyTypeOf<K>): T {
     const grain: ICheckGrain = {
       dispatchCheck: async (signal?: AbortSignal | undefined) => {
         const index = this.calls.length;

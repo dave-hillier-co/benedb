@@ -1,7 +1,9 @@
+import { normalizeRegistration, type GrainRegistration } from "@thresh/core/grain-registration";
+import type { GrainKeyKind } from "@thresh/core/grain-key";
 import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import type { IDatastore } from "@benedb/datastore/i-datastore";
 import type { GrainInterface } from "@thresh/core/grain-interface";
-import type { GrainKeyFor } from "@thresh/core/key-kinds";
+import type { KeyTypeOf } from "@thresh/core/key-kinds";
 import { SiloAddress } from "@thresh/core/silo-address";
 import {
   createSilo,
@@ -150,14 +152,28 @@ function spyOn(builder: SiloBuilder): Spy {
     spy.outgoing.push(filter);
     return addOutgoing(filter);
   };
+  // Both overloads now take either a class plus its interfaces or a `defineGrain`
+  // definition that carries its own, so the spy collapses them through the same
+  // `normalizeRegistration` the builder uses rather than reading `.ctor` off a
+  // shape only one of them has.
   const registerGrain = builder.registerGrain.bind(builder);
-  builder.registerGrain = (ctor, registration) => {
-    spy.grains.push({ ctor, interfaces: registration.interfaces });
-    return registerGrain(ctor, registration);
-  };
+  builder.registerGrain = ((
+    definition: Parameters<typeof registerGrain>[0],
+    registration?: GrainRegistration,
+  ) => {
+    spy.grains.push(normalizeRegistration(definition, registration));
+    return registerGrain(definition as never, registration as never);
+  }) as typeof builder.registerGrain;
   const registerGrains = builder.registerGrains.bind(builder);
   builder.registerGrains = (registrations) => {
-    for (const r of registrations) spy.grains.push({ ctor: r.ctor, interfaces: r.interfaces });
+    for (const r of registrations) {
+      // A ctor spec carries its interfaces separately; a definition carries its own.
+      spy.grains.push(
+        "ctor" in r
+          ? normalizeRegistration(r.ctor, { interfaces: [...r.interfaces] })
+          : normalizeRegistration(r),
+      );
+    }
     return registerGrains(registrations);
   };
   const addStartupTask = builder.addStartupTask.bind(builder);
@@ -181,7 +197,7 @@ function fakeFactory(): FakeFactory {
   const references: object[] = [];
   return {
     references,
-    getGrain<T>(_def: GrainInterface<T>, _key: GrainKeyFor<T>): T {
+    getGrain<T, K extends GrainKeyKind>(_def: GrainInterface<T, K>, _key: KeyTypeOf<K>): T {
       return new Proxy({} as object, {
         get: () => () => Promise.resolve(undefined),
       }) as T;

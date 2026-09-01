@@ -1,3 +1,4 @@
+import type { GrainKeyKind } from "@thresh/core/grain-key";
 import { ELLIPSIS } from "@benedb/core/core-constants";
 import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
 import { createRelationship, type Relationship } from "@benedb/core/relationship";
@@ -7,7 +8,7 @@ import type { IDatastore } from "@benedb/datastore/i-datastore";
 import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { GrainStorage } from "@thresh/core/grain-storage";
-import type { GrainKeyFor } from "@thresh/core/key-kinds";
+import type { KeyTypeOf } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
@@ -109,7 +110,7 @@ async function newCluster(storage: GrainStorage): Promise<TestCluster> {
  */
 function grainFactory(cluster: TestCluster): GrainFactoryAccess {
   return {
-    getGrain<T>(def: GrainInterface<T>, key: GrainKeyFor<T>): T {
+    getGrain<T, K extends GrainKeyKind>(def: GrainInterface<T, K>, key: KeyTypeOf<K>): T {
       return cluster.primary.host.getGrain(def, key);
     },
     createObjectReference<T>(): T {
