@@ -92,6 +92,16 @@ jobs:
           done > "$RUNNER_TEMP/ports-before.txt" || true
           cat "$RUNNER_TEMP/ports-before.txt"
 
+      # Thresh's OWN dependencies too. BeneDB imports Thresh's TypeScript sources
+      # directly through the workspace link, so `tsc` follows them into the
+      # sibling checkout and typechecks them — against `pg`, `redis`, `kafkajs`
+      # and `@opentelemetry/api`, which live in Thresh's node_modules and not in
+      # BeneDB's. Locally that tree is always installed; on a fresh runner it is
+      # not, and the failure reads as BeneDB's rather than as a missing install.
+      - name: Install Thresh
+        working-directory: thresh
+        run: pnpm install --frozen-lockfile
+
       - name: Install
         run: pnpm install --frozen-lockfile
 
