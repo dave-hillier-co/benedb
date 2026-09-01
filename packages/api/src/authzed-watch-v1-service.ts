@@ -51,17 +51,13 @@ import type { ServerStreamWriter } from "./server-stream-writer";
  *   * `HashSet<string>` over `optional_object_types` becomes a `Set`, ordinal membership. An EMPTY
  *     list is NO filter (`undefined`), never an empty set that matches nothing.
  *
- * SOURCE CONCERN, transliterated rather than fixed (unsure). {@link resolveContent} reproduces the
- * C#'s `ResolveContent` (lines 145-163), whose comment says "If only checkpoints (or only schema)
- * were selected, we still need a content slice or the changefeed would emit nothing to checkpoint
- * over; SpiceDB's content selection is additive" - but the code adds no content slice, so
- * `optional_update_kinds = [WATCH_KIND_INCLUDE_CHECKPOINTS]` alone yields `checkpoints` (4) with
- * the `relationships` bit (1) UNSET. The comment and the code disagree; the CODE is ported.
+ * {@link resolveContent} reproduces the C#'s `ResolveContent` with no additive fallback - the
+ * source's stale comment claiming one was needed was corrected upstream (issue #43, Spiceport
+ * `21dc4d3`): checkpoint emission is keyed off commit activity itself, so a checkpoints-only mask
+ * still sees checkpoints on every commit.
  *
- * SOURCE CONCERN, second, already recorded on `authzed-permissions-v1-service.ts`:
- * {@link toProtoRelationship} never sets `optional_expires_at`, although the vendored
- * `authzed/api/v1/core.proto` declares it and the generated bindings carry `optionalExpiresAt`, so
- * a watched relationship's expiration is dropped on this surface. The omission is deliberate.
+ * {@link toProtoRelationship} populates `optional_expires_at` from a stored expiry - the earlier
+ * deliberate omission was fixed at the source (issue #39, Spiceport `ad647b4`).
  */
 export class AuthzedWatchV1Service {
   readonly #datastore: IDatastore;
@@ -229,9 +225,10 @@ function resolveContent(request: WatchRequest): WatchContent {
           : WatchContentFlags.relationships;
   }
 
-  // The C# comment here promises an additive content slice when only checkpoints (or only schema)
-  // were selected; the code does not add one, and the code is what is ported. See the class
-  // doc-comment's source concern.
+  // No additive fallback needed here: the datastore's checkpoint emission (see IDatastore.watch /
+  // WatchOptions) is keyed off commit activity itself, not off whether the requested content flags
+  // matched anything, so a checkpoints-only (or schema-only) mask still sees checkpoints emitted
+  // on every commit.
   return content;
 }
 
@@ -272,8 +269,15 @@ function toProtoRelationship(rel: Relationship): ProtoRelationship {
     proto.optionalCaveat = pc;
   }
 
+  if (rel.optionalExpiration !== undefined) {
+    proto.optionalExpiresAt = new Date(Number(rel.optionalExpiration / NANOS_PER_MILLISECOND));
+  }
+
   return proto;
 }
+
+/** ts-proto Timestamps are millisecond `Date`s; core `optionalExpiration` is epoch nanos. */
+const NANOS_PER_MILLISECOND = 1_000_000n;
 
 /** `DictToStruct`: an absent or EMPTY dictionary is `undefined` (C# `null`). */
 function mapToStruct(

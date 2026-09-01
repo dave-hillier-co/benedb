@@ -39,11 +39,8 @@ import { CollectingStreamWriter } from "./collecting-stream-writer";
  *  - `ZedTokens.FromRevision` is `zedTokenFromRevision` from `@benedb/core/zed-tokens`.
  *  - `await using var cluster` becomes an explicit `try { ... } finally { await cluster.dispose(); }`.
  *
- * WHAT THIS FILE DOES NOT BEAR ON. Neither checkpoint case is a checkpoints-ONLY watch (both select
- * INCLUDE_RELATIONSHIP_UPDATES as well), so nothing here confirms or contradicts spiceport#43
- * (`ResolveContent` returning checkpoints alone for a checkpoints-only watch) - the service is left
- * exactly as it stands. Nor does any case read `optional_expires_at`, so nothing here bears on
- * spiceport#39 (expiration dropped in both directions on the v1 surface).
+ * The checkpoints-ONLY case (spiceport#43) and the expiration round trip (spiceport#39) are both
+ * pinned below, following the source's fixes (`21dc4d3`, `ad647b4`).
  */
 
 const SchemaText = `definition user {}
@@ -76,6 +73,29 @@ function writeViewer(
       subjectType: "user",
       subjectId: user,
       subjectRelation: ELLIPSIS,
+    },
+  };
+  return cluster.relationships.writeRelationships({ updates: [update] });
+}
+
+/** `WriteViewerWithExpiration(cluster, type, id, user, expiration)` - epoch-nanos expiry. */
+function writeViewerWithExpiration(
+  cluster: MeshTestCluster,
+  type: string,
+  id: string,
+  user: string,
+  expirationNanos: bigint,
+): Promise<unknown> {
+  const update: RelationshipUpdateWire = {
+    operation: "touch",
+    relationship: {
+      resourceType: type,
+      resourceId: id,
+      resourceRelation: "viewer",
+      subjectType: "user",
+      subjectId: user,
+      subjectRelation: ELLIPSIS,
+      expiration: expirationNanos,
     },
   };
   return cluster.relationships.writeRelationships({ updates: [update] });
@@ -114,6 +134,36 @@ describe("AuthzedWatchV1ServiceTests", () => {
       expect(update.operation).toBe(RelationshipUpdate_Operation.OPERATION_TOUCH);
       expect(update.relationship?.resource?.objectId).toBe("doc1");
       expect(update.relationship?.subject?.object?.objectId).toBe("alice");
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  it("Watch_includes_relationship_expiration", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+
+      const watchTask = svc.watch(watchRequest(), writer, controller.signal);
+
+      const expiresAt = new Date(Date.UTC(2099, 0, 1));
+      await writeViewerWithExpiration(
+        cluster,
+        "document",
+        "doc3",
+        "dana",
+        BigInt(expiresAt.getTime()) * 1_000_000n,
+      );
+
+      const response = await writer.waitForNext(10_000, watchTask);
+      controller.abort();
+      await watchTask;
+
+      expect(response.updates.length).toBe(1);
+      expect(response.updates[0]?.relationship?.optionalExpiresAt).toEqual(expiresAt);
     } finally {
       await cluster.dispose();
     }
@@ -232,6 +282,38 @@ describe("AuthzedWatchV1ServiceTests", () => {
       expect(checkpoint.isCheckpoint).toBe(true);
       expect(checkpoint.updates).toEqual([]);
       expect(checkpoint.changesThrough?.token ?? "").not.toBe("");
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  it("Watch_with_checkpoints_only_still_emits_checkpoints_with_no_content", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+
+      // Requesting checkpoints ONLY (no INCLUDE_RELATIONSHIP_UPDATES, no INCLUDE_SCHEMA_UPDATES):
+      // the resulting WatchContent has just the checkpoints bit set. Content selection is additive
+      // in name only here -- checkpoint emission is driven by commit activity, not by the content
+      // mask matching anything, so this must still see a checkpoint (and never relationship
+      // content). Pins issue #43.
+      const request = watchRequest({
+        optionalUpdateKinds: [WatchKind.WATCH_KIND_INCLUDE_CHECKPOINTS],
+      });
+      const watchTask = svc.watch(request, writer, controller.signal);
+
+      await writeViewer(cluster, "document", "doc1", "alice");
+
+      const response = await writer.waitForNext(10_000, watchTask);
+      controller.abort();
+      await watchTask;
+
+      expect(response.isCheckpoint).toBe(true);
+      expect(response.updates).toEqual([]);
+      expect(response.changesThrough?.token ?? "").not.toBe("");
     } finally {
       await cluster.dispose();
     }

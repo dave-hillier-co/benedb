@@ -24,6 +24,7 @@ import type { RelationshipReads } from "@benedb/grains/relationship-reads";
 import type {
   PreconditionWire,
   RelationshipsFilterWire,
+  RelationshipStreamItem,
   RelationshipUpdateOpWire,
   RelationshipUpdateWire,
   RelationshipWire,
@@ -33,7 +34,9 @@ import type {
   ExpandModeWire,
   ExpandSubjectWire,
   ExpandTreeNodeWire,
+  ExpandTreeReply,
   FoundResourceWire,
+  FoundSubjectStreamItem,
   FoundSubjectWire,
   Permissionship as PermissionshipWire,
   SetOpWire,
@@ -334,20 +337,34 @@ export class PermissionsGrpcService {
     // value a real client sends; without it the port would accept a 3-billion limit the C#
     // fast-fails on.
     const limit = request.optionalLimit === 0 ? undefined : request.optionalLimit | 0;
-    const { items, cursor } = await drain(
-      this.#relationshipReads.readRelationships(
-        {
-          filter: toWireFilter(request.filter ?? EMPTY_RELATIONSHIP_FILTER),
-          limit,
-          cursor: nullIfEmpty(request.optionalCursor),
-          consistency: toWireConsistency(request.consistency),
-        },
+    let items: readonly RelationshipStreamItem[];
+    let cursor: string | undefined;
+    try {
+      ({ items, cursor } = await drain(
+        this.#relationshipReads.readRelationships(
+          {
+            filter: toWireFilter(request.filter ?? EMPTY_RELATIONSHIP_FILTER),
+            limit,
+            cursor: nullIfEmpty(request.optionalCursor),
+            consistency: toWireConsistency(request.consistency),
+          },
+          signal,
+        ),
+        limit,
+        (i) => i.resumeCursor,
         signal,
-      ),
-      limit,
-      (i) => i.resumeCursor,
-      signal,
-    );
+      ));
+    } catch (ex) {
+      if (ex instanceof InvalidConsistencyTokenException) {
+        throw new RpcError(status.INVALID_ARGUMENT, ex.message);
+      }
+      if (ex instanceof RevisionNotFoundException) {
+        // The pinned revision has been garbage-collected (or never existed): same client-facing
+        // contract as an invalid consistency token.
+        throw new RpcError(status.INVALID_ARGUMENT, ex.message);
+      }
+      throw ex;
+    }
 
     return {
       relationships: items.map((i) => toProtoRelationship(i.relationship)),
@@ -394,13 +411,29 @@ export class PermissionsGrpcService {
         : "shallow";
 
     const resource = request.resource ?? EMPTY_OBJECT_REFERENCE;
-    const reply = await this.#reverseOps.expandPermissionTree({
-      resourceType: resource.objectType,
-      resourceId: resource.objectId,
-      permission: request.permission,
-      mode,
-      consistency: toWireConsistency(request.consistency),
-    });
+    let reply: ExpandTreeReply;
+    try {
+      reply = await this.#reverseOps.expandPermissionTree({
+        resourceType: resource.objectType,
+        resourceId: resource.objectId,
+        permission: request.permission,
+        mode,
+        consistency: toWireConsistency(request.consistency),
+      });
+    } catch (ex) {
+      if (ex instanceof InvalidConsistencyTokenException) {
+        throw new RpcError(status.INVALID_ARGUMENT, ex.message);
+      }
+      if (ex instanceof RevisionNotFoundException) {
+        // The pinned revision has been garbage-collected (or never existed): same client-facing
+        // contract as an invalid consistency token.
+        throw new RpcError(status.INVALID_ARGUMENT, ex.message);
+      }
+      if (ex instanceof DispatchFailedException) {
+        throw toRpc(ex);
+      }
+      throw ex;
+    }
 
     return {
       treeRoot: toProtoTreeNode(reply.root),
@@ -423,25 +456,45 @@ export class PermissionsGrpcService {
     // value a real client sends; without it the port would accept a 3-billion limit the C#
     // fast-fails on.
     const limit = request.optionalLimit === 0 ? undefined : request.optionalLimit | 0;
-    const { items, cursor } = await drain(
-      this.#reverseOps.streamLookupSubjects(
-        {
-          resourceType: resource.objectType,
-          resourceId: resource.objectId,
-          permission: request.permission,
-          subjectType: request.subjectObjectType,
-          subjectRelation,
-          context: structToMap(request.context),
-          limit,
-          cursor: nullIfEmpty(request.optionalCursor),
-          consistency: toWireConsistency(request.consistency),
-        },
+    let items: readonly FoundSubjectStreamItem[];
+    let cursor: string | undefined;
+    try {
+      ({ items, cursor } = await drain(
+        this.#reverseOps.streamLookupSubjects(
+          {
+            resourceType: resource.objectType,
+            resourceId: resource.objectId,
+            permission: request.permission,
+            subjectType: request.subjectObjectType,
+            subjectRelation,
+            context: structToMap(request.context),
+            limit,
+            cursor: nullIfEmpty(request.optionalCursor),
+            consistency: toWireConsistency(request.consistency),
+          },
+          signal,
+        ),
+        limit,
+        (i) => i.resumeCursor,
         signal,
-      ),
-      limit,
-      (i) => i.resumeCursor,
-      signal,
-    );
+      ));
+    } catch (ex) {
+      if (ex instanceof InvalidConsistencyTokenException) {
+        throw new RpcError(status.INVALID_ARGUMENT, ex.message);
+      }
+      if (ex instanceof RevisionNotFoundException) {
+        // The pinned revision has been garbage-collected (or never existed): same client-facing
+        // contract as an invalid consistency token.
+        throw new RpcError(status.INVALID_ARGUMENT, ex.message);
+      }
+      if (ex instanceof CaveatEvaluationException) {
+        throw new RpcError(caveatStatus(ex.kind), ex.message);
+      }
+      if (ex instanceof DispatchFailedException) {
+        throw toRpc(ex);
+      }
+      throw ex;
+    }
 
     return {
       subjects: items.map((i) => toProtoFoundSubject(i.subject)),
@@ -466,25 +519,45 @@ export class PermissionsGrpcService {
     // value a real client sends; without it the port would accept a 3-billion limit the C#
     // fast-fails on.
     const limit = request.optionalLimit === 0 ? undefined : request.optionalLimit | 0;
-    const { items, cursor } = await drain(
-      this.#reverseOps.streamLookupResources(
-        {
-          resourceType: request.resourceObjectType,
-          permission: request.permission,
-          subjectType: subjectObject.objectType,
-          subjectId: subjectObject.objectId,
-          subjectRelation,
-          context: structToMap(request.context),
-          limit,
-          cursor: nullIfEmpty(request.optionalCursor),
-          consistency: toWireConsistency(request.consistency),
-        },
+    let items: readonly FoundResourceWire[];
+    let cursor: string | undefined;
+    try {
+      ({ items, cursor } = await drain(
+        this.#reverseOps.streamLookupResources(
+          {
+            resourceType: request.resourceObjectType,
+            permission: request.permission,
+            subjectType: subjectObject.objectType,
+            subjectId: subjectObject.objectId,
+            subjectRelation,
+            context: structToMap(request.context),
+            limit,
+            cursor: nullIfEmpty(request.optionalCursor),
+            consistency: toWireConsistency(request.consistency),
+          },
+          signal,
+        ),
+        limit,
+        (r) => r.afterResultCursor,
         signal,
-      ),
-      limit,
-      (r) => r.afterResultCursor,
-      signal,
-    );
+      ));
+    } catch (ex) {
+      if (ex instanceof InvalidConsistencyTokenException) {
+        throw new RpcError(status.INVALID_ARGUMENT, ex.message);
+      }
+      if (ex instanceof RevisionNotFoundException) {
+        // The pinned revision has been garbage-collected (or never existed): same client-facing
+        // contract as an invalid consistency token.
+        throw new RpcError(status.INVALID_ARGUMENT, ex.message);
+      }
+      if (ex instanceof CaveatEvaluationException) {
+        throw new RpcError(caveatStatus(ex.kind), ex.message);
+      }
+      if (ex instanceof DispatchFailedException) {
+        throw toRpc(ex);
+      }
+      throw ex;
+    }
 
     return {
       resources: items.map(toProtoFoundResource),
@@ -606,8 +679,11 @@ const MAX_UNIX_SECONDS = 253402300799n;
 /** Nanoseconds per second: the grains DTOs carry expiration as epoch nanos. */
 const NANOS_PER_SECOND = 1_000_000_000n;
 
-/** Maps a proto relationship onto the cross-grain wire form. */
-function toWireRelationship(r: Relationship): RelationshipWire {
+/**
+ * Maps a proto relationship onto the cross-grain wire form. Exported for
+ * `relationship-wire-mapping-tests.test.ts` - the C# is `internal` + `InternalsVisibleTo`.
+ */
+export function toWireRelationship(r: Relationship): RelationshipWire {
   const subject = r.subject ?? EMPTY_SUBJECT_REFERENCE;
   const subjectRelation = isNullOrEmpty(subject.optionalRelation)
     ? ELLIPSIS
@@ -626,7 +702,10 @@ function toWireRelationship(r: Relationship): RelationshipWire {
     subjectRelation,
     caveatName:
       caveat !== undefined && caveat.caveatName.length > 0 ? caveat.caveatName : undefined,
-    caveatContext: caveat !== undefined ? structToMap(caveat.context) : undefined,
+    caveatContext:
+      caveat !== undefined && caveat.caveatName.length > 0
+        ? structToMap(caveat.context)
+        : undefined,
     expiration,
   };
 }

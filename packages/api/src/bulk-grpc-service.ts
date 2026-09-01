@@ -225,8 +225,11 @@ function toWireFilter(f: ProtoRelationshipFilter): RelationshipsFilterWire {
   };
 }
 
-/** Maps a proto relationship onto the cross-grain wire form. */
-function toWireRelationship(r: ProtoRelationship): RelationshipWire {
+/**
+ * Maps a proto relationship onto the cross-grain wire form. Exported for
+ * `relationship-wire-mapping-tests.test.ts` - the C# is `internal` + `InternalsVisibleTo`.
+ */
+export function toWireRelationship(r: ProtoRelationship): RelationshipWire {
   const subject = r.subject ?? EMPTY_SUBJECT_REFERENCE;
   const subjectRelation = isNullOrEmpty(subject.optionalRelation)
     ? ELLIPSIS
@@ -245,7 +248,10 @@ function toWireRelationship(r: ProtoRelationship): RelationshipWire {
     subjectRelation,
     caveatName:
       caveat !== undefined && caveat.caveatName.length > 0 ? caveat.caveatName : undefined,
-    caveatContext: caveat !== undefined ? structToMap(caveat.context) : undefined,
+    caveatContext:
+      caveat !== undefined && caveat.caveatName.length > 0
+        ? structToMap(caveat.context)
+        : undefined,
     expiration,
   };
 }

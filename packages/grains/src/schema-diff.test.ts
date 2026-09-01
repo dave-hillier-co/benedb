@@ -13,6 +13,7 @@ import {
   type UsersetRewrite,
 } from "@benedb/core/userset-rewrite";
 import type { CompiledSchema } from "@benedb/schema/compiled-schema";
+import { compileSchema } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
 import { computeSchemaDiff, rewriteEquals, sameAllowedType, type SchemaDelta } from "./schema-diff";
@@ -36,11 +37,12 @@ import { computeSchemaDiff, rewriteEquals, sameAllowedType, type SchemaDelta } f
  * There is NO sorting anywhere in the file: order is source/collection order, and `ToDictionary`
  * is only a membership index - the iteration is always over the LIST.
  *
- * KNOWN, DELIBERATE DIVERGENCE (parameter type comparison): the C# `nextType != existingType` is
- * record equality, and `CaveatTypeReference.ChildTypes` is an `ImmutableList` whose `Equals` is
- * REFERENCE-based, so C# reports two separately-compiled but structurally identical NESTED
- * generic types as CHANGED. The port uses core's structural `caveatTypeReferenceEquals`, which
- * only ever removes spurious rejections and never adds one. Pinned below.
+ * PARAMETER TYPE COMPARISON is structural. The C# `nextType != existingType` was record equality
+ * over a REFERENCE-compared `ImmutableList` of child types, so it reported two separately-compiled
+ * but structurally identical nested generic types as CHANGED; the port used core's structural
+ * `caveatTypeReferenceEquals` from the start, and Spiceport has since fixed the C# the same way
+ * (`SchemaDiff.CaveatTypeEquals`, issue #37, commit 16c80f8). No divergence remains. Pinned below,
+ * including the source fix's two compiled-text cases (`SchemaDiffTests.cs`).
  *
  * KNOWN ORDER DIVERGENCE (multi-parameter caveats): `ParameterTypes` is an `ImmutableDictionary`
  * in C# (HASH enumeration order) and a `Map` here (INSERTION order). For a caveat with more than
@@ -118,6 +120,35 @@ describe("computeSchemaDiff on identical schemas", () => {
 
   it("returns an empty list for two empty schemas", () => {
     expect(computeSchemaDiff(EMPTY, EMPTY)).toEqual([]);
+  });
+
+  // The two cases of Spiceport's `SchemaDiffTests.cs`: two independent compiles mirror
+  // WriteSchema-ing identical text twice, so each pass synthesizes its own CaveatTypeReference
+  // tree - same shape, different references.
+  it("produces no CaveatParameterTypeChanged delta when unchanged caveat schema text is recompiled", () => {
+    const schemaText = `caveat has_level(levels list<int>) {
+  levels.exists(l, l > 0)
+}`;
+
+    const first = compileSchema(schemaText);
+    const second = compileSchema(schemaText);
+
+    const deltas = computeSchemaDiff(first, second);
+
+    expect(deltas.some((d) => d.kind === "caveatParameterTypeChanged")).toBe(false);
+  });
+
+  it("still detects a genuine generic parameter type change", () => {
+    const existing = compileSchema(`caveat has_level(levels list<int>) {
+  levels.exists(l, l > 0)
+}`);
+    const next = compileSchema(`caveat has_level(levels list<string>) {
+  levels.exists(l, l != "")
+}`);
+
+    const deltas = computeSchemaDiff(existing, next);
+
+    expect(deltas.some((d) => d.kind === "caveatParameterTypeChanged")).toBe(true);
   });
 
   it("treats structurally equal but separately built schemas as unchanged", () => {

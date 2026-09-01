@@ -983,15 +983,16 @@ function toWireRelationshipUpdate(u: RelationshipUpdate): RelationshipUpdateWire
 }
 
 /**
- * Maps a v1 proto relationship onto the cross-grain wire form.
+ * Maps a v1 proto relationship onto the cross-grain wire form, INCLUDING `optional_expires_at`
+ * (core.proto field 5): a client-supplied expiry must not be silently dropped, which stored a
+ * time-limited grant as permanent (issue #39, Spiceport `ad647b4`). ts-proto surfaces the
+ * Timestamp as a millisecond-precision `Date` where the C# `ToDateTimeOffset` keeps ticks; the
+ * sub-millisecond loss is accepted, matching the v0 surface's whole-second mapping in spirit.
  *
- * SOURCE CONCERN, transliterated: the C# passes `null` for the expiration on the claim that "v1
- * core.proto Relationship has no expiration field in this snapshot". The vendored proto DOES
- * declare `optional_expires_at = 5` and the generated binding carries `optionalExpiresAt`, so an
- * authzed-v1 client's expiry is silently dropped and the relationship is stored as non-expiring.
- * The field is deliberately NOT read here.
+ * Exported for `relationship-wire-mapping-tests.test.ts` - the C# is `internal` +
+ * `InternalsVisibleTo`.
  */
-function toWireRelationship(r: ProtoRelationship): RelationshipWire {
+export function toWireRelationship(r: ProtoRelationship): RelationshipWire {
   const subject = r.subject ?? EMPTY_SUBJECT_REFERENCE;
   const subjectRelation = isNullOrEmpty(subject.optionalRelation)
     ? ELLIPSIS
@@ -1006,20 +1007,27 @@ function toWireRelationship(r: ProtoRelationship): RelationshipWire {
     subjectType: subjectObject.objectType,
     subjectId: subjectObject.objectId,
     subjectRelation,
-    // `CaveatName.Length: > 0` gates only the NAME; the context is taken from any present caveat.
+    // Name and context are taken from the SAME `caveatName.length > 0` guard: an empty caveat
+    // name is not a valid caveat reference, so its context must not survive as an orphan (#42).
     caveatName:
       caveat !== undefined && caveat.caveatName.length > 0 ? caveat.caveatName : undefined,
-    caveatContext: caveat !== undefined ? structToMap(caveat.context) : undefined,
-    expiration: undefined,
+    caveatContext:
+      caveat !== undefined && caveat.caveatName.length > 0
+        ? structToMap(caveat.context)
+        : undefined,
+    expiration:
+      r.optionalExpiresAt !== undefined
+        ? BigInt(r.optionalExpiresAt.getTime()) * NANOS_PER_MILLISECOND
+        : undefined,
   };
 }
 
+/** ts-proto Timestamps arrive as millisecond `Date`s; the grains DTOs carry epoch nanos. */
+const NANOS_PER_MILLISECOND = 1_000_000n;
+
 /**
- * Maps a wire relationship back to v1 proto, blanking an ellipsis subrelation.
- *
- * SOURCE CONCERN, transliterated: `optional_expires_at` is never populated, so a stored expiry is
- * invisible to a v1 client on ReadRelationships and ExportBulkRelationships alike. See
- * {@link toWireRelationship}.
+ * Maps a wire relationship back to v1 proto, blanking an ellipsis subrelation and populating
+ * `optional_expires_at` from a stored expiry (issue #39). See {@link toWireRelationship}.
  */
 function toProtoRelationship(w: RelationshipWire): ProtoRelationship {
   const rel: ProtoRelationship = {
@@ -1035,6 +1043,10 @@ function toProtoRelationship(w: RelationshipWire): ProtoRelationship {
       caveatName: w.caveatName,
       context: mapToStruct(w.caveatContext),
     };
+  }
+
+  if (w.expiration !== undefined) {
+    rel.optionalExpiresAt = new Date(Number(w.expiration / NANOS_PER_MILLISECOND));
   }
 
   return rel;

@@ -43,8 +43,9 @@ export const DATASTORE_PROVIDER_NAME = "datastore";
 
 /**
  * Primary configuration key for the grain-storage Postgres connection string. Set this (or env
- * `ConnectionStrings__OrleansStorage`) to enable durable Postgres storage. When unset/empty,
- * storage falls back to non-durable in-memory.
+ * `ConnectionStrings__OrleansStorage`) to enable durable Postgres storage. When neither this key
+ * nor the fallback is present at all, storage falls back to non-durable in-memory; a key that is
+ * present but blank refuses to start instead.
  */
 export const DATASTORE_CONNECTION_STRING_KEY = "ConnectionStrings:OrleansStorage";
 
@@ -89,18 +90,37 @@ export function configurationFromEnvironment(
 }
 
 /**
- * `configuration[ConnectionStringKey] ?? configuration[FallbackConnectionStringKey]`.
- *
- * The `??` short-circuits on NON-NULL, so a primary key that is present but EMPTY or WHITESPACE
- * stops the fallback key from ever being read - and the caller then takes the non-durable branch
- * even though a usable `Storage:ConnectionString` is configured. That is Spiceport's behaviour and
- * the port reproduces it (see `sourceConcerns`).
+ * Resolves the connection string as the first configured key that is present AND non-blank -
+ * unlike `??`, an empty (but present) primary value does NOT short-circuit the fallback. If a key
+ * was configured (present in the configuration) but every configured key resolved blank, this
+ * refuses to start rather than silently degrading a production silo to non-durable in-memory
+ * storage over what is almost always an unset env var / Helm default / typo. A configuration where
+ * NEITHER key is present at all (the ordinary local-dev/test shape) is left alone and falls back
+ * to in-memory as before. (Spiceport `ResolveConnectionString`, the fix for issue #40.)
  */
 export function resolveDatastoreConnectionString(configuration: Configuration): string | undefined {
-  return (
-    configuration.get(DATASTORE_CONNECTION_STRING_KEY) ??
-    configuration.get(DATASTORE_FALLBACK_CONNECTION_STRING_KEY)
-  );
+  const primary = configuration.get(DATASTORE_CONNECTION_STRING_KEY);
+  const fallback = configuration.get(DATASTORE_FALLBACK_CONNECTION_STRING_KEY);
+
+  if (!isNullOrWhiteSpace(primary)) {
+    return primary;
+  }
+
+  if (!isNullOrWhiteSpace(fallback)) {
+    return fallback;
+  }
+
+  if (primary !== undefined || fallback !== undefined) {
+    throw new Error(
+      `Datastore connection string configuration is present but blank ` +
+        `(checked '${DATASTORE_CONNECTION_STRING_KEY}' and '${DATASTORE_FALLBACK_CONNECTION_STRING_KEY}'). ` +
+        "Refusing to silently start a non-durable in-memory datastore in place of the " +
+        "durable Postgres storage that was evidently intended. Either supply a valid " +
+        "connection string, or remove the key(s) entirely to opt into in-memory storage.",
+    );
+  }
+
+  return undefined;
 }
 
 /** `string.IsNullOrWhiteSpace` - a value of `" "` is empty for this decision. */

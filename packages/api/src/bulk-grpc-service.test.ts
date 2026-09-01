@@ -368,7 +368,7 @@ describe("importBulkRelationships", () => {
     );
   });
 
-  it("drops an EMPTY caveat name but still takes the caveat's context - the C# asymmetry", async () => {
+  it("drops an EMPTY caveat name together with its context (issue #42)", async () => {
     const h = harness();
 
     await h.service.importBulkRelationships(
@@ -382,7 +382,7 @@ describe("importBulkRelationships", () => {
 
     const wired = h.grain.importArgs[0]?.relationships[0];
     expect(wired?.caveatName).toBeUndefined();
-    expect(wired?.caveatContext).toEqual(new Map<string, unknown>([["day", "tuesday"]]));
+    expect(wired?.caveatContext).toBeUndefined();
   });
 
   it("leaves the caveat context absent when the struct is empty", async () => {

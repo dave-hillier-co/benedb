@@ -921,9 +921,9 @@ describe("writeRelationships", () => {
     expect(written[1]?.relationship.caveatContext).toEqual(new Map([["limit", 10]]));
   });
 
-  it("keeps the caveat CONTEXT of an empty-named caveat while dropping its name", async () => {
-    // `CaveatName.Length: > 0` gates only the NAME; the context is taken from any present caveat
-    // message. The asymmetry is the C#'s.
+  it("discards the CONTEXT of an empty-named caveat along with its name", async () => {
+    // Name and context come off the SAME `caveatName.length > 0` guard: an empty caveat name is
+    // not a valid caveat reference, so its context must not survive as an orphan (issue #42).
     const h = harness();
 
     await h.service.writeRelationships(
@@ -938,14 +938,12 @@ describe("writeRelationships", () => {
 
     const relationship = h.grain.writeArgs[0]?.updates[0]?.relationship;
     expect(relationship?.caveatName).toBeUndefined();
-    expect(relationship?.caveatContext).toEqual(new Map([["limit", 10]]));
+    expect(relationship?.caveatContext).toBeUndefined();
   });
 
-  it("SILENTLY DROPS optional_expires_at on the way in (source concern, transliterated)", async () => {
-    // `ToWire(V1::Relationship)` line 774 passes `null` for the expiration on the claim that "v1
-    // core.proto Relationship has no expiration field in this snapshot". The vendored proto DOES
-    // declare `optional_expires_at = 5`, so an authzed-v1 client's expiry is lost and the
-    // relationship is stored as non-expiring. Reproduced deliberately, not fixed.
+  it("maps optional_expires_at onto the wire expiration (issue #39)", async () => {
+    // `optional_expires_at` is core.proto field 5; a client-supplied expiry must reach the wire
+    // as epoch nanos instead of silently storing a time-limited grant as permanent.
     const h = harness();
 
     await h.service.writeRelationships(
@@ -958,7 +956,9 @@ describe("writeRelationships", () => {
       }),
     );
 
-    expect(h.grain.writeArgs[0]?.updates[0]?.relationship.expiration).toBeUndefined();
+    expect(h.grain.writeArgs[0]?.updates[0]?.relationship.expiration).toBe(
+      1_893_456_000_000_000_000n,
+    );
   });
 
   it("passes no preconditions as undefined and maps the two specified operations", async () => {
@@ -1113,9 +1113,9 @@ describe("readRelationships", () => {
     expect(writer.collected[0]?.afterResultCursor).toBeUndefined();
   });
 
-  it("renders an ellipsis subject relation as the empty string and never sets optional_expires_at", async () => {
-    // The second half is the same source concern as the write path: `ToProto(RelationshipWire)`
-    // never populates `optional_expires_at`, so a stored expiry is invisible to a v1 client.
+  it("renders an ellipsis subject relation as the empty string and populates optional_expires_at", async () => {
+    // The second half mirrors the write path's issue #39 fix: `toProtoRelationship` populates
+    // `optional_expires_at` from a stored expiry, so it is visible to a v1 client.
     const h = harness();
     h.reads.readSteps = [
       {
@@ -1147,7 +1147,7 @@ describe("readRelationships", () => {
       caveatName: "over_limit",
       context: { limit: 10 },
     });
-    expect(relationship?.optionalExpiresAt).toBeUndefined();
+    expect(relationship?.optionalExpiresAt).toEqual(new Date("2023-11-14T22:13:20.000Z"));
   });
 
   /**
@@ -2337,8 +2337,8 @@ describe("importBulkRelationships", () => {
       subjectRelation: ELLIPSIS,
       caveatName: "over_limit",
       caveatContext: new Map([["limit", 10]]),
-      // Source concern, transliterated: `ToWire` drops the expiration on this surface too.
-      expiration: undefined,
+      // Bulk import shares the Permissions mapper, so the issue #39 fix carries the expiry here too.
+      expiration: 1_893_456_000_000_000_000n,
     });
   });
 
@@ -2545,7 +2545,7 @@ describe("exportBulkRelationships", () => {
     ).rejects.toBe(cancelled);
   });
 
-  it("renders the exported relationships, dropping the expiration (source concern)", async () => {
+  it("renders the exported relationships, including the expiration (issue #39)", async () => {
     const h = harness();
     h.reads.exportSteps = [
       {
@@ -2563,6 +2563,8 @@ describe("exportBulkRelationships", () => {
       writer,
     );
 
-    expect(writer.collected[0]?.relationships[0]?.optionalExpiresAt).toBeUndefined();
+    expect(writer.collected[0]?.relationships[0]?.optionalExpiresAt).toEqual(
+      new Date("2023-11-14T22:13:20.000Z"),
+    );
   });
 });

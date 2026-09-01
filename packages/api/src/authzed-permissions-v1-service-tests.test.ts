@@ -87,9 +87,8 @@ import { RpcError } from "./rpc-error";
  *    STRING, so the assertion is against `"3"`.
  *  - The `[Theory]/[InlineData]` over `DispatchErrorCode` becomes an `it.each` over the four
  *    (code, status) pairs; `DispatchErrorCode` is a string-literal union in the port.
- *  - This file writes relationships carrying NO expiration, so it neither confirms nor contradicts
- *    spiceport#39 (v1 expiration dropped in both directions); no expiration handling is added to
- *    the service on its account.
+ *  - The expiration round trip (spiceport#39, fixed at the source in `ad647b4`) is pinned below:
+ *    `optional_expires_at` survives write-then-read as a millisecond-precision ts-proto `Date`.
  */
 
 const Schema = `definition user {}
@@ -645,6 +644,42 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
       const resp = await service(cluster).writeRelationships(req);
 
       expect(resp.writtenAt?.token).toBeTruthy();
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships then ReadRelationships round trips expiration", async () => {
+    // `optional_expires_at` is core.proto field 5: a client-supplied expiry must survive the wire
+    // in BOTH directions rather than silently turning a time-limited grant permanent (issue #39).
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const expiresAt = new Date(Date.UTC(2099, 0, 1));
+      const req = WriteRelationshipsRequest.fromPartial({
+        updates: [
+          {
+            operation: RelationshipUpdate_Operation.OPERATION_TOUCH,
+            relationship: {
+              resource: { objectType: "document", objectId: "readme" },
+              relation: "viewer",
+              subject: userSubject("alice"),
+              optionalExpiresAt: expiresAt,
+            },
+          },
+        ],
+      });
+      await service(cluster).writeRelationships(req);
+
+      const writer = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document", optionalResourceId: "readme" },
+        }),
+        writer,
+      );
+
+      expect(writer.collected).toHaveLength(1);
+      expect(writer.collected[0]?.relationship?.optionalExpiresAt).toEqual(expiresAt);
     } finally {
       await cluster.dispose();
     }

@@ -29,12 +29,13 @@ import {
  *     `Storage:ConnectionString` only as a fallback. Operators already set the documented env-var
  *     spelling `ConnectionStrings__OrleansStorage`, so the `__` -> `:` mapping and .NET's
  *     case-INSENSITIVE key comparison are part of the contract, not of the config library.
- *  3. `IsNullOrWhiteSpace`, NOT `IsNullOrEmpty`: a value of `" "` selects the in-memory fallback.
- *  4. THE `??` / `IsNullOrWhiteSpace` INTERACTION (see `sourceConcerns`). `configuration[Primary] ??
- *     configuration[Fallback]` short-circuits on NON-NULL, so a primary key present but EMPTY or
- *     WHITESPACE stops the fallback key from ever being read, and the host then takes the
- *     non-durable branch even though a perfectly good `Storage:ConnectionString` is configured.
- *     That is Spiceport's behaviour and the port reproduces it, so it is pinned here deliberately.
+ *  3. `IsNullOrWhiteSpace`, NOT `IsNullOrEmpty`: a value of `" "` counts as blank.
+ *  4. FIRST NON-BLANK, THEN REFUSE-TO-START (Spiceport fix for issue #40, `f37f82e`). Resolution
+ *     picks the first key that is present AND non-blank - unlike the original `??`, an empty (but
+ *     present) primary no longer masks a usable fallback. And when a key IS present but every
+ *     configured key resolves blank (an unset Kubernetes secret, a Helm default, `--env FOO=`),
+ *     resolution throws instead of silently degrading a production silo to non-durable in-memory
+ *     storage. Only the shape where NEITHER key is present at all falls back to in-memory.
  *  5. BOTH ARGUMENTS ARE GUARDED (`ArgumentNullException.ThrowIfNull` on each). TypeScript will not
  *     throw on an undefined configuration until much later, so the guard is load-bearing.
  *
@@ -108,9 +109,38 @@ describe("resolveDatastoreConnectionString", () => {
     expect(resolveDatastoreConnectionString(configuration)).toBe("Host=primary");
   });
 
-  it("falls back to Storage:ConnectionString only when the primary key is ABSENT", () => {
+  it("falls back to Storage:ConnectionString when the primary key is ABSENT", () => {
     const configuration = createConfiguration({ "Storage:ConnectionString": "Host=fallback" });
     expect(resolveDatastoreConnectionString(configuration)).toBe("Host=fallback");
+  });
+
+  it("falls back to a valid fallback when the primary is present but EMPTY, instead of masking it", () => {
+    const configuration = createConfiguration({
+      "ConnectionStrings:OrleansStorage": "",
+      "Storage:ConnectionString": "Host=db;Database=benedb",
+    });
+    expect(resolveDatastoreConnectionString(configuration)).toBe("Host=db;Database=benedb");
+  });
+
+  it("falls back to a valid fallback when the primary is whitespace", () => {
+    const configuration = createConfiguration({
+      "ConnectionStrings:OrleansStorage": "   ",
+      "Storage:ConnectionString": "Host=db;Database=benedb",
+    });
+    expect(resolveDatastoreConnectionString(configuration)).toBe("Host=db;Database=benedb");
+  });
+
+  it("refuses to start when the primary is present but blank and no fallback is configured", () => {
+    const configuration = createConfiguration({ "ConnectionStrings:OrleansStorage": "" });
+    expect(() => resolveDatastoreConnectionString(configuration)).toThrow(/present but blank/i);
+  });
+
+  it("refuses to start when both keys are present but blank", () => {
+    const configuration = createConfiguration({
+      "ConnectionStrings:OrleansStorage": "",
+      "Storage:ConnectionString": "   ",
+    });
+    expect(() => resolveDatastoreConnectionString(configuration)).toThrow();
   });
 
   it("reads the documented env-var spelling, mapping __ to :", () => {
@@ -130,11 +160,6 @@ describe("resolveDatastoreConnectionString", () => {
   it("compares the fallback key case-insensitively too", () => {
     const configuration = createConfiguration({ "STORAGE:CONNECTIONSTRING": "Host=upper" });
     expect(resolveDatastoreConnectionString(configuration)).toBe("Host=upper");
-  });
-
-  it("returns the whitespace value verbatim: the emptiness test lives in the branch, not here", () => {
-    const configuration = createConfiguration({ "ConnectionStrings:OrleansStorage": " " });
-    expect(resolveDatastoreConnectionString(configuration)).toBe(" ");
   });
 });
 
@@ -173,38 +198,35 @@ describe("addDatastoreGrainStorage branch selection", () => {
     expect(registration.connectionString).toBe("postgres://localhost/primary");
   });
 
-  it("falls back to in-memory for a whitespace-only value (IsNullOrWhiteSpace, not IsNullOrEmpty)", () => {
-    const registration = register({ "ConnectionStrings:OrleansStorage": "   " });
-
-    expect(registration.kind).toBe("storage");
-    expect(registration.provider).toBeInstanceOf(MemoryGrainStorage);
-  });
-
-  it("falls back to in-memory for an empty value", () => {
-    const registration = register({ "ConnectionStrings:OrleansStorage": "" });
-
-    expect(registration.kind).toBe("storage");
-  });
-
-  // See note 4 and `sourceConcerns`: `??` short-circuits on the non-null empty primary, so the
-  // usable fallback is never read and the host comes up NON-DURABLE. Spiceport's behaviour, kept.
-  it("lets an EMPTY primary key mask a usable fallback key, exactly as the C# does", () => {
+  // Note 4: the fixed resolution reads through to the fallback past a blank primary, so the host
+  // comes up DURABLE - and refuses to start rather than silently degrade when everything is blank.
+  it("registers durable Postgres from the fallback when the primary is present but empty", () => {
     const registration = register({
       "ConnectionStrings:OrleansStorage": "",
       "Storage:ConnectionString": "postgres://localhost/fallback",
     });
 
-    expect(registration.kind).toBe("storage");
-    expect(registration.provider).toBeInstanceOf(MemoryGrainStorage);
+    expect(registration.kind).toBe("postgres");
+    expect(registration.connectionString).toBe("postgres://localhost/fallback");
   });
 
-  it("lets a WHITESPACE primary key mask a usable fallback key too", () => {
+  it("registers durable Postgres from the fallback past a whitespace primary too", () => {
     const registration = register({
       "ConnectionStrings:OrleansStorage": " ",
       "Storage:ConnectionString": "postgres://localhost/fallback",
     });
 
-    expect(registration.kind).toBe("storage");
+    expect(registration.kind).toBe("postgres");
+  });
+
+  it("refuses to register anything when a key is present but every configured key is blank", () => {
+    const { builder } = recordingBuilder();
+    expect(() =>
+      addDatastoreGrainStorage(
+        builder,
+        createConfiguration({ "ConnectionStrings:OrleansStorage": "   " }),
+      ),
+    ).toThrow(/present but blank/i);
   });
 
   it("gives each registration its own in-memory provider instance", () => {

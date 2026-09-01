@@ -178,7 +178,9 @@ async function buildCluster(
  * and the hub subscribes to the sequencer - which ACTIVATES it, and the activation writes `head`.
  * That races the seed's own read-then-write of `head` and fails it with an etag conflict roughly
  * half the time. Deriving the id from metadata removes the cluster, and with it the race, which is
- * what the phase was documented to do all along.
+ * what the phase was documented to do all along. The C# has since fixed its own version of this
+ * race (issue #38, Spiceport `3296422`) with a seed-only silo minus the grain services, pinning
+ * the same seed-id-vs-cluster-id invariant asserted in `buildCluster` above.
  */
 function datastoreGrainId(): GrainId {
   const metadata = getGrainMetadata(DatastoreGrain);

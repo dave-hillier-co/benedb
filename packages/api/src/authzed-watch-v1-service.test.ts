@@ -626,9 +626,9 @@ describe("toProto", () => {
     expect(updates[1]?.relationship?.optionalCaveat?.context).toBeUndefined();
   });
 
-  it("DROPS a relationship's expiration - the C# never sets optional_expires_at", async () => {
-    // SOURCE CONCERN, reproduced verbatim: the v1 `Relationship` proto declares the field and the
-    // generated bindings carry it, but `ToProto` does not set it.
+  it("populates optional_expires_at from a relationship's expiration (issue #39)", async () => {
+    // A watched relationship's stored expiry must reach the v1 client; the earlier deliberate
+    // omission was fixed at the source (Spiceport `ad647b4`).
     const expiring = createRelationship(
       { objectType: "document", objectId: "doc1", relation: "viewer" },
       { objectType: "user", objectId: "alice", relation: ELLIPSIS },
@@ -641,7 +641,9 @@ describe("toProto", () => {
 
     await h.service.watch(request(), h.writer);
 
-    expect(h.writer.collected[0]?.updates[0]?.relationship?.optionalExpiresAt).toBeUndefined();
+    expect(h.writer.collected[0]?.updates[0]?.relationship?.optionalExpiresAt).toEqual(
+      new Date("2023-11-14T22:13:20.000Z"),
+    );
   });
 });
 

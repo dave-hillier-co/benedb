@@ -96,10 +96,10 @@ describe("schemaFiltersFromRequest validation", () => {
     expect(error.details).toBe("relation/permission filter requires a definition filter");
   });
 
-  it("reports the missing-definition rule before the caveat/relation rule", () => {
-    // Both `hasRelation && !hasDef` and `hasCaveat && hasRelation` hold here; the C# checks them
-    // in that order, so the missing-definition message is the one the client sees. (The fourth
-    // rule is unreachable as a consequence - see sourceConcerns.)
+  it("caveat plus relation filter reports the missing definition", () => {
+    // SpiceDB has no dedicated caveat-vs-relation rule: a caveat+relation filter without a
+    // definition gets the missing-definition error. The C#'s unreachable fourth rule was dropped
+    // at the source (issue #44), keeping the observable error text aligned with upstream.
     const error = expectRpcError(() =>
       schemaFiltersFromRequest([
         filter({ optionalCaveatNameFilter: "only", optionalRelationNameFilter: "view" }),

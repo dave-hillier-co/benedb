@@ -4,6 +4,10 @@ import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import {
   CheckPermissionRequest,
   CheckPermissionResponse_Permissionship,
+  ExpandPermissionTreeRequest,
+  LookupResourcesRequest,
+  LookupSubjectsRequest,
+  ReadRelationshipsRequest,
   RelationshipUpdate,
   RelationshipUpdate_Operation,
   WriteRelationshipsRequest,
@@ -242,6 +246,100 @@ describe("ConsistencyMeshTests", () => {
 
       expect(error).toBeInstanceOf(RpcError);
       expect((error as RpcError).code).toBe(status.INVALID_ARGUMENT);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  // ---- 6b. Garbage at_exact_snapshot tokens are InvalidArgument on every reverse/read RPC, not
+  // just CheckPermission (issue #41: ReadRelationships/ExpandPermissionTree/LookupSubjects/
+  // LookupResources had no error mapping at all, so RevisionResolver's
+  // InvalidConsistencyTokenException surfaced as an unmapped Unknown/Internal status instead). ----
+
+  const GarbageSnapshot: Consistency = { atExactSnapshot: { token: "garbage" } } as Consistency;
+
+  async function expectInvalidArgument(action: () => Promise<unknown>): Promise<void> {
+    const error = await action().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(RpcError);
+    expect((error as RpcError).code).toBe(status.INVALID_ARGUMENT);
+  }
+
+  it("ReadRelationships with garbage exact snapshot token is InvalidArgument", async () => {
+    const cluster = await MeshTestCluster.create(ViewerSchema);
+    try {
+      const svc = service(cluster);
+
+      await expectInvalidArgument(() =>
+        svc.readRelationships(
+          ReadRelationshipsRequest.fromPartial({
+            filter: { resourceType: "document" },
+            consistency: GarbageSnapshot,
+          }),
+        ),
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ExpandPermissionTree with garbage exact snapshot token is InvalidArgument", async () => {
+    const cluster = await MeshTestCluster.create(ViewerSchema);
+    try {
+      const svc = service(cluster);
+      await writeViewer(svc, "readme", "alice");
+
+      await expectInvalidArgument(() =>
+        svc.expandPermissionTree(
+          ExpandPermissionTreeRequest.fromPartial({
+            resource: { objectType: "document", objectId: "readme" },
+            permission: "view",
+            consistency: GarbageSnapshot,
+          }),
+        ),
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("LookupSubjects with garbage exact snapshot token is InvalidArgument", async () => {
+    const cluster = await MeshTestCluster.create(ViewerSchema);
+    try {
+      const svc = service(cluster);
+
+      await expectInvalidArgument(() =>
+        svc.lookupSubjects(
+          LookupSubjectsRequest.fromPartial({
+            resource: { objectType: "document", objectId: "readme" },
+            permission: "view",
+            subjectObjectType: "user",
+            consistency: GarbageSnapshot,
+          }),
+        ),
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("LookupResources with garbage exact snapshot token is InvalidArgument", async () => {
+    const cluster = await MeshTestCluster.create(ViewerSchema);
+    try {
+      const svc = service(cluster);
+
+      await expectInvalidArgument(() =>
+        svc.lookupResources(
+          LookupResourcesRequest.fromPartial({
+            resourceObjectType: "document",
+            permission: "view",
+            subject: { object: { objectType: "user", objectId: "alice" } },
+            consistency: GarbageSnapshot,
+          }),
+        ),
+      );
     } finally {
       await cluster.dispose();
     }

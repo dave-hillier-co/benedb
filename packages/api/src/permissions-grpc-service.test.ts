@@ -997,9 +997,9 @@ describe("writeRelationships", () => {
     expect(h.grain.writeArgs).toHaveLength(0);
   });
 
-  it("keeps a caveat's context while dropping an EMPTY caveat name", async () => {
-    // `CaveatName.Length: > 0` guards the NAME only; the context is converted whenever the caveat
-    // message is present at all.
+  it("drops a caveat's context together with an EMPTY caveat name", async () => {
+    // Name and context come off the SAME `caveatName.length > 0` guard: an empty caveat name is
+    // not a valid caveat reference, so its context must not survive as an orphan (issue #42).
     const h = harness();
 
     await h.service.writeRelationships(
@@ -1015,7 +1015,7 @@ describe("writeRelationships", () => {
 
     const written = h.grain.writeArgs[0]?.updates[0]?.relationship;
     expect(written?.caveatName).toBeUndefined();
-    expect(written?.caveatContext?.get("hour")).toBe(9);
+    expect(written?.caveatContext).toBeUndefined();
   });
 
   it("passes undefined preconditions for an empty list, and maps the operations", async () => {

@@ -48,10 +48,11 @@ export function schemaFiltersFromRequest(
     if (hasDef && hasCaveat) throw invalid("cannot filter by both definition and caveat name");
     if (hasRelation && hasPermission)
       throw invalid("cannot filter by both relation and permission name");
+    // A caveat + relation/permission combination is rejected by one of the rules above: with a
+    // definition filter the def+caveat rule fires; without one this rule fires. Matches SpiceDB,
+    // which has no dedicated caveat-vs-relation check (issue #44 dropped the unreachable rule).
     if ((hasRelation || hasPermission) && !hasDef)
       throw invalid("relation/permission filter requires a definition filter");
-    if (hasCaveat && (hasRelation || hasPermission))
-      throw invalid("cannot filter by both caveat and relation/permission name");
   }
 
   return {
