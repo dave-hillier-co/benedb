@@ -2,7 +2,6 @@ import type { IDatastore } from "@benedb/datastore/i-datastore";
 import { createClient, type ClientNode } from "@thresh/client/client-node";
 import type { Duration } from "@thresh/core/duration";
 import type { GrainStorage } from "@thresh/core/grain-storage";
-import { SiloAddress } from "@thresh/core/silo-address";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { InProcessTransport } from "@thresh/messaging/in-process-transport";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
@@ -389,7 +388,6 @@ export class MeshTestCluster {
     // test's calls must NOT be issued from a silo container.
     const client = createClient({
       clusterId: cluster.clusterId,
-      local: new SiloAddress("mesh-test-client", "uid-mesh-test-client", "mesh-test-client:22222"),
       transport: new InProcessTransport(cluster.network, cluster.clusterId),
       gateway: cluster.primary.address,
     }).registerGrains(SPICEPORT_GRAIN_REGISTRATIONS);

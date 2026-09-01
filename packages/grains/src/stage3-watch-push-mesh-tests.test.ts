@@ -6,7 +6,6 @@ import type { RelationshipUpdate } from "@benedb/core/relationship-update";
 import { WatchContent, type RevisionChange } from "@benedb/datastore/watch";
 import { createClient, type ClientNode } from "@thresh/client/client-node";
 import { IManagementGrain } from "@thresh/core/management-grain";
-import { SiloAddress } from "@thresh/core/silo-address";
 import { InProcessTransport } from "@thresh/messaging/in-process-transport";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
@@ -88,7 +87,6 @@ async function newDatastoreCluster(): Promise<TestCluster> {
 async function newClient(cluster: TestCluster): Promise<ClientNode> {
   const client = createClient({
     clusterId: cluster.clusterId,
-    local: new SiloAddress("watch-push-client", "uid-watch-push-client", "watch-push-client:22222"),
     transport: new InProcessTransport(cluster.network, cluster.clusterId),
     gateway: cluster.primary.address,
   }).registerGrains([{ ctor: DatastoreGrain, interfaces: [IDatastoreGrain] }]);
