@@ -13,11 +13,6 @@ concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: true
 
-env:
-  # The self-hosted macOS runner starts from a minimal PATH, so Homebrew's bin
-  # (node, pnpm, docker) has to be named explicitly.
-  PATH: /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-
 jobs:
   gate:
     runs-on: self-hosted
@@ -46,6 +41,20 @@ jobs:
           repository: dave-hillier-co/thresh
           path: thresh
 
+      # The runner service starts from a minimal PATH, so Homebrew's bin — where
+      # docker lives — is added explicitly. Via GITHUB_PATH rather than a
+      # workflow-level `env.PATH`, because that would override what `setup-node`
+      # puts on the path and the toolchain would vanish again.
+      - name: Add Homebrew to PATH
+        working-directory: .
+        run: echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+
+      # Node comes from the tool cache rather than whatever the runner happens
+      # to have installed, so CI runs the version the repository is developed on.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       # Fails loudly and early when the runner is missing a tool, rather than
       # midway through an install with an error that names something else.
       - name: Tool versions
@@ -55,6 +64,24 @@ jobs:
           pnpm --version
           docker --version
           docker info --format '{{.ServerVersion}}'
+
+      # THE ORPHANED-HOST GUARD, first half. CLAUDE.md forbids starting a host
+      # from a test or from CI, because a backgrounded host orphans and runs
+      # forever. On a SELF-HOSTED runner that is not hypothetical: the orphan
+      # outlives the job on a real machine and holds its ports until someone
+      # notices. So the rule is enforced here rather than only written down.
+      #
+      # A snapshot, NOT a bare "nothing is listening" assertion. The runner is a
+      # shared machine and these are ordinary development ports — 8080 above all
+      # — so anything bound before the job started is somebody else's and must
+      # not fail this run. Only a port that APPEARS across the job is evidence
+      # that the job started a host.
+      - name: Record listening ports
+        run: |
+          for port in 50051 8080 11111 11112; do
+            lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 && echo "$port"
+          done > "$RUNNER_TEMP/ports-before.txt" || true
+          cat "$RUNNER_TEMP/ports-before.txt"
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -77,23 +104,19 @@ jobs:
       - name: Differential
         run: pnpm test:differential
 
-      # THE ORPHANED-HOST GUARD. CLAUDE.md forbids starting a host from a test
-      # or from CI, because a backgrounded host orphans and runs forever. On a
-      # SELF-HOSTED runner that is not hypothetical: the orphan would outlive
-      # the job on a real machine and hold its ports until someone noticed. So
-      # the rule is enforced here rather than only written down.
       - name: No host was left running
         if: always()
         run: |
-          listening=""
+          appeared=""
           for port in 50051 8080 11111 11112; do
-            if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-              listening="$listening $port"
+            if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 &&
+               ! grep -qx "$port" "$RUNNER_TEMP/ports-before.txt" 2>/dev/null; then
+              appeared="$appeared $port"
               lsof -nP -iTCP:"$port" -sTCP:LISTEN
             fi
           done
-          if [ -n "$listening" ]; then
-            echo "::error::a host is still listening on$listening — something started one from CI"
+          if [ -n "$appeared" ]; then
+            echo "::error::a host is listening on$appeared and was not before this job — CI started one"
             exit 1
           fi
-          echo "no host ports are listening"
+          echo "no host port was opened by this job"
