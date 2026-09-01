@@ -55,6 +55,14 @@ jobs:
         with:
           node-version: 22
 
+      # protoc is not installed on the runner, and `packages/protos/scripts/generate.sh`
+      # needs the binary (the ts-proto plugin itself comes from node_modules). Taking
+      # it from the action rather than asking the runner to have it keeps the job
+      # self-describing — nothing has to be provisioned by hand for a new runner.
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       # Fails loudly and early when the runner is missing a tool, rather than
       # midway through an install with an error that names something else.
       - name: Tool versions
@@ -115,10 +123,17 @@ jobs:
       - name: No host was left running
         if: always()
         run: |
+          # No snapshot means the job failed before it could take one, so nothing
+          # here can be attributed to it. Say so rather than blaming it for ports
+          # that were already bound.
+          if [ ! -f "$RUNNER_TEMP/ports-before.txt" ]; then
+            echo "no snapshot was taken; skipping the orphan check"
+            exit 0
+          fi
           appeared=""
           for port in 50051 8080 11111 11112; do
             if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 &&
-               ! grep -qx "$port" "$RUNNER_TEMP/ports-before.txt" 2>/dev/null; then
+               ! grep -qx "$port" "$RUNNER_TEMP/ports-before.txt"; then
               appeared="$appeared $port"
               lsof -nP -iTCP:"$port" -sTCP:LISTEN
             fi
