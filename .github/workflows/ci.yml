@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The self-hosted macOS runner starts from a minimal PATH, so Homebrew's bin
+  # (node, pnpm, docker) has to be named explicitly.
+  PATH: /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+jobs:
+  gate:
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: benedb
+
+    steps:
+      # TWO CHECKOUTS, SIDE BY SIDE. BeneDB reaches Thresh through
+      # `link:../../../thresh/packages/*` — a relative path into a SIBLING
+      # checkout — so a lone checkout of this repository cannot install. Both
+      # trees go under the workspace as `benedb/` and `thresh/`, which is the
+      # layout that link resolves against: benedb/packages/core/../../../thresh.
+      #
+      # Checking out Thresh at `main` rather than pinning a SHA is deliberate.
+      # The absence of a registry between the two repositories is load-bearing
+      # (see docs/packaging.md): BeneDB exists to surface Thresh bugs, and a
+      # Thresh change that breaks BeneDB must fail here, not sit behind a pin
+      # waiting to be noticed.
+      - uses: actions/checkout@v4
+        with:
+          path: benedb
+
+      - uses: actions/checkout@v4
+        with:
+          repository: dave-hillier-co/thresh
+          path: thresh
+
+      # Fails loudly and early when the runner is missing a tool, rather than
+      # midway through an install with an error that names something else.
+      - name: Tool versions
+        run: |
+          corepack enable
+          node --version
+          pnpm --version
+          docker --version
+          docker info --format '{{.ServerVersion}}'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Unit
+        run: pnpm test
+
+      - name: Conformance
+        run: pnpm test:conformance
+
+      # The only external oracle. It SKIPS rather than fails without Docker, so
+      # a runner that lost its daemon would turn this into a silent pass — the
+      # `docker info` check above is what stops that.
+      - name: Differential
+        run: pnpm test:differential
+
+      # THE ORPHANED-HOST GUARD. CLAUDE.md forbids starting a host from a test
+      # or from CI, because a backgrounded host orphans and runs forever. On a
+      # SELF-HOSTED runner that is not hypothetical: the orphan would outlive
+      # the job on a real machine and hold its ports until someone noticed. So
+      # the rule is enforced here rather than only written down.
+      - name: No host was left running
+        if: always()
+        run: |
+          listening=""
+          for port in 50051 8080 11111 11112; do
+            if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+              listening="$listening $port"
+              lsof -nP -iTCP:"$port" -sTCP:LISTEN
+            fi
+          done
+          if [ -n "$listening" ]; then
+            echo "::error::a host is still listening on$listening — something started one from CI"
+            exit 1
+          fi
+          echo "no host ports are listening"
