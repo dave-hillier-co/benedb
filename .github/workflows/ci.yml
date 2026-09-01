@@ -63,7 +63,8 @@ jobs:
           node --version
           pnpm --version
           docker --version
-          docker info --format '{{.ServerVersion}}'
+          docker info --format "{{.ServerVersion}}"
+          protoc --version
 
       # THE ORPHANED-HOST GUARD, first half. CLAUDE.md forbids starting a host
       # from a test or from CI, because a backgrounded host orphans and runs
@@ -85,6 +86,13 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      # `packages/protos/generated` is NOT committed — the vendored `.proto`
+      # files are, and the TypeScript is regenerated from them. A fresh checkout
+      # therefore has no protos at all, and everything downstream fails on a
+      # missing module rather than on anything it is testing.
+      - name: Generate protos
+        run: pnpm --filter @benedb/protos generate
 
       - name: Typecheck
         run: pnpm typecheck
