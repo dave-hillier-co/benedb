@@ -1,5 +1,6 @@
 import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
 import {
+  GatewayTooBusyException,
   GrainCallAbortedError,
   GrainCallError,
   GrainCallTimeoutError,
@@ -71,6 +72,12 @@ describe("dispatch transport predicate", () => {
     expect(isDispatchTransportFailure(new GrainCallError("no compatible silo"))).toBe(true);
   });
 
+  it("recognises any other ThreshRuntimeError via the base - the C#'s OrleansException catch-all", () => {
+    // `GatewayTooBusyException` is transient by contract (the gateway sheds load); collapsing it
+    // to Internal instead of Unavailable would make `zed` fail outright rather than retry.
+    expect(isDispatchTransportFailure(new GatewayTooBusyException())).toBe(true);
+  });
+
   it("does not swallow a programming fault as a transient transport failure", () => {
     // The C#'s `_ => false` arm. A TypeError reported as retriable Unavailable would have `zed`
     // retrying a bug forever instead of surfacing it.
@@ -110,6 +117,16 @@ describe("translating a dispatch failure", () => {
     const translated = translateDispatchError(
       new GrainCallAbortedError(),
     ) as DispatchFailedException;
+
+    expect(translated.code).toBe("cancelled");
+    expect(translated.message).toBe("the permission check was cancelled");
+  });
+
+  it("collapses a plain Error named AbortError to Cancelled - isCancellationError matches by name", () => {
+    const abort = new Error("aborted");
+    abort.name = "AbortError";
+
+    const translated = translateDispatchError(abort) as DispatchFailedException;
 
     expect(translated.code).toBe("cancelled");
     expect(translated.message).toBe("the permission check was cancelled");

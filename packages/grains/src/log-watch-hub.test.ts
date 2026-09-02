@@ -70,6 +70,8 @@ class WatchFakeGrain implements IDatastoreGrain {
 
   /** Set to make the next `subscribeWatch` reject once (a transient grain unavailability). */
   failSubscribeTimes = 0;
+  /** When set alongside `failSubscribeTimes`, the rejection reason to use instead of a plain Error. */
+  failSubscribeWith: unknown = undefined;
   /** Set to make `unsubscribeWatch` reject (teardown must swallow it). */
   failUnsubscribe = false;
 
@@ -79,7 +81,7 @@ class WatchFakeGrain implements IDatastoreGrain {
     this.subscribedWith.push(watcher);
     if (this.failSubscribeTimes > 0) {
       this.failSubscribeTimes -= 1;
-      return Promise.reject(new Error("grain momentarily unavailable"));
+      return Promise.reject(this.failSubscribeWith ?? new Error("grain momentarily unavailable"));
     }
     return Promise.resolve(this.head);
   }
@@ -505,6 +507,23 @@ describe("LogWatchHub", () => {
       await vi.advanceTimersByTimeAsync(FAST_HEARTBEAT_MS);
       expect(grain.subscribeCalls).toBe(2);
       expect(wait.settled()).toBe(true);
+      await hub.dispose();
+    });
+
+    it("treatsAPlainAbortErrorAsNormalShutdownNotATransientFailure", async () => {
+      // The C# catches `OperationCanceledException`; the port's counterpart is the whole abort
+      // family via `isCancellationError`, which also matches a plain Error named "AbortError". A
+      // cancellation must END the loop, not be mistaken for grain unavailability and retried.
+      const hub = newHub();
+      grain.failSubscribeTimes = 1;
+      grain.failSubscribeWith = Object.assign(new Error("aborted"), { name: "AbortError" });
+
+      hub.ensureStarted();
+      await flush();
+      expect(grain.subscribeCalls).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(FAST_HEARTBEAT_MS * 3);
+      expect(grain.subscribeCalls).toBe(1);
       await hub.dispose();
     });
 

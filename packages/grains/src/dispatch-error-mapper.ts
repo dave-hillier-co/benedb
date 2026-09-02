@@ -3,13 +3,7 @@ import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import { InvalidConsistencyTokenException } from "@benedb/core/invalid-consistency-token-exception";
 import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
 import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
-import {
-  GrainCallAbortedError,
-  GrainCallError,
-  GrainCallTimeoutError,
-  GrainTaskCanceledError,
-  RejectionError,
-} from "@thresh/core/errors";
+import { isCancellationError, isThreshRuntimeError } from "@thresh/core/errors";
 
 import { DispatchFailedException, type DispatchErrorCode } from "./dispatch-failed-exception";
 import { PreconditionFailedException } from "./precondition-failed-exception";
@@ -77,47 +71,19 @@ export function isDispatchDomainException(exception: unknown): boolean {
 }
 
 /**
- * Whether `exception` is a cancellation.
- *
- * PORT DECISION. C#'s `TaskCanceledException` derives from `OperationCanceledException`, so the C#
- * catches both with one `is OperationCanceledException`. TypeScript has no such hierarchy, so the
- * port matches the ABORT FAMILY explicitly: Thresh's {@link GrainCallAbortedError} and
- * {@link GrainTaskCanceledError}, plus a DOM `AbortError` raised by an `AbortSignal`. One
- * predicate, all the cases.
- */
-function isCancellation(exception: unknown): boolean {
-  return (
-    exception instanceof GrainCallAbortedError ||
-    exception instanceof GrainTaskCanceledError ||
-    (exception instanceof DOMException && exception.name === "AbortError")
-  );
-}
-
-/**
  * Whether `exception` is a transient transport / silo-availability / timeout failure that should be
  * reported as retriable `unavailable`.
  *
- * PORT DECISION. Orleans' `SiloUnavailableException`, `OrleansMessageRejectionException`,
- * `TimeoutException` and the `OrleansException` catch-all base have no one-to-one Thresh names.
- * Thresh raises {@link RejectionError} for a refused call (its `kind` names the refusal; both the
- * silo-unavailable and message-rejected cases land here), {@link GrainCallTimeoutError} for a call
- * that missed its deadline, and {@link GrainCallError} as the general dispatch/execution failure
- * that stands in for the `OrleansException` catch-all. Thresh has no single base class beneath all
- * three, so the arm is an explicit list rather than one `instanceof` - recorded as a Thresh gap.
+ * The C# catches the `OrleansException` base (its leaf arms - `SiloUnavailableException`,
+ * `OrleansMessageRejectionException`, `TimeoutException` - all derive from it); Thresh's
+ * counterpart is `ThreshRuntimeError`, matched via the guide's `isThreshRuntimeError` predicate,
+ * so a newly-added Thresh grain-call failure never silently falls through as "unexpected".
  *
  * The C#'s `_ => false` default arm is load-bearing and is kept: a programming fault (TypeError,
  * RangeError, a plain Error) must NOT be reported as retriable, or `zed` retries a bug forever.
  */
 export function isDispatchTransportFailure(exception: unknown): boolean {
-  return (
-    exception instanceof RejectionError ||
-    // Thresh surfaces a response timeout / dropped request as a call-timeout error; treat it as a
-    // transient hop failure (retriable), not a deadline the caller set.
-    exception instanceof GrainCallTimeoutError ||
-    // Any other Thresh grain-call failure (e.g. no compatible silo for placement) is an
-    // availability problem at the mesh layer -> retriable.
-    exception instanceof GrainCallError
-  );
+  return isThreshRuntimeError(exception);
 }
 
 /**
@@ -137,8 +103,10 @@ export function classifyDispatchError(exception: unknown): DispatchClassificatio
   if (isDispatchDomainException(exception)) return DISPATCH_CLASSIFICATION_DOMAIN;
 
   // 2. Cancellation / deadline. A cancellation surfaced as a timeout (a deadline elapsed) is
-  //    DeadlineExceeded; a plain caller cancellation is Cancelled.
-  if (isCancellation(exception)) return mappedDispatchClassification("cancelled");
+  //    DeadlineExceeded; a plain caller cancellation is Cancelled. The C#'s
+  //    `is OperationCanceledException` becomes the guide's `isCancellationError` - the whole abort
+  //    family, including a plain Error named "AbortError".
+  if (isCancellationError(exception)) return mappedDispatchClassification("cancelled");
 
   // 3. Transport / silo-availability failures are TRANSIENT -> retriable Unavailable (NOT
   //    Internal): a silo dropping mid-check should let the client retry, matching SpiceDB.

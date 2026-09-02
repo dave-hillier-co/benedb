@@ -1,6 +1,6 @@
 import { raceSignal } from "@thresh/core/abort";
 import { durationToMs, type Duration } from "@thresh/core/duration";
-import { GrainCallAbortedError } from "@thresh/core/errors";
+import { isCancellationError } from "@thresh/core/errors";
 import type { Logger } from "@thresh/core/logger";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
@@ -220,7 +220,8 @@ export class LogWatchHub implements IDatastoreWatcher {
 
         await delay(this.heartbeatIntervalMs, ct);
       } catch (error) {
-        if (error instanceof GrainCallAbortedError) return; // Normal shutdown.
+        // The C#'s `catch (OperationCanceledException)` - the whole abort family, per the guide.
+        if (isCancellationError(error)) return; // Normal shutdown.
         // The grain may be momentarily unavailable (membership change, deactivation). Back off and
         // retry; a transient failure must not tear down every Watch stream on the silo.
         try {

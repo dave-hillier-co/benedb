@@ -27,12 +27,13 @@ import { WriteConflictException } from "./write-conflict-exception";
 //     `TimeoutException` and the `OrleansException` base have no one-to-one Thresh names. Thresh
 //     raises `RejectionError` (with a `kind` naming the refusal - the silo-unavailable and
 //     message-rejected cases both land here), `GrainCallTimeoutError` for a call that missed its
-//     deadline, and `GrainCallError` as the general dispatch/execution failure that stands in for
-//     the `OrleansException` catch-all. Four C# cases, four Thresh cases.
+//     deadline, and `GrainCallError` as a general dispatch/execution failure - all beneath the
+//     `ThreshRuntimeError` base that stands in for the `OrleansException` catch-all
+//     (`isThreshRuntimeError`, per the guide). Four C# cases, four Thresh cases.
 //   * CANCELLATION. C#'s `TaskCanceledException` derives from `OperationCanceledException`, so both
-//     of the C#'s cancellation cases hit the same branch. TypeScript has no such hierarchy, so the
-//     port matches the ABORT FAMILY explicitly: `GrainCallAbortedError`, `GrainTaskCanceledError`
-//     and a DOM `AbortError`. One predicate, all the cases.
+//     of the C#'s cancellation cases hit the same branch. The port's counterpart is the guide's
+//     `isCancellationError`: `ThreshCancellationError` and its leaves plus any Error named
+//     "AbortError". One predicate, all the cases.
 //
 // `Assert.Throws<ArgumentNullException>` becomes the project `InvalidArgumentError`, per the guide.
 
