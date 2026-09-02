@@ -1,5 +1,4 @@
 import { createServer, type Server as HttpServer } from "node:http";
-import { once } from "node:events";
 import type {
   MethodDefinition,
   Server as GrpcServer,
@@ -54,6 +53,7 @@ import { AuthzedSchemaV1Service } from "./authzed-schema-v1-service";
 import { AuthzedWatchV1Service } from "./authzed-watch-v1-service";
 import { BulkGrpcService } from "./bulk-grpc-service";
 import { PermissionsGrpcService } from "./permissions-grpc-service";
+import { RpcError } from "./rpc-error";
 import { SEED_SCHEMA_TEXT, seedAsync } from "./seed-data";
 import type { ServerStreamWriter } from "./server-stream-writer";
 import { WatchGrpcService } from "./watch-grpc-service";
@@ -86,7 +86,9 @@ import { WatchGrpcService } from "./watch-grpc-service";
  *     `(request, [stream], signal?)` - see `server-stream-writer.ts`. This file is the only place
  *     that knows about `ServerWritableStream`/`ServerReadableStream`: it turns the call's
  *     `cancelled` event into an `AbortSignal`, honours Node backpressure by awaiting `drain` when
- *     `write` returns false, and turns a thrown `RpcError` into the `ServiceError` grpc-js puts on
+ *     `write` returns false (racing it against `error`/`close`/`cancelled` so a client disconnect
+ *     unwinds the handler instead of parking it - see {@link streamWriterFor}), and turns a thrown
+ *     `RpcError` into the `ServiceError` grpc-js puts on
  *     the wire (unary: the callback; streaming: an `error` event, which grpc-js converts to a
  *     status and ends the stream).
  *  4. `app.MapGet("/", () => "Spiceport API up.")` is an HTTP endpoint alongside gRPC, and grpc-js
@@ -224,11 +226,54 @@ function signalFor(call: AnyCall): AbortSignal {
  * `IServerStreamWriter<T>` over a `ServerWritableStream`. A `write` returning false means the
  * socket's buffer is full: awaiting `drain` is the ADAPTER's job, so a service body only ever
  * awaits `write` (see `server-stream-writer.ts`).
+ *
+ * A CANCELLED CALL MAKES `write` THROW, as C# `WriteAsync` throws on a cancelled call
+ * (`AuthzedPermissionsV1Service.cs`). A call destroyed by client cancellation emits `cancelled` and
+ * `close` - not necessarily `drain` or `error` - so a backpressure wait that listens for `drain`
+ * alone parks the handler promise forever, leaking its source iterator and abort listener. The wait
+ * therefore races `drain` against `error`, `close` and `cancelled`, removing every listener on
+ * whichever settles, and rejects with the CANCELLED `RpcError` so the handler unwinds (closing a
+ * `for await` source on the way out) exactly as the C# does.
+ *
+ * Exported for its test only; nothing outside this file constructs one.
  */
-function streamWriterFor<T>(call: ServerWritableStream<unknown, T>): ServerStreamWriter<T> {
+export function streamWriterFor<T>(call: ServerWritableStream<unknown, T>): ServerStreamWriter<T> {
+  // The three call classes' `on` overload sets do not unify (see `signalFor`), so the subscriptions
+  // go through the plain emitter surface all of them share.
+  const emitter = call as unknown as {
+    on(event: string, listener: (...args: unknown[]) => void): void;
+    off(event: string, listener: (...args: unknown[]) => void): void;
+  };
+  const cancelledWrite = (): RpcError =>
+    new RpcError(status.CANCELLED, "Cannot write message: the call was cancelled.");
   return {
     async write(message: T): Promise<void> {
-      if (!call.write(message)) await once(call, "drain");
+      if (call.cancelled || call.destroyed) throw cancelledWrite();
+      if (call.write(message)) return;
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = (): void => {
+          emitter.off("drain", onDrain);
+          emitter.off("error", onError);
+          emitter.off("close", onClosed);
+          emitter.off("cancelled", onClosed);
+        };
+        const onDrain = (): void => {
+          cleanup();
+          resolve();
+        };
+        const onError = (error: unknown): void => {
+          cleanup();
+          reject(toServiceError(error));
+        };
+        const onClosed = (): void => {
+          cleanup();
+          reject(cancelledWrite());
+        };
+        emitter.on("drain", onDrain);
+        emitter.on("error", onError);
+        emitter.on("close", onClosed);
+        emitter.on("cancelled", onClosed);
+      });
     },
   };
 }

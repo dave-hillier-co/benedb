@@ -1,4 +1,5 @@
-import { Server, type ServiceDefinition } from "@grpc/grpc-js";
+import { Server, status, type ServerWritableStream, type ServiceDefinition } from "@grpc/grpc-js";
+import { EventEmitter } from "node:events";
 import { CheckGrain } from "@benedb/grains/check-grain";
 import type { IPermissionChecker } from "@benedb/grains/i-permission-checker";
 import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
@@ -36,10 +37,12 @@ import {
   resolveApiListenEndpoints,
   runApiHost,
   shutdownApiHost,
+  streamWriterFor,
   type ApiHost,
   type ApiHostSteps,
   type ApiServiceDependencies,
 } from "./program";
+import { RpcError } from "./rpc-error";
 import { SEED_SCHEMA_TEXT } from "./seed-data";
 
 /**
@@ -175,6 +178,150 @@ describe("addServices", () => {
     servers.push(server);
 
     expect(() => addServices(server, createServiceRegistrations(dependencies()))).not.toThrow();
+  });
+});
+
+/**
+ * A `ServerWritableStream` stand-in for {@link streamWriterFor}: `write` records the message and
+ * reports the socket buffer full when told to, and the emitter surface carries the four events the
+ * adapter races (`drain`, `error`, `close`, `cancelled`).
+ */
+class FakeWritableCall extends EventEmitter {
+  cancelled = false;
+  destroyed = false;
+  full = false;
+  readonly written: unknown[] = [];
+
+  write(message: unknown): boolean {
+    this.written.push(message);
+    return !this.full;
+  }
+
+  asCall(): ServerWritableStream<unknown, string> {
+    return this as unknown as ServerWritableStream<unknown, string>;
+  }
+}
+
+/** Lets a just-started async pump reach its pending `write` before the test emits an event. */
+const settled = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+describe("streamWriterFor", () => {
+  it("resolves immediately when the transport accepts the write", async () => {
+    const call = new FakeWritableCall();
+
+    await streamWriterFor(call.asCall()).write("m");
+
+    expect(call.written).toEqual(["m"]);
+  });
+
+  it("waits for drain under backpressure, then resolves", async () => {
+    const call = new FakeWritableCall();
+    call.full = true;
+    const pending = streamWriterFor(call.asCall()).write("m");
+
+    await settled();
+    call.emit("drain");
+
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it("rejects a backpressured write when the call closes, rather than parking forever", async () => {
+    // A grpc-js call destroyed by client cancellation emits `cancelled`/`close`, NOT `drain` or
+    // `error` - the case where a drain-only wait leaks the handler, its source iterator and its
+    // abort listener for the life of the process.
+    const call = new FakeWritableCall();
+    call.full = true;
+    const pending = streamWriterFor(call.asCall()).write("m");
+
+    await settled();
+    call.emit("close");
+
+    await expect(pending).rejects.toMatchObject({
+      name: "RpcError",
+      code: status.CANCELLED,
+    });
+  });
+
+  it("rejects a backpressured write when the call is cancelled", async () => {
+    const call = new FakeWritableCall();
+    call.full = true;
+    const pending = streamWriterFor(call.asCall()).write("m");
+
+    await settled();
+    call.emit("cancelled");
+
+    await expect(pending).rejects.toMatchObject({
+      name: "RpcError",
+      code: status.CANCELLED,
+    });
+  });
+
+  it("rejects a backpressured write with the stream's own error", async () => {
+    const call = new FakeWritableCall();
+    call.full = true;
+    const failure = new Error("transport torn down");
+    const pending = streamWriterFor(call.asCall()).write("m");
+
+    await settled();
+    call.emit("error", failure);
+
+    await expect(pending).rejects.toBe(failure);
+  });
+
+  it("throws without writing when the call is already cancelled", async () => {
+    // C# `WriteAsync` throws on a cancelled call; the adapter matches it so a handler loop stops
+    // pumping its source instead of writing into the void.
+    const call = new FakeWritableCall();
+    call.cancelled = true;
+
+    await expect(streamWriterFor(call.asCall()).write("m")).rejects.toBeInstanceOf(RpcError);
+    expect(call.written).toEqual([]);
+  });
+
+  it("removes every listener once the wait settles, either way", async () => {
+    const call = new FakeWritableCall();
+    call.full = true;
+    const writer = streamWriterFor(call.asCall());
+
+    const drained = writer.write("first");
+    await settled();
+    call.emit("drain");
+    await drained;
+    const closed = writer.write("second");
+    await settled();
+    call.emit("close");
+    await expect(closed).rejects.toBeInstanceOf(RpcError);
+
+    for (const event of ["drain", "error", "close", "cancelled"]) {
+      expect(call.listenerCount(event), `leaked ${event} listener`).toBe(0);
+    }
+  });
+
+  it("unwinds a for-await handler loop, closing its source iterator", async () => {
+    // The handler shape every server-streaming service body has: pump an async iterator into the
+    // writer. A cancelled call must propagate out of `write` so the `for await` closes the source
+    // (the datastore watch iterator, in the real services).
+    const call = new FakeWritableCall();
+    call.full = true;
+    let sourceClosed = false;
+    async function* source(): AsyncGenerator<string> {
+      try {
+        yield "a";
+        yield "b";
+      } finally {
+        sourceClosed = true;
+      }
+    }
+    const writer = streamWriterFor(call.asCall());
+    const pump = (async () => {
+      for await (const message of source()) await writer.write(message);
+    })();
+
+    await settled();
+    call.emit("close");
+
+    await expect(pump).rejects.toBeInstanceOf(RpcError);
+    expect(sourceClosed).toBe(true);
   });
 });
 
