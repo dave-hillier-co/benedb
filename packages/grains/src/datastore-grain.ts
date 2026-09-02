@@ -130,11 +130,13 @@ import "./revision-not-found-surrogate";
  *     mutates its state object in place through `TransitionState(holder, ev)`; Thresh's
  *     `transitionState(state, ev)` RETURNS the next state, so the holder is dead weight. This
  *     settles the open question recorded on `DatastoreMetaHolder`.
- *  3. `RaiseConditionalEvent(ev)` has no Thresh counterpart. `raiseEvent` + `confirmEvents` is the
- *     equivalent pair, and the custom-storage adaptor's own CAS on the contiguous log version plays
- *     the role of Orleans' conditional-append version check - so the boolean the C# branches on
- *     becomes "did `confirmEvents` complete without an `InconsistentStateError`". See
- *     {@link DatastoreGrain.raiseConditionalEvent}.
+ *  3. `RaiseConditionalEvent(ev)` maps to Thresh's `raiseConditionalEvent(ev)` - the same
+ *     conditional append (adaptor `tryAppend`, mirroring Orleans' first-conflict-drop
+ *     `TryAppend`), so the boolean the C# branches on crosses unchanged. The earlier
+ *     `raiseEvent` + `confirmEvents` + `catch` translation was retired as unsound (a rejected
+ *     event stayed pending and rode the next commit's confirm). See
+ *     {@link DatastoreGrain.#raiseConditionalEvent} and the regression gate in
+ *     `datastore-conditional-append-tests.test.ts`.
  *  4. `SemaphoreSlim(1,1)` -> the module-private {@link Mutex}. The port guide points at
  *     `AsyncSerialExecutor`, but that runs a QUEUED CALLBACK to completion and cannot be HELD
  *     across a section (the flush holds `#shardIo` across its whole write-rows/meta/head/clear
@@ -770,22 +772,17 @@ export class DatastoreGrain
   }
 
   /**
-   * `RaiseConditionalEvent(ev)` + `ConfirmEvents()` as one step. Orleans' conditional append fails
-   * (returns false) when the confirmed version moved under it; Thresh has no conditional raise, and
-   * the custom-storage adaptor's CAS on the contiguous log version - which
-   * {@link applyUpdatesToStorage}'s own version guard implements - plays the same role, surfacing a
-   * lost race as an `InconsistentStateError` out of `confirmEvents`. Any other error is a genuine
-   * storage failure and propagates unchanged.
+   * `RaiseConditionalEvent(ev)`: Thresh's `raiseConditionalEvent` carries Orleans' conditional
+   * append whole - the entry is conditional on the version it was raised at, and a lost race (or
+   * an exhausted CAS budget, the adaptor's bounded deviation) DROPS the event and reports `false`,
+   * never leaving it pending. The retired `raiseEvent` + `confirmEvents` + `catch` translation was
+   * unsound: the adaptor retried the same event against a re-read base, and after the budget the
+   * event stayed pending, so the NEXT commit's confirm appended an event whose caller had already
+   * been told it failed. Any error other than the reported `false` is a genuine storage failure
+   * and propagates unchanged.
    */
   async #raiseConditionalEvent(ev: LogEvent): Promise<boolean> {
-    this.raiseEvent(ev);
-    try {
-      await this.confirmEvents();
-      return true;
-    } catch (error) {
-      if (error instanceof InconsistentStateError) return false;
-      throw error;
-    }
+    return this.raiseConditionalEvent(ev);
   }
 
   /** @inheritdoc */
