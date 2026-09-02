@@ -1,6 +1,6 @@
 import { keyToString } from "@thresh/core/grain-key";
 import type { GrainType } from "@thresh/core/grain-type";
-import type { SiloAddress } from "@thresh/core/silo-address";
+import { SiloAddress } from "@thresh/core/silo-address";
 import {
   pickRandom,
   type PlacementContext,
@@ -61,10 +61,11 @@ import { fnv1a64 } from "./stable-hash";
  *     (test-first) and the dispatcher now passes `req.target`; `orleans-to-thresh-port.md` gained
  *     the row. `grainId` is optional in the context, and an absent one falls back to the random
  *     pick - the same fallback an unrecognized key shape takes.
- *   * THRESH GAP, DECIDED HERE: the C# does `Array.Sort(SiloAddress[])` on a CLONE, but Thresh's
- *     `SiloAddress` exposes no comparator. The sort here is by `toString()`, ordinally. Which
- *     order it is does not matter; that EVERY silo produces the identical order does, and
- *     `toString()` is a total function of the address's three components.
+ *   * The C#'s `Array.Sort(SiloAddress[])` becomes `sort(SiloAddress.compare)` - the comparator
+ *     the port guide mandates for this exact row. Every silo must derive the identical order, and
+ *     the component-by-component compare (podName, podUid, endpoint) is what the rest of the
+ *     cluster (the directory ring included) sorts by; a toString() sort would order differently
+ *     ('#' interposes after the pod name) and split placement across silos that disagree.
  *   * `Array.prototype.sort` sorts IN PLACE where `Array.Sort` follows `Clone()`, so the copy is
  *     kept: the dispatcher's own candidate list must not be reordered.
  */
@@ -102,13 +103,7 @@ export class GraphLocalityPlacementDirector implements PlacementStrategy {
 
     // Sort a COPY so every silo indexes an identically-ordered list (the candidate set makes no
     // ordering promise); the modulus then names one silo cluster-wide for this key.
-    const sorted = [...candidates].sort((a, b) => {
-      const left = a.toString();
-      const right = b.toString();
-      // A bare comparator is UTF-16 ordinal, which is what C#'s `StringComparer.Ordinal` is; a
-      // locale-aware compare would order differently on different hosts.
-      return left < right ? -1 : left > right ? 1 : 0;
-    });
+    const sorted = [...candidates].sort(SiloAddress.compare);
     // The modulus stays in BIGINT space: `fnv1a64` exceeds 2^53, so narrowing to `number` first
     // would round away the low bits and name a different silo.
     const index = Number(fnv1a64(key) % BigInt(sorted.length));

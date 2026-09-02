@@ -4,6 +4,7 @@ import type { PlacementContext } from "@thresh/runtime/placement/placement-strat
 import { describe, expect, it } from "vitest";
 
 import { GraphLocalityPlacementDirector, localityKey } from "./graph-locality-placement-director";
+import { fnv1a64 } from "./stable-hash";
 
 // CHARACTERIZATION test for `src/Spiceport.Server/Grains/GraphLocalityPlacementDirector.cs`.
 //
@@ -20,13 +21,11 @@ import { GraphLocalityPlacementDirector, localityKey } from "./graph-locality-pl
 //   4. otherwise: sort a COPY of the candidates, index by
 //      `StableHash.Fnv1a64(localityKey) % (ulong)sorted.Length`.
 //
-// Two Thresh gaps this port had to close, both noted in the ported file:
+// One Thresh gap this port had to close, noted in the ported file:
 //   * `PlacementStrategy.choose` received no grain key (only the grain TYPE), so the locality key
 //     could not be computed at all. The grain id now reaches the strategy through
 //     `PlacementContext`.
-//   * `SiloAddress` has no ordering, where the C# does `Array.Sort(SiloAddress[])`. The sort here
-//     is by `toString()`, ordinally - what matters is only that EVERY silo sorts identically, which
-//     is the whole co-location property.
+// The C#'s `Array.Sort(SiloAddress[])` maps to `sort(SiloAddress.compare)`, per the port guide.
 
 const silo = (n: number): SiloAddress => new SiloAddress(`silo-${n}`, `uid-${n}`, `silo-${n}:1`);
 
@@ -132,6 +131,29 @@ describe("GraphLocalityPlacementDirector", () => {
 
     expect(backwards.podName).toBe(forwards.podName);
     expect(shuffled.podName).toBe(forwards.podName);
+  });
+
+  it("sorts candidates by SiloAddress.compare, not by toString()", () => {
+    // C#: `Array.Sort(sorted)` uses `SiloAddress.CompareTo`; the Thresh equivalent is
+    // `SiloAddress.compare` (podName, then podUid, then endpoint). A toString() sort orders
+    // DIFFERENTLY because toString() interposes '#' (0x23) after the pod name: "a!" (0x21) sorts
+    // BEFORE "a#..." under toString() but AFTER "a" under the component compare. A silo sorting
+    // one way and a silo sorting the other name different owners for the same key - placement
+    // split-brain.
+    const director = new GraphLocalityPlacementDirector({ coLocateWithShards: true });
+    const a = new SiloAddress("a", "uid-a", "a:1");
+    const aBang = new SiloAddress("a!", "uid-b", "b:1");
+    const candidates = [a, aBang];
+
+    // The independent computation, straight off the mandated comparator.
+    const sorted = [...candidates].sort(SiloAddress.compare);
+    const expected = sorted[Number(fnv1a64("document/readme") % BigInt(sorted.length))]!;
+
+    const chosen = director.choose("CheckGrain", candidates, context(CHECK_KEY));
+
+    // fnv1a64("document/readme") is odd, so index 1: "a!" under compare, "a" under toString().
+    expect(expected.podName).toBe("a!");
+    expect(chosen).toBe(expected);
   });
 
   it("does not mutate the caller's candidate array while sorting", () => {
