@@ -122,6 +122,31 @@ describe("caveat evaluator", () => {
     expect(result.missingFields).toContain("user_ip");
   });
 
+  it("is caveated when a bare overload failure coincides with a missing referenced parameter", () => {
+    // Pins the C# `IsMissingReferenceError` special case (CaveatEvaluator.cs:236-237): a BARE
+    // `CelNoSuchOverloadException` (no inner detail) counts as a missing-reference error, so when
+    // the referenced-parameter scan finds anything absent the answer is Caveated, not a throw.
+    // Here `a || true` short-circuits over the missing `a`, and `b > "x"` fails with an overload
+    // error - Spiceport answers CAVEATED with missing_required_context ["a"].
+    const evaluate = evaluator(caveat("c", '(a || true) && b > "x"', ["a", "bool"], ["b", "int"]));
+
+    const result = evaluate.evaluate("c", undefined, context(["b", 1]));
+
+    expect(result.outcome).toBe("caveated");
+    expect(result.missingFields).toEqual(["a"]);
+  });
+
+  it("still throws on a bare overload failure when no referenced parameter is missing", () => {
+    // The other half of the C# special case: with nothing missing, the overload failure is a
+    // genuine expression bug and propagates (`throw` after the missing check).
+    const evaluate = evaluator(caveat("c", 'b > "x"', ["b", "int"]));
+
+    const error = captureError(() => evaluate.evaluate("c", undefined, context(["b", 1])));
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("could not evaluate caveat `c`");
+  });
+
   it("throws unknownCaveat for an unknown caveat name", () => {
     const evaluate = evaluator(caveat("c", "true"));
 

@@ -290,14 +290,26 @@ function invert(r: CaveatResult): CaveatResult {
  * partial-evaluation carrier for the same condition. Errors merge into `CelError.additional`, so
  * the whole merged tree is walked.
  *
- * The C#'s overload special case is deliberately NOT carried across: in `@bufbuild/cel` the macro
- * form it existed for already surfaces as "unresolved attribute" (the fold's iteration range
- * evaluates to that error), so admitting `found no matching overload` here would only widen the
- * predicate - turning a genuine type mismatch such as `age > "x"` into `caveated` where the C#
- * throws.
+ * The C#'s BARE overload special case (`CelNoSuchOverloadException` at the top of the chain with
+ * no inner exception) IS carried across: the equivalent here is a top-level
+ * `found no matching overload` error carrying no merged `additional` errors. It matters even
+ * though the macro form it originally existed for already surfaces as "unresolved attribute" in
+ * `@bufbuild/cel`, because a definite branch can short-circuit AROUND the missing parameter while
+ * a sibling operand fails on overload - e.g. `(a || true) && b > "x"` with `{b: 1}`: `a` is
+ * absent but absorbed by the `||`, and the surviving error is a bare overload failure. The C#
+ * counts that as a missing-reference error and answers Caveated with `["a"]`. The predicate stays
+ * narrow - an overload error wrapping further detail is not admitted, matching the
+ * `InnerException is null` guard - and `evaluate`'s `missing.length > 0` gate still turns a
+ * genuine type mismatch with nothing missing (plain `age > "x"`) into a throw, as in the C#.
  */
 function isMissingReferenceResult(result: CelError | CelUnknown): boolean {
   if (result instanceof CelUnknown) return true;
+  if (
+    result.message.startsWith("found no matching overload") &&
+    (result.additional === undefined || result.additional.length === 0)
+  ) {
+    return true; // bare overload failure on a missing-operand expression (no inner detail)
+  }
   for (const error of flattenErrors(result)) {
     if (
       error.message === "unresolved attribute" ||
