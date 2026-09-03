@@ -378,10 +378,13 @@ export class PermissionsGrpcService {
     request: DeleteRelationshipsRequest,
   ): Promise<DeleteRelationshipsResponse> {
     try {
+      // This surface's response reports reachedLimit, so a limited delete truncates (partial
+      // deletions allowed) rather than rejecting transactionally.
       const reply = await this.#relationships.deleteRelationships({
         filter: toWireFilter(request.filter ?? EMPTY_RELATIONSHIP_FILTER),
         optionalLimit: request.optionalLimit === 0 ? undefined : BigInt(request.optionalLimit),
         preconditions: toWirePreconditions(request.optionalPreconditions),
+        allowPartialDeletions: true,
       });
 
       return {

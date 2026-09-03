@@ -129,7 +129,13 @@ export interface WriteRelationshipsReply {
   readonly writtenAtToken: string;
 }
 
-/** Arguments for `IRelationshipsGrain.deleteRelationships`. */
+/**
+ * Arguments for `IRelationshipsGrain.deleteRelationships`. When `optionalLimit` is set and
+ * `allowPartialDeletions` is false (the RPC default - absent means false, the C#'s constructor
+ * default), a filter matching MORE rows than the limit rejects the whole delete
+ * (`DeleteLimitExceededException`) with nothing applied; true deletes up to the limit and reports
+ * it via `DeleteRelationshipsReply.reachedLimit`.
+ */
 export interface DeleteRelationshipsArgs {
   /** The filter naming the rows to close. */
   readonly filter: RelationshipsFilterWire;
@@ -137,9 +143,16 @@ export interface DeleteRelationshipsArgs {
   readonly optionalLimit?: bigint | undefined;
   /** The preconditions, or absent for none. */
   readonly preconditions?: readonly PreconditionWire[] | undefined;
+  /** Whether a limited delete may truncate rather than reject; absent means false. */
+  readonly allowPartialDeletions?: boolean | undefined;
 }
 
-/** Reply for `IRelationshipsGrain.deleteRelationships`. */
+/**
+ * Reply for `IRelationshipsGrain.deleteRelationships`. `reachedLimit` is true when the deleted row
+ * count EQUALS the limit (upstream SpiceDB datastore semantics), so a limit exactly covering all
+ * matches deletes everything yet still reports the limit as reached (the v1 API surfaces that as
+ * PARTIAL deletion progress).
+ */
 export interface DeleteRelationshipsReply {
   /** The number of rows deleted (`ulong`). */
   readonly deletedCount: bigint;

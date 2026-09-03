@@ -1,10 +1,6 @@
 import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import { ELLIPSIS } from "@benedb/core/core-constants";
-import {
-  allowedRelationDirect,
-  allowedRelationWildcard,
-  type AllowedRelation,
-} from "@benedb/core/allowed-relation";
+import { allowedRelationDirect, type AllowedRelation } from "@benedb/core/allowed-relation";
 import { createNamespaceDefinition } from "@benedb/core/namespace-definition";
 import { baseRelation, permission, type Relation } from "@benedb/core/relation";
 import {
@@ -22,8 +18,9 @@ import { createReachabilityEntrypoint } from "./reachability-entrypoint";
 import { buildReachabilityGraph, type ReachabilityMode } from "./reachability-graph";
 import type { RelationReference } from "./relation-reference";
 
-// Characterization of Spiceport `Engine/Reachability/ReachabilityGraph.cs`. NO C# test covers it
-// directly - it is exercised only through `LookupResourcesEngineTests` and, three stages up, the
+// Characterization of Spiceport `Engine/Reachability/ReachabilityGraph.cs`, plus the direct
+// structural cases of `tests/Spiceport.Engine.Tests/ReachabilityGraphTests.cs`. Beyond those it
+// is exercised only through `LookupResourcesEngineTests` and, three stages up, the
 // schema-introspection RPCs. That makes it the file a wrong port breaks SILENTLY: a missing
 // entrypoint yields fewer LookupResources results, not an error. So this suite pins the shape of
 // the entrypoints the builder emits, not just their count.
@@ -501,44 +498,36 @@ describe("arrow entrypoints", () => {
     ).toEqual([]);
   });
 
-  it("skips a wildcard allowed type on the tupleset relation", () => {
-    // A wildcard tupleset link is not productive for an arrow. With `folder:*` as the ONLY
-    // allowed type of `parent`, the arrow yields no entrypoint whatsoever - which is the only way
-    // the skip is observable, since a wildcard and a concrete link of the same object type would
-    // otherwise land on the identical index key and dedupe.
+  it("emits a tuple-to-userset entrypoint for a wildcard-typed tupleset relation", () => {
+    // Ported from Spiceport `ReachabilityGraphTests.Ttu_OverWildcardTypedTuplesetRelation_
+    // EmitsEntrypointForWildcardNamespace`. Upstream iterates AllowedDirectRelationsAndWildcards
+    // and adds a TUPLESET_TO_USERSET entrypoint for every allowed type whose target definition
+    // has the computed relation -- a public-wildcard entry included (its namespace still
+    // contributes the entrypoint).
     const graph = buildReachabilityGraph(
-      namespacesFrom(
-        createNamespaceDefinition("user"),
-        createNamespaceDefinition(
-          "folder",
-          baseRelation("viewer", allowedRelationDirect("user")),
-          permission("view", {
-            operation: setOperationUnion({
-              kind: "computedUserset",
-              value: computedUsersetOnResource("viewer"),
-            }),
-          }),
-        ),
-        createNamespaceDefinition(
-          "document",
-          baseRelation("parent", allowedRelationWildcard("folder")),
-          permission("view", {
-            operation: setOperationUnion({
-              kind: "tupleToUserset",
-              value: {
-                tuplesetRelation: "parent",
-                computedUserset: computedUsersetOnResource("view"),
-              },
-            }),
-          }),
-        ),
-      ),
+      namespacesOf(`
+        definition user {}
+
+        definition folder {
+            relation viewer: user
+        }
+
+        definition document {
+            relation parent: folder:*
+            permission view = parent->viewer
+        }
+      `),
     );
 
-    expect(labels(graph.targets)).toContain("document#view");
-    expect(
-      graph.entrypointsForSubjectToResource(ref("folder", "view"), ref("document", "view")),
-    ).toEqual([]);
+    const entrypoints = graph.entrypointsForSubjectToResource(
+      ref("folder", "viewer"),
+      ref("document", "view"),
+    );
+
+    const ttus = entrypoints.filter((e) => e.kind === "tupleToUserset");
+    expect(ttus).toHaveLength(1);
+    expect(ttus[0]?.tuplesetRelation).toBe("parent");
+    expect(ttus[0]?.computedUsersetRelation).toBe("viewer");
   });
 
   it("emits nothing for an arrow over an unknown or rewrite-only tupleset relation", () => {

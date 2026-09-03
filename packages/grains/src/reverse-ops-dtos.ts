@@ -159,6 +159,20 @@ export interface FoundSubjectWire {
   readonly isWildcard: boolean;
   /** Member or caveated (with missing context params). */
   readonly permissionship: Permissionship;
+  /**
+   * For a wildcard match, the ids of ALL concrete subjects the engine excluded from it, regardless
+   * of how each exclusion's own caveat collapsed (mirrors upstream's deprecated
+   * `excluded_subject_ids`, which is built before per-exclusion collapse). Absent for concrete
+   * subjects (a C# default parameter `= null`).
+   */
+  readonly excludedSubjectIds?: readonly string[] | undefined;
+  /**
+   * For a wildcard match, the excluded subjects whose own caveat survives the request context,
+   * each with its collapsed permissionship (mirrors upstream's modern `excluded_subjects`: a
+   * definitely-false exclusion caveat drops the entry from this list but not from
+   * {@link excludedSubjectIds}). Absent for concrete subjects (a C# default parameter `= null`).
+   */
+  readonly excludedSubjects?: readonly FoundSubjectWire[] | undefined;
 }
 
 /**

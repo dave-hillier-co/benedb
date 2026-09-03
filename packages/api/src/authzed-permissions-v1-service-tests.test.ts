@@ -26,12 +26,14 @@ import {
   CheckPermissionRequest,
   CheckPermissionResponse_Permissionship,
   DeleteRelationshipsRequest,
+  DeleteRelationshipsResponse_DeletionProgress,
   ExpandPermissionTreeRequest,
   ExportBulkRelationshipsRequest,
   ImportBulkRelationshipsRequest,
   LookupPermissionship,
   LookupResourcesRequest,
   LookupSubjectsRequest,
+  LookupSubjectsRequest_WildcardOption,
   Precondition_Operation,
   ReadRelationshipsRequest,
   WriteRelationshipsRequest,
@@ -137,6 +139,26 @@ async function seedCaveatedViewer(datastore: IDatastore, res: string, subj: stri
   await datastore.readWriteTx((tx) =>
     tx.writeRelationships([{ relationship, operation: "touch" }]),
   );
+}
+
+const WildcardSchema = `definition user {}
+
+definition doc {
+    relation banned: user
+    relation viewer: user | user:*
+    permission view = viewer - banned
+}`;
+
+/** The C# `SeedDocAsync`: seeds `doc` tuples ("*" is the public wildcard subject id). */
+async function seedDoc(
+  datastore: IDatastore,
+  ...tuples: readonly (readonly [res: string, rel: string, subj: string])[]
+): Promise<void> {
+  const updates: RelationshipUpdate[] = tuples.map(([res, rel, subj]) => ({
+    relationship: createRelationship(onr("doc", res, rel), onr("user", subj, ELLIPSIS)),
+    operation: "touch",
+  }));
+  await datastore.readWriteTx((tx) => tx.writeRelationships(updates));
 }
 
 function userSubject(id: string): SubjectReference {
@@ -1053,6 +1075,162 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
     }
   });
 
+  it("DeleteRelationships without limit is complete with count", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "editor", "carol"],
+      );
+
+      const resp = await service(cluster).deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document", optionalResourceId: "readme" },
+        }),
+      );
+
+      expect(resp.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_COMPLETE,
+      );
+      expect(resp.relationshipsDeletedCount).toBe("3");
+      expect(resp.deletedAt?.token).toBeTruthy();
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships limit with allow partial deletes up to limit and is partial", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "u1"],
+        ["readme", "viewer", "u2"],
+        ["readme", "viewer", "u3"],
+        ["readme", "viewer", "u4"],
+        ["readme", "viewer", "u5"],
+      );
+      const svc = service(cluster);
+
+      const resp = await svc.deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document", optionalResourceId: "readme" },
+          optionalLimit: 3,
+          optionalAllowPartialDeletions: true,
+        }),
+      );
+
+      expect(resp.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_PARTIAL,
+      );
+      expect(resp.relationshipsDeletedCount).toBe("3");
+      expect(resp.deletedAt?.token).toBeTruthy();
+
+      // Exactly 2 remain past the limit.
+      const writer = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await svc.readRelationships(
+        ReadRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document", optionalResourceId: "readme" },
+          consistency: { fullyConsistent: true },
+        }),
+        writer,
+      );
+      expect(writer.collected).toHaveLength(2);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships limit exceeded without allow partial is invalid argument and deletes nothing", async () => {
+    // Upstream (relationships.go DeleteRelationships): a limit with allow-partial false and MORE
+    // matching rows than the limit rejects the whole call transactionally - InvalidArgument
+    // (ERROR_REASON_TOO_MANY_RELATIONSHIPS_FOR_TRANSACTIONAL_DELETE), nothing deleted.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "u1"],
+        ["readme", "viewer", "u2"],
+        ["readme", "viewer", "u3"],
+        ["readme", "viewer", "u4"],
+        ["readme", "viewer", "u5"],
+      );
+      const svc = service(cluster);
+
+      const error = await expectRpcError(
+        svc.deleteRelationships(
+          DeleteRelationshipsRequest.fromPartial({
+            relationshipFilter: { resourceType: "document", optionalResourceId: "readme" },
+            optionalLimit: 3,
+          }),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.message).toContain("found more than 3 relationships to be deleted");
+
+      // The rejection was transactional: all 5 rows survive.
+      const writer = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await svc.readRelationships(
+        ReadRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document", optionalResourceId: "readme" },
+          consistency: { fullyConsistent: true },
+        }),
+        writer,
+      );
+      expect(writer.collected).toHaveLength(5);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships limit covering all matches without allow partial is partial", async () => {
+    // Exactly limit matches without allow-partial: upstream's limit+1 probe passes (only strictly
+    // MORE matches than the limit trips the transactional rejection), every row is deleted - but
+    // the response still reports PARTIAL, because upstream datastores flag the limit as reached
+    // when deleted == limit (postgres readwrite.go: RowsAffected() == limit; memdb readwrite.go:
+    // counter == limit), which relationships.go maps to DELETION_PROGRESS_PARTIAL. Note the
+    // vendored proto doc says PARTIAL only when MORE rows matched than the limit; upstream's
+    // implementation contradicts its own doc, and behavioral agreement with real spicedb wins.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "u1"],
+        ["readme", "viewer", "u2"],
+        ["readme", "viewer", "u3"],
+      );
+      const svc = service(cluster);
+
+      const resp = await svc.deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document", optionalResourceId: "readme" },
+          optionalLimit: 3,
+        }),
+      );
+
+      expect(resp.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_PARTIAL,
+      );
+      expect(resp.relationshipsDeletedCount).toBe("3");
+
+      // The delete itself was complete: nothing remains.
+      const writer = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await svc.readRelationships(
+        ReadRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document", optionalResourceId: "readme" },
+          consistency: { fullyConsistent: true },
+        }),
+        writer,
+      );
+      expect(writer.collected).toHaveLength(0);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
   it("LookupResources streams the accessible resources", async () => {
     const cluster = await MeshTestCluster.create(Schema);
     try {
@@ -1110,6 +1288,72 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
         );
         expect(r.permissionship).toBe(LookupPermissionship.LOOKUP_PERMISSIONSHIP_HAS_PERMISSION);
       }
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("LookupSubjects wildcard carries exclusions in modern and deprecated fields", async () => {
+    const cluster = await MeshTestCluster.create(WildcardSchema);
+    try {
+      await seedDoc(cluster.datastore, ["d1", "viewer", "*"], ["d1", "banned", "alice"]);
+
+      const writer = new CollectingStreamWriter<LookupSubjectsResponse>();
+      await service(cluster).lookupSubjects(
+        LookupSubjectsRequest.fromPartial({
+          resource: { objectType: "doc", objectId: "d1" },
+          permission: "view",
+          subjectObjectType: "user",
+        }),
+        writer,
+      );
+
+      expect(writer.collected).toHaveLength(1);
+      const resp = writer.collected[0]!;
+      expect(resp.subject?.subjectObjectId).toBe("*");
+      expect(resp.subject?.permissionship).toBe(
+        LookupPermissionship.LOOKUP_PERMISSIONSHIP_HAS_PERMISSION,
+      );
+
+      // Modern field: the excluded subject with its own permissionship.
+      expect(resp.excludedSubjects).toHaveLength(1);
+      const excluded = resp.excludedSubjects[0]!;
+      expect(excluded.subjectObjectId).toBe("alice");
+      expect(excluded.permissionship).toBe(
+        LookupPermissionship.LOOKUP_PERMISSIONSHIP_HAS_PERMISSION,
+      );
+
+      // Deprecated mirror: the excluded subject ids.
+      expect(resp.excludedSubjectIds).toEqual(["alice"]);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("LookupSubjects wildcard option exclude suppresses wildcard rows", async () => {
+    const cluster = await MeshTestCluster.create(WildcardSchema);
+    try {
+      await seedDoc(
+        cluster.datastore,
+        ["d1", "viewer", "*"],
+        ["d1", "viewer", "carol"],
+        ["d1", "banned", "alice"],
+      );
+
+      const writer = new CollectingStreamWriter<LookupSubjectsResponse>();
+      await service(cluster).lookupSubjects(
+        LookupSubjectsRequest.fromPartial({
+          resource: { objectType: "doc", objectId: "d1" },
+          permission: "view",
+          subjectObjectType: "user",
+          wildcardOption: LookupSubjectsRequest_WildcardOption.WILDCARD_OPTION_EXCLUDE_WILDCARDS,
+        }),
+        writer,
+      );
+
+      // The wildcard row is suppressed entirely; concrete subjects still stream.
+      const ids = writer.collected.map((r) => r.subject?.subjectObjectId ?? "");
+      expect(ids).toEqual(["carol"]);
     } finally {
       await cluster.dispose();
     }

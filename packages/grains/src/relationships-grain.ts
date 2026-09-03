@@ -31,6 +31,7 @@ import type {
   CommitRequest,
 } from "./commit-contract";
 import type { CounterDeltaWire } from "./log-event";
+import { DeleteLimitExceededException } from "./delete-limit-exceeded-exception";
 import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "./i-datastore-grain";
 import type { IRelationshipsGrain } from "./i-relationships-grain";
 import type { ISchemaProvider } from "./i-schema-provider";
@@ -335,6 +336,7 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
       deleteByFilter: {
         filter: toFullFilter(toFilter(args.filter)),
         limit: args.optionalLimit,
+        allowPartial: args.allowPartialDeletions ?? false,
       },
       schemaBytes: undefined,
       expectedSchemaHash: undefined,
@@ -498,9 +500,10 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
  * threw: a precondition failure rethrows {@link PreconditionFailedException} (kind/index recovered
  * from the shared message text), and a duplicate create rethrows {@link WriteConflictException}
  * with kind `createExisting` carrying the message {@link CreateRelationshipExistsException} DERIVES
- * from the conflicting relationship (the reply detail). `headMoved` never reaches this mapper - the
- * declarative commit retries it - and no other kind can occur on a declarative relationship commit,
- * so anything else is surfaced loudly.
+ * from the conflicting relationship (the reply detail), and a transactional-delete rejection
+ * rethrows {@link DeleteLimitExceededException} (the limit recovered from the reply detail).
+ * `headMoved` never reaches this mapper - the declarative commit retries it - and no other kind can
+ * occur on a declarative relationship commit, so anything else is surfaced loudly.
  */
 function relationshipWriteFailure(failure: CommitFailureWire): Error {
   switch (failure.kind) {
@@ -511,11 +514,19 @@ function relationshipWriteFailure(failure: CommitFailureWire): Error {
         "createExisting",
         new CreateRelationshipExistsException(failure.detail ?? "").message,
       );
+    case "deleteLimitExceeded":
+      return new DeleteLimitExceededException(parseLimitDetail(failure.detail));
     default:
       return new Error(
         `unexpected relationship-commit failure ${failure.kind}: ${failure.detail ?? ""}`,
       );
   }
+}
+
+/** `ulong.TryParse(failure.Detail, out var limit) ? limit : 0`. */
+function parseLimitDetail(detail: string | undefined): bigint {
+  if (detail === undefined || !/^\d+$/.test(detail)) return 0n;
+  return BigInt(detail);
 }
 
 function preconditionFailure(detail: string | undefined): PreconditionFailedException {

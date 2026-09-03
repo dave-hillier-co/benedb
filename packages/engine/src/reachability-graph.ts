@@ -328,7 +328,9 @@ class ReachabilityGraphImpl implements ReachabilityGraph {
     if (typeInfo === undefined) return;
 
     for (const allowed of typeInfo.allowedDirectRelations) {
-      if (isAllowedRelationPublicWildcard(allowed)) continue; // arrows over a wildcard tupleset are not productive here.
+      // A public-wildcard entry contributes like any other: its namespace is the subject type
+      // reached after resolving the arrow's right side (upstream iterates
+      // AllowedDirectRelationsAndWildcards with no wildcard skip).
 
       // Guard: the allowed type must actually have the computed relation (HasRelation).
       if (!this.hasRelation(allowed.objectType, computedRelation)) continue;

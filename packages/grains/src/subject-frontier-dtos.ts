@@ -19,9 +19,9 @@ export interface FrontierSubjectWire {
    * (the C# round-trip test asserts a plain subject's list is null), so this starts life absent and
    * is never initialised to `[]` for tidiness.
    *
-   * Note: `FoundSubjectWire` (the client-facing collapsed shape) still has no excluded-subjects
-   * field, so `ReverseOps` drops these at the client edge exactly as it always has - carrying them
-   * here only keeps the memoized frontier a byte-faithful mirror of the engine's own output.
+   * Carried PRE-CONTEXT (verbatim caveats): `ReverseOps` collapses each exclusion's caveat
+   * per-request into the client-facing `FoundSubjectWire.excludedSubjects` shape, so the memoized
+   * frontier must stay a byte-faithful mirror of the engine's own output.
    */
   readonly excludedSubjects?: readonly FrontierSubjectWire[] | undefined;
 }

@@ -548,6 +548,45 @@ describe("LookupResourcesEngine", () => {
     expect(found).toEqual([]);
   });
 
+  // A wildcard-typed tupleset relation compiles (the schema type validator rejects it only at
+  // WriteSchema time, mirroring SpiceDB). Upstream's computeTTUReachability still emits a
+  // TupleToUserset entrypoint for the wildcard entry's namespace, so LookupResources must not
+  // silently miss resources reached through such an arrow (Check confirmation cannot recover a
+  // candidate that was never generated).
+  const WILDCARD_TUPLESET_SCHEMA = `
+definition user {}
+
+definition folder {
+    relation viewer: user
+}
+
+definition document {
+    relation parent: folder:*
+    permission view = parent->viewer
+}
+`;
+
+  it("still yields candidates for an arrow over a wildcard-typed tupleset relation", async () => {
+    const { store, rev } = await seed(
+      tuple("document", "d1", "parent", onr("folder", "f1")),
+      tuple("folder", "f1", "viewer", onr("user", "alice")),
+    );
+    const engine = buildEngine(WILDCARD_TUPLESET_SCHEMA);
+    const check = buildCheckEngine(WILDCARD_TUPLESET_SCHEMA);
+    const reader = store.snapshotReader(rev);
+
+    // Check reaches d1 through the arrow; LookupResources must agree.
+    const verdict = (await check.check(reader, "document", "d1", "view", onr("user", "alice")))
+      .verdict;
+    expect(verdict).toBe("member");
+
+    const found = await collect(
+      engine.lookupResources(reader, "user", "alice", ELLIPSIS, "document", "view"),
+    );
+
+    expect(found.map((f) => f.resourceId)).toEqual(["d1"]);
+  });
+
   it.each(["view", "edit_only", "allowed_view", "inherited_view"])(
     "agrees with Check across the resource universe for %s",
     async (permission) => {

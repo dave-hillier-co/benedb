@@ -13,6 +13,7 @@ import {
   MINIMIZE_LATENCY_WIRE,
 } from "@benedb/grains/consistency-wire";
 import { DispatchFailedException } from "@benedb/grains/dispatch-failed-exception";
+import { InvalidCursorException } from "@benedb/grains/invalid-cursor-exception";
 import type { BatchCheckItem, IPermissionChecker } from "@benedb/grains/i-permission-checker";
 import type { IRelationshipsGrain } from "@benedb/grains/i-relationships-grain";
 import {
@@ -20,6 +21,7 @@ import {
   RELATIONSHIPS_GRAIN_KEY,
 } from "@benedb/grains/i-relationships-grain";
 import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
+import { DeleteLimitExceededException } from "@benedb/grains/delete-limit-exceeded-exception";
 import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
 import type { RelationshipReads } from "@benedb/grains/relationship-reads";
 import type {
@@ -49,7 +51,6 @@ import { WriteConflictException } from "@benedb/grains/write-conflict-exception"
 import type { Membership } from "@benedb/engine/membership";
 import type {
   ObjectReference,
-  PartialCaveatInfo,
   PermissionRelationshipTree,
   Relationship as ProtoRelationship,
   RelationshipUpdate,
@@ -83,6 +84,7 @@ import type {
   ReadRelationshipsRequest,
   ReadRelationshipsResponse,
   RelationshipFilter as ProtoRelationshipFilter,
+  ResolvedSubject,
   WriteRelationshipsRequest,
   WriteRelationshipsResponse,
 } from "@benedb/protos/authzed/api/v1/permission_service";
@@ -90,6 +92,7 @@ import {
   CheckPermissionResponse_Permissionship,
   DeleteRelationshipsResponse_DeletionProgress,
   LookupPermissionship,
+  LookupSubjectsRequest_WildcardOption,
   Precondition_Operation,
 } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { Status as RpcStatus } from "@benedb/protos/google/rpc/status";
@@ -352,21 +355,26 @@ export class AuthzedPermissionsV1Service {
     try {
       const reply = await this.#relationships.deleteRelationships({
         filter: toWireFilter(request.relationshipFilter ?? EMPTY_RELATIONSHIP_FILTER),
-        optionalLimit: undefined,
+        optionalLimit: request.optionalLimit === 0 ? undefined : BigInt(request.optionalLimit),
         preconditions: toWirePreconditions(request.optionalPreconditions),
+        allowPartialDeletions: request.optionalAllowPartialDeletions,
       });
 
-      // v1 DeleteRelationshipsResponse carries only deleted_at in this snapshot; the request's
-      // optional_limit and the reply's deleted count are both discarded.
       return {
         deletedAt: { token: reply.deletedAtToken },
-        deletionProgress:
-          DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_UNSPECIFIED,
-        relationshipsDeletedCount: "0",
+        deletionProgress: reply.reachedLimit
+          ? DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_PARTIAL
+          : DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_COMPLETE,
+        relationshipsDeletedCount: String(reply.deletedCount),
       };
     } catch (error) {
       if (error instanceof PreconditionFailedException) {
         throw new RpcError(status.FAILED_PRECONDITION, error.message);
+      }
+      if (error instanceof DeleteLimitExceededException) {
+        // More rows matched than optional_limit with partial deletions disallowed: SpiceDB's
+        // CouldNotTransactionallyDeleteError -> InvalidArgument, nothing deleted.
+        throw new RpcError(status.INVALID_ARGUMENT, error.message);
       }
       if (error instanceof SequencerOverloadedException) {
         // Sequencer overload shed by the admission gate: retryable RESOURCE_EXHAUSTED.
@@ -507,6 +515,11 @@ export class AuthzedPermissionsV1Service {
         if (limit !== undefined && emitted >= limit) break;
       }
     } catch (error) {
+      if (error instanceof InvalidCursorException) {
+        // Malformed cursor, or a cursor minted for a different request shape (SpiceDB: "cursor
+        // does not apply to this request").
+        throw new RpcError(status.INVALID_ARGUMENT, error.message);
+      }
       if (error instanceof InvalidConsistencyTokenException) {
         throw new RpcError(status.INVALID_ARGUMENT, error.message);
       }
@@ -582,33 +595,52 @@ export class AuthzedPermissionsV1Service {
         signal,
       )) {
         const s = item.subject;
-        const ship = toLookupPermissionship(s.permissionship);
-        let partial: PartialCaveatInfo | undefined;
-        if (s.permissionship.isCaveated && s.permissionship.missingContextParams.length > 0) {
-          partial = { missingRequiredContext: [...s.permissionship.missingContextParams] };
+
+        // wildcard_option (field 9): EXCLUDE_WILDCARDS suppresses wildcard rows entirely;
+        // unspecified defaults to INCLUDE_WILDCARDS for backwards compatibility.
+        if (
+          s.isWildcard &&
+          request.wildcardOption ===
+            LookupSubjectsRequest_WildcardOption.WILDCARD_OPTION_EXCLUDE_WILDCARDS
+        ) {
+          continue;
         }
+
+        const subject = toResolvedSubject(s.subjectId, s.permissionship);
 
         const response: LookupSubjectsResponse = {
           lookedUpAt: { token: foundSubjectStreamItemLookedUpAtToken(item) },
           // Modern field.
-          subject: { subjectObjectId: s.subjectId, permissionship: ship },
+          subject,
           // Deprecated mirror fields for older clients.
           subjectObjectId: s.subjectId,
-          permissionship: ship,
-          // Neither exclusion list is populated by the C#; ts-proto types them as required
-          // repeated fields, so they carry the proto default.
+          permissionship: subject.permissionship,
+          // ts-proto types the exclusion lists as required repeated fields, so they start at the
+          // proto default and are filled below when the wire subject carries exclusions.
           excludedSubjectIds: [],
           excludedSubjects: [],
         };
-        if (partial !== undefined) {
-          // `resp.Subject.PartialCaveatInfo = partial; resp.PartialCaveatInfo = partial.Clone();`
-          // A ts-proto message is a plain object, so the second write is a STRUCTURAL copy: the
-          // same reference twice would alias, and so would a shared missing-context array.
-          response.subject!.partialCaveatInfo = partial;
+        if (subject.partialCaveatInfo !== undefined) {
+          // `resp.PartialCaveatInfo = subject.PartialCaveatInfo.Clone()` - a ts-proto message is
+          // a plain object, so the mirror is a STRUCTURAL copy: the same reference twice would
+          // alias, and so would a shared missing-context array.
           response.partialCaveatInfo = {
-            missingRequiredContext: [...partial.missingRequiredContext],
+            missingRequiredContext: [...subject.partialCaveatInfo.missingRequiredContext],
           };
         }
+
+        // Wildcard exclusions (SpiceDB: LookupSubjects response mapping): the modern
+        // excluded_subjects each carry their own permissionship/partial caveat info; the
+        // deprecated excluded_subject_ids mirror carries every exclusion's id.
+        if (s.excludedSubjects !== undefined && s.excludedSubjects.length > 0) {
+          response.excludedSubjects.push(
+            ...s.excludedSubjects.map((e) => toResolvedSubject(e.subjectId, e.permissionship)),
+          );
+        }
+        if (s.excludedSubjectIds !== undefined && s.excludedSubjectIds.length > 0) {
+          response.excludedSubjectIds.push(...s.excludedSubjectIds);
+        }
+
         await responseStream.write(response);
 
         // The cap is a *concrete* limit: wildcards do not count against it. The C#'s
@@ -921,6 +953,23 @@ function toLookupPermissionship(p: PermissionshipWire): LookupPermissionship {
   return p.isCaveated
     ? LookupPermissionship.LOOKUP_PERMISSIONSHIP_CONDITIONAL_PERMISSION
     : LookupPermissionship.LOOKUP_PERMISSIONSHIP_HAS_PERMISSION;
+}
+
+/**
+ * Maps a collapsed permissionship onto a v1 `ResolvedSubject` (SpiceDB:
+ * foundSubjectToResolvedSubject) - used for both the found subject and each wildcard exclusion.
+ */
+function toResolvedSubject(subjectId: string, p: PermissionshipWire): ResolvedSubject {
+  const resolved: ResolvedSubject = {
+    subjectObjectId: subjectId,
+    permissionship: toLookupPermissionship(p),
+  };
+  if (p.isCaveated && p.missingContextParams.length > 0) {
+    resolved.partialCaveatInfo = {
+      missingRequiredContext: [...p.missingContextParams],
+    };
+  }
+  return resolved;
 }
 
 /** Maps a membership verdict onto the proto permissionship. */

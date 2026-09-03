@@ -1,3 +1,5 @@
+import { samePayload } from "@benedb/datastore/mvcc-read-write-transaction";
+
 import type { StoredRelationshipWire } from "./datastore-dtos";
 import type { GraphShardKeyWire } from "./graph-shard-key";
 import { graphShardKeyMatches } from "./graph-shard-key";
@@ -65,8 +67,13 @@ export function shardFoldApplyEvent(
   // `MvccReadWriteTransaction` (apply/remove), then commit them the same way, so within-event
   // sequences fold identically to the whole-state replay.
   const baseLive = new Set<string>();
+  const basePayloads = new Map<string, RelationshipWire>();
   for (const row of rows) {
-    if (row.deletedRevision === undefined) baseLive.add(rowIdentityOf(row.relationship));
+    if (row.deletedRevision === undefined) {
+      const identity = rowIdentityOf(row.relationship);
+      baseLive.add(identity);
+      basePayloads.set(identity, row.relationship);
+    }
   }
 
   const live = new Set<string>(baseLive);
@@ -82,7 +89,8 @@ export function shardFoldApplyEvent(
     // The whole fold stores the wire payload after a round trip through the core relationship
     // (which normalizes an empty subject relation to the ellipsis and an empty caveat name to
     // "no caveat"); apply the identical normalization so the restricted rows compare equal.
-    const rel = toWire(toRelationship(update.relationship));
+    const core = toRelationship(update.relationship);
+    const rel = toWire(core);
     const identity = rowIdentityOf(rel);
 
     if (update.operation === "delete") {
@@ -92,6 +100,14 @@ export function shardFoldApplyEvent(
       if (baseLive.has(identity)) deleted.add(identity);
     } else {
       // Touch and Create alike: create-or-replace the identity.
+
+      // Mirror MvccReadWriteTransaction's TOUCH no-op: an identical payload over a live row
+      // stages nothing (no close, no new row), or the lemma would break on such events.
+      const staged = payloads.get(identity);
+      const currentWire =
+        staged !== undefined ? staged : live.has(identity) ? basePayloads.get(identity) : undefined;
+      if (currentWire !== undefined && samePayload(toRelationship(currentWire), core)) continue;
+
       if (!created.has(identity) && baseLive.has(identity)) deleted.add(identity);
       created.add(identity);
       live.add(identity);

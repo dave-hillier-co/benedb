@@ -238,11 +238,7 @@ export class LocalDispatcher implements IDispatcher {
         continue;
       }
 
-      if (
-        isPublicWildcard(s) &&
-        s.objectType === subject.objectType &&
-        s.relation === subject.relation
-      ) {
+      if (isPublicWildcard(s) && s.objectType === subject.objectType) {
         found = or(found, dispatchCheckCaveatedMember(tupleCaveat));
         if (isDispatchCheckDetermined(found)) {
           return found;

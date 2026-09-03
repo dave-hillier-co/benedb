@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { FormatError } from "@benedb/core/format-error";
 import type { RelationshipReference } from "@benedb/core/relationship-reference";
 import type {
@@ -7,6 +9,8 @@ import type {
 
 import { fromBase64String, toBase64String } from "./convert-base64";
 import { escapeDataString, unescapeDataString } from "./grain-key-codec";
+import { InvalidCursorException } from "./invalid-cursor-exception";
+import type { LookupResourcesArgs, LookupSubjectsArgs } from "./reverse-ops-dtos";
 
 /**
  * Encodes and decodes the opaque continuation cursors carried on the reverse-op grain replies and
@@ -16,6 +20,12 @@ import { escapeDataString, unescapeDataString } from "./grain-key-codec";
  * nesting level). LookupSubjects has no engine cursor - its results are deterministically ordered
  * by subject id, so a cursor is simply the last id already returned and resumption skips ids at or
  * before it. An empty/whitespace token means "from the start".
+ *
+ * Every token is bound to a hash of the originating request's shape (op kind, resource/permission,
+ * subject, caveat context) plus the hash of the schema in effect at the pinned revision - mirroring
+ * SpiceDB's cursor request-hash check and its schema-hash-carrying cursors - so resuming with a
+ * cursor minted for a different request, or across a schema change, fails with
+ * {@link InvalidCursorException} rather than silently skipping or duplicating results.
  *
  * CONTRADICTION RESOLVED IN FAVOUR OF THE CODE. The C# doc comment says the tokens are "URL-safe
  * base64"; `ToToken` calls `Convert.ToBase64String`, which is STANDARD base64 with `+`, `/` and
@@ -30,6 +40,10 @@ import { escapeDataString, unescapeDataString } from "./grain-key-codec";
 
 const SECTION_SEPARATOR = ";";
 const FIELD_SEPARATOR = ":";
+
+// Separates the request-shape hash prefix from the cursor payload inside the token. '\n' never
+// occurs in the hex hash and never survives the payload's Uri escaping.
+const HASH_SEPARATOR = "\n";
 
 // Per-section kind tags. Exactly one resume mechanism applies per section.
 const TAG_LEAF = "L"; // Portion-1 self-match: LastResourceId follows.
@@ -86,9 +100,121 @@ function tryParseInt32(value: string): number | undefined {
   return parsed;
 }
 
-/** Encodes a LookupResources engine cursor to an opaque token, or absent when there is none. */
+/**
+ * The request-shape hash a LookupResources cursor is bound to: op kind, resource type, permission,
+ * subject, caveat context, and the hash of the schema resolved at the pinned revision. The schema
+ * hash is included because `LookupResourcesCursorSection.entrypointIndex` is positional in the
+ * schema's entrypoint ordering - resuming under a changed schema would silently walk the wrong
+ * entrypoint (mirrors upstream, whose cursors carry the schema hash; cf. the CLAUDE.md "schema
+ * change yields a fresh keyspace" invariant on dispatch grain keys). Limit and consistency are
+ * deliberately excluded - a client may legitimately change the page size or re-pin between pages,
+ * and a benign re-pin under an unchanged schema resolves the same schema hash.
+ *
+ * The C# `RequestShapeHash` overload pair becomes two distinctly named functions, per the guide's
+ * overload-set row.
+ */
+export function requestShapeHashLookupResources(
+  args: LookupResourcesArgs,
+  schemaHash: string,
+): string {
+  return hashShape(
+    "LR",
+    schemaHash,
+    args.resourceType,
+    args.permission,
+    args.subjectType,
+    args.subjectId,
+    args.subjectRelation,
+    args.context,
+  );
+}
+
+/**
+ * The request-shape hash a LookupSubjects cursor is bound to: op kind, resource, permission,
+ * subject type/relation, caveat context, and the hash of the schema resolved at the pinned
+ * revision (see {@link requestShapeHashLookupResources} for why the schema hash is bound).
+ */
+export function requestShapeHashLookupSubjects(
+  args: LookupSubjectsArgs,
+  schemaHash: string,
+): string {
+  return hashShape(
+    "LS",
+    schemaHash,
+    args.resourceType,
+    args.resourceId,
+    args.permission,
+    args.subjectType,
+    args.subjectRelation,
+    args.context,
+  );
+}
+
+function hashShape(
+  kind: string,
+  schemaHash: string,
+  a: string,
+  b: string,
+  c: string,
+  d: string,
+  e: string,
+  context: ReadonlyMap<string, unknown> | undefined,
+): string {
+  let sb = "";
+  for (const part of [kind, schemaHash, a, b, c, d, e]) {
+    sb += escapeDataString(part) + FIELD_SEPARATOR;
+  }
+  sb += appendCanonical(context);
+  // `Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(...)).AsSpan(0, 12))`.
+  const digest = createHash("sha256").update(sb, "utf8").digest();
+  return digest.subarray(0, 12).toString("hex");
+}
+
+/**
+ * A deterministic rendering of the caveat context: keys sorted ordinally, values recursed, every
+ * atom escaped so structure characters cannot be forged by content. Same input dictionary =>
+ * same string, so equal request shapes always hash equal.
+ *
+ * The C# appends into a shared `StringBuilder`; the port returns the rendered text and the caller
+ * concatenates - the same bytes, as with `encodeSection`. The branch ORDER is the C#'s: null,
+ * string, bool, dictionary, enumerable, then the numeric (`IFormattable`) arm. The bare `sort()`
+ * is `StringComparer.Ordinal` (UTF-16 code units), never `localeCompare`. The `n` arm renders via
+ * `String(value)` where the C# uses the invariant culture - only same-runtime determinism is
+ * load-bearing (tokens never cross implementations), so the two renderings need not agree
+ * byte-for-byte across languages.
+ */
+function appendCanonical(value: unknown): string {
+  if (value === null || value === undefined) return "~";
+  if (typeof value === "string") return "s" + escapeDataString(value);
+  if (typeof value === "boolean") return "b" + (value ? "1" : "0");
+  if (value instanceof Map) {
+    let sb = "{";
+    const map = value as ReadonlyMap<string, unknown>;
+    for (const key of [...map.keys()].sort()) {
+      sb += escapeDataString(key) + "=" + appendCanonical(map.get(key)) + ",";
+    }
+    return sb + "}";
+  }
+  if (typeof value === "object" && Symbol.iterator in value) {
+    let sb = "[";
+    for (const item of value as Iterable<unknown>) {
+      sb += appendCanonical(item) + ",";
+    }
+    return sb + "]";
+  }
+  if (typeof value === "number" || typeof value === "bigint") {
+    return "n" + escapeDataString(String(value));
+  }
+  return "o" + escapeDataString(String(value));
+}
+
+/**
+ * Encodes a LookupResources engine cursor to an opaque token bound to the request-shape hash, or
+ * absent when there is none.
+ */
 export function encodeLookupResourcesCursor(
   cursor: LookupResourcesCursor | undefined,
+  requestHash: string,
 ): string | undefined {
   if (cursor === undefined || cursor.sections.length === 0) return undefined;
 
@@ -97,7 +223,7 @@ export function encodeLookupResourcesCursor(
     if (i > 0) raw += SECTION_SEPARATOR;
     raw += encodeSection(cursor.sections[i] as LookupResourcesCursorSection);
   }
-  return toBase64String(raw);
+  return toToken(raw, requestHash);
 }
 
 // The C# appends into a shared `StringBuilder`; the port returns each section's text and the caller
@@ -132,11 +258,16 @@ function keysetParts(k: RelationshipReference): readonly string[] {
   ];
 }
 
-/** Decodes an opaque token back to a LookupResources engine cursor, or absent when empty. */
+/**
+ * Decodes an opaque token back to a LookupResources engine cursor, or absent when empty. Throws
+ * {@link InvalidCursorException} when the token is malformed or was minted for a request with a
+ * different shape.
+ */
 export function decodeLookupResourcesCursor(
   token: string | undefined,
+  requestHash: string,
 ): LookupResourcesCursor | undefined {
-  const raw = fromToken(token);
+  const raw = fromToken(token, requestHash);
   if (raw === undefined) return undefined;
 
   const sections: LookupResourcesCursorSection[] = [];
@@ -184,23 +315,52 @@ function decodeSection(part: string): LookupResourcesCursorSection {
   }
 }
 
-function malformedSection(part: string): FormatError {
-  return new FormatError(`Malformed lookup-resources cursor section: '${part}'.`);
+function malformedSection(part: string): InvalidCursorException {
+  return new InvalidCursorException(`Malformed lookup-resources cursor section: '${part}'.`);
 }
 
-/** Encodes the last subject id returned as a LookupSubjects continuation token. */
-export function encodeSubjectId(lastSubjectId: string): string {
-  return toBase64String(lastSubjectId);
+/**
+ * Encodes the last subject id returned as a LookupSubjects continuation token bound to the
+ * request-shape hash.
+ */
+export function encodeSubjectId(lastSubjectId: string, requestHash: string): string {
+  return toToken(lastSubjectId, requestHash);
 }
 
-/** Decodes a LookupSubjects token back to the last subject id, or absent when empty. */
-export function decodeSubjectId(token: string | undefined): string | undefined {
-  return fromToken(token);
+/**
+ * Decodes a LookupSubjects token back to the last subject id, or absent when empty. Throws
+ * {@link InvalidCursorException} when the token is malformed or was minted for a request with a
+ * different shape.
+ */
+export function decodeSubjectId(
+  token: string | undefined,
+  requestHash: string,
+): string | undefined {
+  return fromToken(token, requestHash);
 }
 
-// A bare base64 of the payload with NO version tag, in both directions - kept as it is, because the
-// token is already in clients' hands.
-function fromToken(token: string | undefined): string | undefined {
+function toToken(raw: string, requestHash: string): string {
+  return toBase64String(requestHash + HASH_SEPARATOR + raw);
+}
+
+function fromToken(token: string | undefined, requestHash: string): string | undefined {
   if (isNullOrWhiteSpace(token)) return undefined;
-  return fromBase64String(token as string);
+
+  let decoded: string;
+  try {
+    decoded = fromBase64String(token as string);
+  } catch (error) {
+    // `catch (FormatException)` - the base64 helper's FormatError; anything else is a bug.
+    if (!(error instanceof FormatError)) throw error;
+    throw new InvalidCursorException("invalid cursor: token is malformed");
+  }
+
+  const separator = decoded.indexOf(HASH_SEPARATOR);
+  if (separator < 0) throw new InvalidCursorException("invalid cursor: token is malformed");
+  if (decoded.slice(0, separator) !== requestHash) {
+    throw new InvalidCursorException(
+      "cursor does not apply to this request: it was created for a different set of arguments",
+    );
+  }
+  return decoded.slice(separator + 1);
 }

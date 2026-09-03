@@ -328,6 +328,7 @@ describe("CommitContractTests", () => {
       const limited = await cluster.relationships.deleteRelationships({
         filter: viewerFilter("bulk"),
         optionalLimit: 3n,
+        allowPartialDeletions: true,
       });
       expect(limited.deletedCount).toBe(3n);
       expect(limited.reachedLimit).toBe(true);

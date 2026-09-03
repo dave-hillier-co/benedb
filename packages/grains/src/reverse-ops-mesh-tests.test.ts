@@ -8,8 +8,10 @@ import type { IDatastore } from "@benedb/datastore/i-datastore";
 import { LookupResourcesEngine } from "@benedb/engine/lookup-resources-engine";
 import { GrainCallAbortedError, GrainTaskCanceledError } from "@thresh/core/errors";
 
+import { FULLY_CONSISTENT_WIRE } from "./consistency-wire";
+import { InvalidCursorException } from "./invalid-cursor-exception";
 import { MeshTestCluster } from "./mesh-test-cluster";
-import { encodeSubjectId } from "./reverse-ops-cursor-codec";
+import { encodeSubjectId, requestShapeHashLookupSubjects } from "./reverse-ops-cursor-codec";
 
 /**
  * Ported from Spiceport `tests/Spiceport.Grains.Tests/ReverseOpsMeshTests.cs`.
@@ -48,6 +50,15 @@ definition document {
     relation viewer: user
     relation editor: user
     permission view = viewer + editor
+}`;
+
+const TWO_PERMISSION_SCHEMA_TEXT = `definition user {}
+
+definition document {
+    relation viewer: user
+    relation editor: user
+    permission view = viewer + editor
+    permission edit = editor
 }`;
 
 const NESTED_SCHEMA_TEXT = `definition user {}
@@ -254,8 +265,8 @@ describe("ReverseOpsMeshTests", () => {
     // SubjectFrontierGrain memo: a limited first page, resumed via ITS OWN cursor on a fresh
     // enumeration (unrelated to whichever SubjectFrontierGrain activation served either call), must
     // union with no duplicates to the unlimited result, and the resume token itself must still be
-    // the SAME opaque encodeSubjectId(lastSubjectId) shape (a plain last-subject-id token,
-    // unaffected by which frontier source produced the item).
+    // the SAME opaque encodeSubjectId(lastSubjectId, shapeHash) shape (a last-subject-id token
+    // bound to the request-shape hash, unaffected by which frontier source produced the item).
     const cluster = await MeshTestCluster.create(SCHEMA_TEXT);
     try {
       await seed(
@@ -298,9 +309,23 @@ describe("ReverseOpsMeshTests", () => {
       const resumeToken = lastOf(page1).resumeCursor;
       expect(resumeToken).not.toBe("");
       expect(resumeToken).toBeDefined();
-      // The cursor is still exactly the cursor codec's plain last-subject-id token - unchanged
-      // format/constant.
-      expect(resumeToken).toBe(encodeSubjectId(lastOf(page1).subject.subjectId));
+      // The cursor is still exactly the cursor codec's last-subject-id token bound to this
+      // request's shape hash under the current schema (unaffected by which frontier source produced
+      // the item).
+      const shapeHash = requestShapeHashLookupSubjects(
+        {
+          resourceType: "document",
+          resourceId: "readme",
+          permission: "view",
+          subjectType: "user",
+          subjectRelation: ELLIPSIS,
+          context: undefined,
+          limit: 2,
+          cursor: undefined,
+        },
+        cluster.schemaProvider.current.schemaHash,
+      );
+      expect(resumeToken).toBe(encodeSubjectId(lastOf(page1).subject.subjectId, shapeHash));
 
       const page2 = await collect(
         cluster.reverseOps.streamLookupSubjects({
@@ -400,6 +425,276 @@ describe("ReverseOpsMeshTests", () => {
 
       const all = ordinal([...page1, ...page2].map((r) => r.resourceId));
       expect(all).toEqual(["d1", "d2", "d3"]);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 120_000);
+
+  it("LookupResources_Cursor_From_Different_Permission_Is_Rejected", async () => {
+    // The cursor is bound to the originating request's shape (SpiceDB's request-hash check): a
+    // page-1 cursor minted for `view` must not resume a `edit` walk - same-request resume is
+    // covered by LookupResources_Honors_Limit_And_Resumes_Via_Cursor above.
+    const cluster = await MeshTestCluster.create(TWO_PERMISSION_SCHEMA_TEXT);
+    try {
+      await seed(
+        cluster.datastore,
+        ["d1", "editor", "alice"],
+        ["d2", "editor", "alice"],
+        ["d3", "editor", "alice"],
+      );
+
+      const page1 = await takeN(
+        cluster.reverseOps.streamLookupResources({
+          resourceType: "document",
+          permission: "view",
+          subjectType: "user",
+          subjectId: "alice",
+          subjectRelation: ELLIPSIS,
+          context: undefined,
+          limit: 2,
+          cursor: undefined,
+        }),
+        2,
+      );
+      expect(isNullOrEmpty(lastOf(page1).afterResultCursor)).toBe(false);
+
+      const error = await rejection(
+        collect(
+          cluster.reverseOps.streamLookupResources({
+            resourceType: "document",
+            permission: "edit",
+            subjectType: "user",
+            subjectId: "alice",
+            subjectRelation: ELLIPSIS,
+            context: undefined,
+            limit: 2,
+            cursor: lastOf(page1).afterResultCursor,
+          }),
+        ),
+      );
+      expect(error).toBeInstanceOf(InvalidCursorException);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 120_000);
+
+  it("LookupResources_Cursor_From_Different_Subject_Is_Rejected", async () => {
+    const cluster = await MeshTestCluster.create(SCHEMA_TEXT);
+    try {
+      await seed(
+        cluster.datastore,
+        ["d1", "viewer", "alice"],
+        ["d2", "viewer", "alice"],
+        ["d1", "viewer", "bob"],
+        ["d2", "viewer", "bob"],
+        ["d3", "viewer", "bob"],
+      );
+
+      const page1 = await takeN(
+        cluster.reverseOps.streamLookupResources({
+          resourceType: "document",
+          permission: "view",
+          subjectType: "user",
+          subjectId: "alice",
+          subjectRelation: ELLIPSIS,
+          context: undefined,
+          limit: 1,
+          cursor: undefined,
+        }),
+        1,
+      );
+      expect(isNullOrEmpty(lastOf(page1).afterResultCursor)).toBe(false);
+
+      const error = await rejection(
+        collect(
+          cluster.reverseOps.streamLookupResources({
+            resourceType: "document",
+            permission: "view",
+            subjectType: "user",
+            subjectId: "bob",
+            subjectRelation: ELLIPSIS,
+            context: undefined,
+            limit: 1,
+            cursor: lastOf(page1).afterResultCursor,
+          }),
+        ),
+      );
+      expect(error).toBeInstanceOf(InvalidCursorException);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 120_000);
+
+  it("LookupSubjects_Cursor_From_Different_Permission_Is_Rejected", async () => {
+    // Same request-shape binding for the LookupSubjects last-subject-id cursor - same-request
+    // resume is covered by LookupSubjects_Honors_Limit_And_Resumes_Via_Cursor above.
+    const cluster = await MeshTestCluster.create(TWO_PERMISSION_SCHEMA_TEXT);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "editor", "alice"],
+        ["readme", "editor", "bob"],
+        ["readme", "editor", "carol"],
+      );
+
+      const page1 = await takeN(
+        cluster.reverseOps.streamLookupSubjects({
+          resourceType: "document",
+          resourceId: "readme",
+          permission: "view",
+          subjectType: "user",
+          subjectRelation: ELLIPSIS,
+          context: undefined,
+          limit: 2,
+          cursor: undefined,
+        }),
+        2,
+      );
+      expect(isNullOrEmpty(lastOf(page1).resumeCursor)).toBe(false);
+
+      const error = await rejection(
+        collect(
+          cluster.reverseOps.streamLookupSubjects({
+            resourceType: "document",
+            resourceId: "readme",
+            permission: "edit",
+            subjectType: "user",
+            subjectRelation: ELLIPSIS,
+            context: undefined,
+            limit: 2,
+            cursor: lastOf(page1).resumeCursor,
+          }),
+        ),
+      );
+      expect(error).toBeInstanceOf(InvalidCursorException);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 120_000);
+
+  it("LookupResources_Cursor_From_Before_A_Schema_Change_Is_Rejected", async () => {
+    // Upstream binds a cursor to the schema it was minted under (pkg/cursor's V1Cursor carries the
+    // schema hash, and internal/services/v1 rejects a stale one). Our LookupResources cursor's
+    // entrypointIndex is positional in the schema's entrypoint ordering, so resuming a pre-change
+    // cursor under a changed schema would silently walk the wrong entrypoint - it must throw
+    // instead.
+    const cluster = await MeshTestCluster.create(SCHEMA_TEXT);
+    try {
+      await seed(
+        cluster.datastore,
+        ["d1", "viewer", "alice"],
+        ["d2", "viewer", "alice"],
+        ["d3", "viewer", "alice"],
+      );
+
+      const page1 = await takeN(
+        cluster.reverseOps.streamLookupResources({
+          resourceType: "document",
+          permission: "view",
+          subjectType: "user",
+          subjectId: "alice",
+          subjectRelation: ELLIPSIS,
+          context: undefined,
+          limit: 2,
+          cursor: undefined,
+        }),
+        2,
+      );
+      expect(isNullOrEmpty(lastOf(page1).afterResultCursor)).toBe(false);
+
+      await cluster.writeSchema(TWO_PERMISSION_SCHEMA_TEXT); // additive change; `view` keeps its meaning.
+
+      // Fully consistent so the resumed page pins a post-write revision (a stale minimize-latency
+      // pin would still resolve the old schema, which is a benign same-schema resume).
+      const error = await rejection(
+        collect(
+          cluster.reverseOps.streamLookupResources({
+            resourceType: "document",
+            permission: "view",
+            subjectType: "user",
+            subjectId: "alice",
+            subjectRelation: ELLIPSIS,
+            context: undefined,
+            limit: 2,
+            cursor: lastOf(page1).afterResultCursor,
+            consistency: FULLY_CONSISTENT_WIRE,
+          }),
+        ),
+      );
+      expect(error).toBeInstanceOf(InvalidCursorException);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 120_000);
+
+  it("LookupSubjects_Cursor_From_Before_A_Schema_Change_Is_Rejected", async () => {
+    const cluster = await MeshTestCluster.create(SCHEMA_TEXT);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const page1 = await takeN(
+        cluster.reverseOps.streamLookupSubjects({
+          resourceType: "document",
+          resourceId: "readme",
+          permission: "view",
+          subjectType: "user",
+          subjectRelation: ELLIPSIS,
+          context: undefined,
+          limit: 2,
+          cursor: undefined,
+        }),
+        2,
+      );
+      expect(isNullOrEmpty(lastOf(page1).resumeCursor)).toBe(false);
+
+      await cluster.writeSchema(TWO_PERMISSION_SCHEMA_TEXT);
+
+      const error = await rejection(
+        collect(
+          cluster.reverseOps.streamLookupSubjects({
+            resourceType: "document",
+            resourceId: "readme",
+            permission: "view",
+            subjectType: "user",
+            subjectRelation: ELLIPSIS,
+            context: undefined,
+            limit: 2,
+            cursor: lastOf(page1).resumeCursor,
+            consistency: FULLY_CONSISTENT_WIRE,
+          }),
+        ),
+      );
+      expect(error).toBeInstanceOf(InvalidCursorException);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 120_000);
+
+  it("LookupResources_Malformed_Cursor_Is_Rejected_As_InvalidCursor", async () => {
+    const cluster = await MeshTestCluster.create(SCHEMA_TEXT);
+    try {
+      await seed(cluster.datastore, ["d1", "viewer", "alice"]);
+
+      const error = await rejection(
+        collect(
+          cluster.reverseOps.streamLookupResources({
+            resourceType: "document",
+            permission: "view",
+            subjectType: "user",
+            subjectId: "alice",
+            subjectRelation: ELLIPSIS,
+            context: undefined,
+            limit: 1,
+            cursor: "not-base64!",
+          }),
+        ),
+      );
+      expect(error).toBeInstanceOf(InvalidCursorException);
     } finally {
       await cluster.dispose();
     }

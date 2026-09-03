@@ -263,6 +263,39 @@ describe("CheckEngine", () => {
     expect(result.verdict).toBe("notMember");
   });
 
+  it("grants a wildcard subject regardless of the checked subject's relation", async () => {
+    // resource#viewer: group#member | group:* ; a group:* grant must match a subject checked
+    // with a non-ellipsis relation (group:eng#member) too. Upstream (spicedb
+    // internal/graph/check.go) gates wildcard eligibility on subject namespace only.
+    const schema = `
+definition user {}
+
+definition group {
+    relation member: user
+}
+
+definition document {
+    relation viewer: group#member | group:*
+    permission view = viewer
+}
+`;
+    const { store, rev } = await seed(
+      tuple("document", "doc1", "viewer", onr("group", PUBLIC_WILDCARD)),
+    );
+    const engine = buildEngine(schema);
+    const reader = store.snapshotReader(rev);
+
+    const result = await engine.check(
+      reader,
+      "document",
+      "doc1",
+      "view",
+      onr("group", "eng", "member"),
+    );
+
+    expect(result.verdict).toBe("member");
+  });
+
   it("raises max-depth on a same-key cycle rather than a confident non-member", async () => {
     // group:a#member -> group:b#member -> group:a#member (a same-key cycle), nobody real inside.
     // Correctness rests SOLELY on the depth budget (SpiceDB's dispatch.CheckDepth): a genuine

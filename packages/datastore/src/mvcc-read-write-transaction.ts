@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { contextualizedCaveatEquals } from "@benedb/core/contextualized-caveat";
 import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import type { IRevision } from "@benedb/core/i-revision";
 import { validateRelationship, type Relationship } from "@benedb/core/relationship";
@@ -83,6 +84,26 @@ function computeHash(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/**
+ * True when two relationships that share the same identity (resource/subject) carry an identical
+ * caveat name, caveat context, and expiration - the full TOUCH payload comparison. Exported (the
+ * C# is `internal static`) because `shard-fold.ts` must apply the IDENTICAL no-op rule to keep
+ * the sharding lemma exact.
+ *
+ * The C# carries a private helper suite (CaveatContextEquals / CaveatValueEquals / LeafEquals /
+ * TryAsInt64 / JsonToClr) solely to compare lazily-deserialized `JsonElement`s against the plain
+ * CLR shapes the wire path produces, including cross-width boxed numerics. TypeScript has one
+ * number type and one JSON value shape, and core's `contextualizedCaveatEquals` already compares
+ * name-plus-context structurally (null and empty contexts equivalent, `Map` and plain-object
+ * shapes mixed), so the whole suite collapses into that one call.
+ */
+export function samePayload(existing: Relationship, incoming: Relationship): boolean {
+  return (
+    contextualizedCaveatEquals(existing.optionalCaveat, incoming.optionalCaveat) &&
+    existing.optionalExpiration === incoming.optionalExpiration
+  );
+}
+
 function assertNever(value: never): never {
   throw new Error(`unreachable update operation: ${JSON.stringify(value)}`);
 }
@@ -156,9 +177,16 @@ export class MvccReadWriteTransaction implements IReadWriteTransaction {
             throw new CreateRelationshipExistsException(formatRelationship(rel));
           this.apply(key, rel);
           break;
-        case "touch":
+        case "touch": {
+          // A TOUCH over a live row with an identical payload is a no-op (matches SpiceDB's
+          // memdb readwrite.go: existing tuple string == incoming tuple string -> skip). This
+          // avoids needless row churn, a spurious Watch event, and a revision whose content is
+          // indistinguishable from the one before it.
+          const existing = this.live.get(key);
+          if (existing !== undefined && samePayload(existing, rel)) break;
           this.apply(key, rel);
           break;
+        }
         case "delete":
           this.remove(key);
           break;
@@ -190,7 +218,6 @@ export class MvccReadWriteTransaction implements IReadWriteTransaction {
         matched.push({ keyString, key: relationshipKeyOf(rel) });
     }
 
-    let reachedLimit = false;
     let toRemove = matched;
     if (limit !== undefined && BigInt(matched.length) > limit) {
       // The subset a truncating limit removes must be a pure function of the MATCHED SET, never of
@@ -198,7 +225,7 @@ export class MvccReadWriteTransaction implements IReadWriteTransaction {
       // per-key shard states (whose concatenation order differs from the reference model's
       // insertion order), and the fold-equivalence gates require both backends to delete the SAME
       // rows. Order canonically by the full six-tuple identity before truncating. When the limit
-      // is not reached every match dies, so ordering is irrelevant and skipped.
+      // is not exceeded every match dies, so ordering is irrelevant and skipped.
       //
       // (.NET `Dictionary` enumeration order is unspecified and disturbed by removals while a JS
       // `Map` is insertion-ordered and stable across removals - a benign divergence, and exactly
@@ -207,8 +234,13 @@ export class MvccReadWriteTransaction implements IReadWriteTransaction {
       // `limit` is a bigint, so the length comparison above is a bigint comparison; `Number` is
       // used only for the slice, where the value is provably below `matched.length`.
       toRemove = matched.slice(0, Number(limit));
-      reachedLimit = true;
     }
+
+    // Upstream SpiceDB datastores report the limit as reached when the DELETED row count equals
+    // the limit (postgres readwrite.go: RowsAffected() == limit; memdb readwrite.go: counter ==
+    // limit) - NOT only when strictly more rows matched. So limit == matches deletes every match
+    // yet still reports reachedLimit, which the v1 API surfaces as DELETION_PROGRESS_PARTIAL.
+    const reachedLimit = limit !== undefined && limit > 0n && BigInt(toRemove.length) === limit;
 
     for (const entry of toRemove) this.remove(entry.keyString);
 

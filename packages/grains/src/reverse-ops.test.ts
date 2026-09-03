@@ -15,7 +15,11 @@ import { MutableSchemaProvider } from "./i-schema-provider";
 import type { ISchemaSource } from "./i-schema-source";
 import { ISubjectFrontierGrain } from "./i-subject-frontier-grain";
 import { ReverseOps } from "./reverse-ops";
-import { decodeSubjectId, encodeSubjectId } from "./reverse-ops-cursor-codec";
+import {
+  decodeSubjectId,
+  encodeSubjectId,
+  requestShapeHashLookupSubjects,
+} from "./reverse-ops-cursor-codec";
 import type {
   ExpandTreeNodeWire,
   LookupResourcesArgs,
@@ -43,7 +47,8 @@ import type { SubjectFrontierMemoOptions } from "./subject-frontier-memo-options
  *   4. `StreamLookupSubjects` chooses memo-vs-live BELOW the pin and the schema resolution, so both
  *      paths feed the identical skip / collapse / yield loop and cannot drift. The skip is ORDINAL
  *      and EXCLUSIVE (`CompareOrdinal(found.SubjectId, a) <= 0`), and `FoundSubject.ExcludedSubjects`
- *      is deliberately DROPPED at the wire edge.
+ *      reaches the wire: every exclusion's id in the deprecated mirror, each SURVIVING exclusion
+ *      (its own caveat collapsed per-request) in the modern list.
  *   5. `StreamLookupResources` derives `limit = args.Limit is { } l && l > 0 ? l : null`, so a limit
  *      of 0 or negative becomes UNLIMITED - and `hasCursorOrLimit` tests the DERIVED limit, so
  *      `Limit = 0` does NOT block the Leopard path while a non-null Cursor does.
@@ -220,6 +225,15 @@ function subjectsArgs(overrides: Partial<LookupSubjectsArgs> = {}): LookupSubjec
     subjectRelation: ELLIPSIS,
     ...overrides,
   };
+}
+
+/**
+ * The request-shape hash the ops bind LookupSubjects cursors to under the harness's ambient
+ * schema (`RequestShapeHash(args, schema.SchemaHash)` - limit and cursor are excluded from the
+ * hash, so the base `subjectsArgs()` shape covers every paged variant of the same request).
+ */
+function subjectsShapeHash(h: Harness, overrides: Partial<LookupSubjectsArgs> = {}): string {
+  return requestShapeHashLookupSubjects(subjectsArgs(overrides), h.provider.current.schemaHash);
 }
 
 function resourcesArgs(overrides: Partial<LookupResourcesArgs> = {}): LookupResourcesArgs {
@@ -412,9 +426,9 @@ describe("ReverseOps.streamLookupSubjects", () => {
 
     expect(new Set(items.map((i) => i.subject.subjectId))).toEqual(new Set(["alice", "bob"]));
     for (const item of items) {
-      // `ReverseOpsCursorCodec.EncodeSubjectId(found.SubjectId)` - the cursor is positioned
-      // immediately AFTER the item it rides on.
-      expect(decodeSubjectId(item.resumeCursor)).toBe(item.subject.subjectId);
+      // `ReverseOpsCursorCodec.EncodeSubjectId(found.SubjectId, requestHash)` - the cursor is
+      // positioned immediately AFTER the item it rides on, bound to this request's shape hash.
+      expect(decodeSubjectId(item.resumeCursor, subjectsShapeHash(h))).toBe(item.subject.subjectId);
       expect(item.lookedUpAtToken).toBeTruthy();
     }
     expect(new Set(items.map((i) => i.lookedUpAtToken)).size).toBe(1);
@@ -434,7 +448,9 @@ describe("ReverseOps.streamLookupSubjects", () => {
     );
 
     const items = await drain(
-      h.ops.streamLookupSubjects(subjectsArgs({ cursor: encodeSubjectId("alice") })),
+      h.ops.streamLookupSubjects(
+        subjectsArgs({ cursor: encodeSubjectId("alice", subjectsShapeHash(h)) }),
+      ),
     );
 
     // "Zoe" and "alice" are both at-or-before "alice" under CompareOrdinal.
@@ -454,9 +470,38 @@ describe("ReverseOps.streamLookupSubjects", () => {
     );
   });
 
-  it("carries the wildcard flag and DROPS excluded subjects at the wire edge", async () => {
-    // The NOTE in the C#: `FoundSubjectWire` has no excluded-subjects field, so exclusions are
-    // preserved by the engine and dropped only here. The wire shape must have no such member.
+  it("carries the wildcard flag and its exclusions onto the wire shape", async () => {
+    // Wildcard exclusions now reach the wire (mirrors upstream's LookupSubjects response mapping):
+    // the deprecated excludedSubjectIds mirror carries EVERY engine exclusion's id, and the modern
+    // excludedSubjects list carries each surviving exclusion with its collapsed permissionship.
+    // The memoized frontier hands exclusions through the same collapse loop as the live walk.
+    const h = await harness([], {
+      frontier: {
+        subjects: [
+          {
+            subjectId: PUBLIC_WILDCARD,
+            isWildcard: true,
+            excludedSubjects: [{ subjectId: "alice", isWildcard: false }],
+          },
+        ],
+      },
+    });
+
+    const items = await drain(h.ops.streamLookupSubjects(subjectsArgs()));
+    const wildcard = items.find((i) => i.subject.subjectId === PUBLIC_WILDCARD);
+
+    expect(wildcard?.subject.isWildcard).toBe(true);
+    expect(wildcard?.subject.excludedSubjectIds).toEqual(["alice"]);
+    expect(wildcard?.subject.excludedSubjects).toEqual([
+      {
+        subjectId: "alice",
+        isWildcard: false,
+        permissionship: { isCaveated: false, missingContextParams: [] },
+      },
+    ]);
+  });
+
+  it("leaves both exclusion fields absent for a wildcard with no exclusions", async () => {
     const h = await harness([rel("document:doc1#viewer@user:*")], {
       frontierMemo: LIVE_WALK,
     });
@@ -465,9 +510,8 @@ describe("ReverseOps.streamLookupSubjects", () => {
     const wildcard = items.find((i) => i.subject.subjectId === PUBLIC_WILDCARD);
 
     expect(wildcard?.subject.isWildcard).toBe(true);
-    expect(Object.keys(wildcard?.subject ?? {})).toEqual(
-      expect.not.arrayContaining(["excludedSubjects"]),
-    );
+    expect(wildcard?.subject.excludedSubjectIds).toBeUndefined();
+    expect(wildcard?.subject.excludedSubjects).toBeUndefined();
   });
 
   it("collapses a caveated subject to a caveated permissionship carrying the missing params", async () => {
@@ -581,7 +625,9 @@ describe("ReverseOps.streamLookupSubjects", () => {
     });
 
     const items = await drain(
-      h.ops.streamLookupSubjects(subjectsArgs({ cursor: encodeSubjectId("alice") })),
+      h.ops.streamLookupSubjects(
+        subjectsArgs({ cursor: encodeSubjectId("alice", subjectsShapeHash(h)) }),
+      ),
     );
     expect(items.map((i) => i.subject.subjectId)).toEqual(["bob"]);
   });

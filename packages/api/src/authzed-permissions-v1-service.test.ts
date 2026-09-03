@@ -27,6 +27,7 @@ import type {
 } from "@benedb/grains/i-permission-checker";
 import { IRelationshipsGrain, RELATIONSHIPS_GRAIN_KEY } from "@benedb/grains/i-relationships-grain";
 import { SchemaSnapshot, type ISchemaProvider } from "@benedb/grains/i-schema-provider";
+import { DeleteLimitExceededException } from "@benedb/grains/delete-limit-exceeded-exception";
 import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
 import type { RelationshipReads } from "@benedb/grains/relationship-reads";
 import type {
@@ -1359,9 +1360,9 @@ describe("readRelationships", () => {
 // ---------------------------------------------------------------- deleteRelationships
 
 describe("deleteRelationships", () => {
-  it("discards the request limit and the deleted count, returning only deleted_at", async () => {
-    // The v1 response carries only `deleted_at` in this snapshot; `optional_limit` is passed to the
-    // grain as `null` and `reply.DeletedCount` is dropped on the floor.
+  it("forwards the limit and allow-partial flag and reports progress and the deleted count", async () => {
+    // `optional_limit` 0 means "no limit" (absent on the wire); a reached limit reports PARTIAL and
+    // the reply's deleted count surfaces as `relationships_deleted_count`.
     const h = harness();
     h.grain.deleteReply = { deletedCount: 5n, reachedLimit: true, deletedAtToken: "tok-d" };
 
@@ -1369,16 +1370,51 @@ describe("deleteRelationships", () => {
       DeleteRelationshipsRequest.fromPartial({
         relationshipFilter: { resourceType: "document", optionalResourceId: "readme" },
         optionalLimit: 10,
+        optionalAllowPartialDeletions: true,
       }),
     );
 
     expect(response.deletedAt).toEqual({ token: "tok-d" });
-    expect(response.relationshipsDeletedCount).toBe("0");
+    expect(response.relationshipsDeletedCount).toBe("5");
     expect(response.deletionProgress).toBe(
-      DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_UNSPECIFIED,
+      DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_PARTIAL,
     );
-    expect(h.grain.deleteArgs[0]?.optionalLimit).toBeUndefined();
+    expect(h.grain.deleteArgs[0]?.optionalLimit).toBe(10n);
+    expect(h.grain.deleteArgs[0]?.allowPartialDeletions).toBe(true);
     expect(h.grain.deleteArgs[0]?.filter.resourceIds).toEqual(["readme"]);
+  });
+
+  it("reports COMPLETE when the limit was not reached and DeleteLimitExceeded as INVALID_ARGUMENT", async () => {
+    const h = harness();
+    h.grain.deleteReply = { deletedCount: 2n, reachedLimit: false, deletedAtToken: "tok-e" };
+
+    const response = await h.service.deleteRelationships(
+      DeleteRelationshipsRequest.fromPartial({
+        relationshipFilter: { resourceType: "document" },
+      }),
+    );
+
+    expect(response.relationshipsDeletedCount).toBe("2");
+    expect(response.deletionProgress).toBe(
+      DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_COMPLETE,
+    );
+    // optional_limit 0 and optional_allow_partial_deletions default: absent limit, allow-partial false.
+    expect(h.grain.deleteArgs[0]?.optionalLimit).toBeUndefined();
+    expect(h.grain.deleteArgs[0]?.allowPartialDeletions).toBe(false);
+
+    // More rows matched than optional_limit with partial deletions disallowed: SpiceDB's
+    // CouldNotTransactionallyDeleteError -> InvalidArgument.
+    h.grain.deleteThrows = new DeleteLimitExceededException(3n);
+    const error = await rpcErrorFrom(
+      h.service.deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document" },
+          optionalLimit: 3,
+        }),
+      ),
+    );
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.message).toContain("found more than 3 relationships to be deleted");
   });
 
   it("passes the preconditions through and maps a precondition failure to FAILED_PRECONDITION", async () => {

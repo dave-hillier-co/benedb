@@ -27,6 +27,8 @@ import {
   decodeSubjectId,
   encodeLookupResourcesCursor,
   encodeSubjectId,
+  requestShapeHashLookupResources,
+  requestShapeHashLookupSubjects,
 } from "./reverse-ops-cursor-codec";
 import {
   caveatedPermissionship,
@@ -36,6 +38,7 @@ import {
   type ExpandTreeReply,
   type FoundResourceWire,
   type FoundSubjectStreamItem,
+  type FoundSubjectWire,
   type LookupResourcesArgs,
   type LookupSubjectsArgs,
   PERMISSIONSHIP_MEMBER,
@@ -174,7 +177,8 @@ export class ReverseOps {
       objectId: args.resourceId,
       relation: args.permission,
     };
-    const after = decodeSubjectId(args.cursor);
+    const requestHash = requestShapeHashLookupSubjects(args, schema.schemaHash);
+    const after = decodeSubjectId(args.cursor, requestHash);
 
     // BELOW the pin/schema resolution: the pre-context frontier is either served from the
     // SubjectFrontierGrain activation memo (an exact memo of this identical computation at a pinned
@@ -201,18 +205,39 @@ export class ReverseOps {
       const collapsed = tryCollapse(found.caveat, args.context, evaluator);
       if (!collapsed.included) continue; // sheared off entirely.
 
-      // NOTE: FoundSubject.excludedSubjects (wildcard exclusions) are not yet carried over the wire
-      // - FoundSubjectWire has no excluded-subjects field, so the client-facing shape drops them.
-      // The engine (and the memoized frontier, which mirrors it byte-for-byte) preserves them
-      // internally; only this client-edge wire shape drops them.
-      const subject = {
+      // Wildcard exclusions (mirrors upstream's LookupSubjects response mapping): the deprecated
+      // excluded_subject_ids mirror carries EVERY engine exclusion's id, while the modern
+      // excluded_subjects list collapses each exclusion's own caveat against the request context -
+      // a definitely-false exclusion caveat drops the entry from the modern list only.
+      let excludedIds: readonly string[] | undefined;
+      let excluded: readonly FoundSubjectWire[] | undefined;
+      const exclusions = found.excludedSubjects;
+      if (exclusions !== undefined && exclusions.length > 0) {
+        excludedIds = exclusions.map((e) => e.subjectId);
+        const survivors: FoundSubjectWire[] = [];
+        for (const e of exclusions) {
+          const excludedCollapse = tryCollapse(e.caveat, args.context, evaluator);
+          if (excludedCollapse.included) {
+            survivors.push({
+              subjectId: e.subjectId,
+              isWildcard: e.isWildcard,
+              permissionship: excludedCollapse.permissionship,
+            });
+          }
+        }
+        excluded = survivors;
+      }
+
+      const subject: FoundSubjectWire = {
         subjectId: found.subjectId,
         isWildcard: found.isWildcard,
         permissionship: collapsed.permissionship,
+        excludedSubjectIds: excludedIds,
+        excludedSubjects: excluded,
       };
       yield {
         subject,
-        resumeCursor: encodeSubjectId(found.subjectId),
+        resumeCursor: encodeSubjectId(found.subjectId, requestHash),
         lookedUpAtToken: pinned.token,
       };
     }
@@ -269,7 +294,8 @@ export class ReverseOps {
       snapshot.caveats,
       snapshot.reachabilityFirst,
     );
-    const startCursor = decodeLookupResourcesCursor(args.cursor);
+    const requestHash = requestShapeHashLookupResources(args, snapshot.schemaHash);
+    const startCursor = decodeLookupResourcesCursor(args.cursor, requestHash);
 
     // A supplied client limit means the caller needs per-item resume cursors: pass the limit into
     // the engine so it runs the cursor-bearing live traversal. A limit of ZERO or negative becomes
@@ -317,7 +343,7 @@ export class ReverseOps {
       yield {
         resourceId: found.resourceId,
         permissionship,
-        afterResultCursor: encodeLookupResourcesCursor(found.afterCursor),
+        afterResultCursor: encodeLookupResourcesCursor(found.afterCursor, requestHash),
         lookedUpAtToken: pinned.token,
       };
     }

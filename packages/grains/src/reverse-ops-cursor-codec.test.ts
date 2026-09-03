@@ -1,14 +1,16 @@
 import { ELLIPSIS } from "@benedb/core/core-constants";
-import { FormatError } from "@benedb/core/format-error";
 import type { LookupResourcesCursor } from "@benedb/engine/lookup-resources-cursor";
 import { createLookupResourcesCursor } from "@benedb/engine/lookup-resources-cursor";
 import { describe, expect, it } from "vitest";
 
+import { InvalidCursorException } from "./invalid-cursor-exception";
 import {
   decodeLookupResourcesCursor,
   decodeSubjectId,
   encodeLookupResourcesCursor,
   encodeSubjectId,
+  requestShapeHashLookupResources,
+  requestShapeHashLookupSubjects,
 } from "./reverse-ops-cursor-codec";
 
 /**
@@ -22,26 +24,32 @@ import {
  * the bug; the exact-token cases below pin the standard alphabet.
  *
  * The rest of the contract, verbatim from the C#:
+ *   * Every token is `base64(requestHash + '\n' + payload)`: the request-shape hash prefix binds
+ *     the token to the originating request (op kind, resource/permission, subject, caveat context)
+ *     plus the schema hash at the pinned revision. A malformed token, a missing separator, or a
+ *     mismatched hash is an `InvalidCursorException` - never a silent resume.
  *   * Sections join on `;`, fields on `:`, per-section tags `L` (leaf: last resource id),
  *     `Q` (query: a six-field keyset) and `S` (structural: no payload).
  *   * Segments are `Uri.EscapeDataString`-escaped - NOT `encodeURIComponent`, which leaves `!'()*`
  *     alone - so the port reuses the same hand-rolled escape `GrainKeyCodec` uses.
  *   * The section split uses `RemoveEmptyEntries`, so a doubled or trailing `;` is TOLERATED;
  *     JavaScript's `split` keeps empties, so the port must filter them explicitly.
- *   * Field counts are EXACT: 3 for `L`, 2 for `S`, 8 for `Q`. Anything else is a `FormatException`
- *     naming the offending section.
+ *   * Field counts are EXACT: 3 for `L`, 2 for `S`, 8 for `Q`. Anything else is an
+ *     `InvalidCursorException` naming the offending section.
  *   * `int.TryParse(fields[0])` uses the DEFAULT number styles here - a leading sign and
  *     surrounding whitespace are accepted - UNLIKE `PreconditionMessages`, which passes
  *     `NumberStyles.None`. The two parses must not be unified.
  *   * The KEYSET FIELD ORDER is asymmetric on purpose: encoded Subject-then-Resource, decoded back
  *     as Resource from `p[3..5]` and Subject from `p[0..2]`. A "tidying" swap here silently resumes
  *     a lookup at the wrong place.
- *   * `EncodeSubjectId`/`DecodeSubjectId` are a bare base64 of the id with NO version tag.
  *   * `string.IsNullOrWhiteSpace` guards the decode, and the .NET and JavaScript whitespace sets
  *     DIFFER - this is the "start from the beginning" vs "decode" decision, so the .NET set is
  *     what the port must implement.
  */
 describe("reverse ops cursor codec", () => {
+  // A stand-in request-shape hash with the real production shape: 12 bytes as lowercase hex.
+  const HASH = "0123456789abcdef01234567";
+
   const cursor: LookupResourcesCursor = createLookupResourcesCursor([
     { entrypointIndex: 0, lastResourceId: "doc:1/x" },
     { entrypointIndex: -1 },
@@ -54,26 +62,28 @@ describe("reverse ops cursor codec", () => {
     },
   ]);
 
-  // base64("0:L:doc%3A1%2Fx;-1:S;7:Q:user:alice:...:document:d%201:viewer")
-  const token =
-    "MDpMOmRvYyUzQTElMkZ4Oy0xOlM7NzpROnVzZXI6YWxpY2U6Li4uOmRvY3VtZW50OmQlMjAxOnZpZXdlcg==";
+  const rawPayload = "0:L:doc%3A1%2Fx;-1:S;7:Q:user:alice:...:document:d%201:viewer";
 
   const base64Of = (raw: string): string => Buffer.from(raw, "utf8").toString("base64");
   const rawOf = (encoded: string): string => Buffer.from(encoded, "base64").toString("utf8");
+  /** `ToToken(raw, HASH)`: the request-shape hash prefix, then `'\n'`, then the payload. */
+  const tokenOf = (raw: string): string => base64Of(`${HASH}\n${raw}`);
 
-  it("encodes the exact token, standard base64 alphabet and padding included", () => {
-    expect(encodeLookupResourcesCursor(cursor)).toBe(token);
+  const token = tokenOf(rawPayload);
+
+  it("encodes the exact hash-prefixed token, standard base64 alphabet and padding included", () => {
+    expect(encodeLookupResourcesCursor(cursor, HASH)).toBe(token);
   });
 
-  it("encodes the keyset SUBJECT first and the RESOURCE second", () => {
+  it("encodes the keyset SUBJECT first and the RESOURCE second, after the hash prefix", () => {
     const raw = rawOf(token);
 
-    expect(raw).toBe("0:L:doc%3A1%2Fx;-1:S;7:Q:user:alice:...:document:d%201:viewer");
-    expect(raw.split(";")[2]).toBe("7:Q:user:alice:...:document:d%201:viewer");
+    expect(raw).toBe(`${HASH}\n${rawPayload}`);
+    expect(raw.split("\n")[1]?.split(";")[2]).toBe("7:Q:user:alice:...:document:d%201:viewer");
   });
 
   it("decodes the pinned token back to the same cursor, keyset halves the right way round", () => {
-    expect(decodeLookupResourcesCursor(token)).toEqual(cursor);
+    expect(decodeLookupResourcesCursor(token, HASH)).toEqual(cursor);
   });
 
   it("round-trips ids that need escaping in every section kind", () => {
@@ -88,9 +98,9 @@ describe("reverse ops cursor codec", () => {
       },
     ]);
 
-    const encoded = encodeLookupResourcesCursor(awkward);
+    const encoded = encodeLookupResourcesCursor(awkward, HASH);
     expect(encoded).toBeDefined();
-    expect(decodeLookupResourcesCursor(encoded)).toEqual(awkward);
+    expect(decodeLookupResourcesCursor(encoded, HASH)).toEqual(awkward);
   });
 
   it("escapes with Uri.EscapeDataString, not encodeURIComponent", () => {
@@ -98,9 +108,10 @@ describe("reverse ops cursor codec", () => {
     // unreserved set. The token is a wire value, so the difference is observable.
     const encoded = encodeLookupResourcesCursor(
       createLookupResourcesCursor([{ entrypointIndex: 0, lastResourceId: "a!'()*b" }]),
+      HASH,
     );
 
-    expect(rawOf(encoded ?? "")).toBe("0:L:a%21%27%28%29%2Ab");
+    expect(rawOf(encoded ?? "")).toBe(`${HASH}\n0:L:a%21%27%28%29%2Ab`);
   });
 
   // .NET's `char.IsWhiteSpace` covers NBSP (U+00A0) and NEL (U+0085); JavaScript's own whitespace
@@ -108,37 +119,37 @@ describe("reverse ops cursor codec", () => {
   it.each([[undefined], [""], [" "], ["\t"], ["\n"], ["\u00a0"], ["\u0085"]])(
     "treats the whitespace-only token %j as 'from the beginning'",
     (empty) => {
-      expect(decodeLookupResourcesCursor(empty)).toBeUndefined();
-      expect(decodeSubjectId(empty)).toBeUndefined();
+      expect(decodeLookupResourcesCursor(empty, HASH)).toBeUndefined();
+      expect(decodeSubjectId(empty, HASH)).toBeUndefined();
     },
   );
 
   it("does NOT treat U+FEFF as whitespace, because .NET's char.IsWhiteSpace does not", () => {
     // JavaScript's own `trim` DOES strip U+FEFF, so a port written with `token.trim() === ""`
     // would answer "from the beginning" where Spiceport attempts a decode and fails.
-    expect(() => decodeLookupResourcesCursor("\ufeff")).toThrow(FormatError);
+    expect(() => decodeLookupResourcesCursor("\ufeff", HASH)).toThrow(InvalidCursorException);
   });
 
   it("encodes an absent cursor as absent", () => {
-    expect(encodeLookupResourcesCursor(undefined)).toBeUndefined();
+    expect(encodeLookupResourcesCursor(undefined, HASH)).toBeUndefined();
   });
 
   it("encodes a section-less cursor as absent", () => {
-    expect(encodeLookupResourcesCursor({ sections: [] })).toBeUndefined();
+    expect(encodeLookupResourcesCursor({ sections: [] }, HASH)).toBeUndefined();
   });
 
   it("decodes to absent when every section entry is empty", () => {
-    expect(decodeLookupResourcesCursor(base64Of(";;"))).toBeUndefined();
+    expect(decodeLookupResourcesCursor(tokenOf(";;"), HASH)).toBeUndefined();
   });
 
   it("tolerates doubled and trailing section separators, as RemoveEmptyEntries does", () => {
-    const decoded = decodeLookupResourcesCursor(base64Of("0:S;;1:S;"));
+    const decoded = decodeLookupResourcesCursor(tokenOf("0:S;;1:S;"), HASH);
 
     expect(decoded?.sections).toEqual([{ entrypointIndex: 0 }, { entrypointIndex: 1 }]);
   });
 
   it("accepts a signed and whitespace-padded entrypoint index, as the default styles do", () => {
-    const decoded = decodeLookupResourcesCursor(base64Of(" +12 :S"));
+    const decoded = decodeLookupResourcesCursor(tokenOf(" +12 :S"), HASH);
 
     expect(decoded?.sections[0]?.entrypointIndex).toBe(12);
   });
@@ -157,8 +168,12 @@ describe("reverse ops cursor codec", () => {
     ["NARROW NO-BREAK SPACE (U+202F)", "\u202f"],
     ["IDEOGRAPHIC SPACE (U+3000)", "\u3000"],
   ])("rejects %s around the entrypoint index, which int.TryParse does not strip", (_case, ws) => {
-    expect(() => decodeLookupResourcesCursor(base64Of(`${ws}3:S`))).toThrow(FormatError);
-    expect(() => decodeLookupResourcesCursor(base64Of(`3${ws}:S`))).toThrow(FormatError);
+    expect(() => decodeLookupResourcesCursor(tokenOf(`${ws}3:S`), HASH)).toThrow(
+      InvalidCursorException,
+    );
+    expect(() => decodeLookupResourcesCursor(tokenOf(`3${ws}:S`), HASH)).toThrow(
+      InvalidCursorException,
+    );
   });
 
   it.each([
@@ -170,11 +185,11 @@ describe("reverse ops cursor codec", () => {
     ["a structural section with a payload", "0:S:a"],
     ["a query section with the wrong field count", "0:Q:a:b:c:d:e"],
     ["an unknown section tag", "0:Z:a"],
-  ])("throws a format error naming the section for %s", (_case, raw) => {
-    const bad = base64Of(raw);
+  ])("throws an invalid-cursor error naming the section for %s", (_case, raw) => {
+    const bad = tokenOf(raw);
 
-    expect(() => decodeLookupResourcesCursor(bad)).toThrow(FormatError);
-    expect(() => decodeLookupResourcesCursor(bad)).toThrow(
+    expect(() => decodeLookupResourcesCursor(bad, HASH)).toThrow(InvalidCursorException);
+    expect(() => decodeLookupResourcesCursor(bad, HASH)).toThrow(
       `Malformed lookup-resources cursor section: '${raw}'.`,
     );
   });
@@ -182,18 +197,116 @@ describe("reverse ops cursor codec", () => {
   it("rejects a token that is not valid base64 rather than truncating it", () => {
     // `Buffer.from(s, "base64")` skips invalid characters and truncates; `Convert.FromBase64String`
     // throws. A silently truncated cursor resumes a lookup at a fabricated position.
-    expect(() => decodeLookupResourcesCursor("MDpT!!")).toThrow(FormatError);
+    expect(() => decodeLookupResourcesCursor("MDpT!!", HASH)).toThrow(InvalidCursorException);
+    expect(() => decodeLookupResourcesCursor("MDpT!!", HASH)).toThrow(
+      "invalid cursor: token is malformed",
+    );
+  });
+
+  it("rejects a well-formed base64 token that carries no hash separator", () => {
+    expect(() => decodeLookupResourcesCursor(base64Of("0:S"), HASH)).toThrow(
+      "invalid cursor: token is malformed",
+    );
+  });
+
+  it("rejects a token minted for a different request shape", () => {
+    const minted = encodeLookupResourcesCursor(cursor, HASH);
+    expect(() => decodeLookupResourcesCursor(minted, "fedcba9876543210fedcba98")).toThrow(
+      "cursor does not apply to this request: it was created for a different set of arguments",
+    );
   });
 
   describe("subject id tokens", () => {
-    it("encodes a bare base64 of the id, with no version tag", () => {
-      expect(encodeSubjectId("alice")).toBe("YWxpY2U=");
+    it("encodes the hash prefix, the separator, then the bare id", () => {
+      expect(encodeSubjectId("alice", HASH)).toBe(tokenOf("alice"));
     });
 
     it("round-trips ids with non-ASCII and base64-significant characters", () => {
       for (const id of ["alice", "café", "a+b/c=", "*"]) {
-        expect(decodeSubjectId(encodeSubjectId(id))).toBe(id);
+        expect(decodeSubjectId(encodeSubjectId(id, HASH), HASH)).toBe(id);
       }
+    });
+
+    it("rejects a subject token minted for a different request shape", () => {
+      expect(() =>
+        decodeSubjectId(encodeSubjectId("alice", HASH), "fedcba9876543210fedcba98"),
+      ).toThrow(InvalidCursorException);
+    });
+  });
+
+  describe("request shape hashes", () => {
+    const subjectsArgs = {
+      resourceType: "document",
+      resourceId: "readme",
+      permission: "view",
+      subjectType: "user",
+      subjectRelation: ELLIPSIS,
+      context: undefined,
+      limit: 2,
+      cursor: undefined,
+    };
+
+    const resourcesArgs = {
+      resourceType: "document",
+      permission: "view",
+      subjectType: "user",
+      subjectId: "alice",
+      subjectRelation: ELLIPSIS,
+      context: undefined,
+      limit: 2,
+      cursor: undefined,
+    };
+
+    const schemaHash = "a".repeat(64);
+
+    it("is 12 bytes of the SHA-256 as lowercase hex", () => {
+      expect(requestShapeHashLookupSubjects(subjectsArgs, schemaHash)).toMatch(/^[0-9a-f]{24}$/);
+      expect(requestShapeHashLookupResources(resourcesArgs, schemaHash)).toMatch(/^[0-9a-f]{24}$/);
+    });
+
+    it("is deterministic for equal shapes and excludes limit and cursor", () => {
+      // Limit and consistency are deliberately excluded: a client may change the page size or
+      // re-pin between pages of the same logical request.
+      const paged = { ...subjectsArgs, limit: 99, cursor: "anything" };
+      expect(requestShapeHashLookupSubjects(paged, schemaHash)).toBe(
+        requestShapeHashLookupSubjects(subjectsArgs, schemaHash),
+      );
+    });
+
+    it("changes with the permission, the schema hash, and the caveat context", () => {
+      const base = requestShapeHashLookupSubjects(subjectsArgs, schemaHash);
+      expect(
+        requestShapeHashLookupSubjects({ ...subjectsArgs, permission: "edit" }, schemaHash),
+      ).not.toBe(base);
+      expect(requestShapeHashLookupSubjects(subjectsArgs, "b".repeat(64))).not.toBe(base);
+      expect(
+        requestShapeHashLookupSubjects(
+          { ...subjectsArgs, context: new Map<string, unknown>([["flag", true]]) },
+          schemaHash,
+        ),
+      ).not.toBe(base);
+    });
+
+    it("canonicalizes the context: key insertion order does not change the hash", () => {
+      const ab = new Map<string, unknown>([
+        ["a", 1],
+        ["b", "x"],
+      ]);
+      const ba = new Map<string, unknown>([
+        ["b", "x"],
+        ["a", 1],
+      ]);
+      expect(requestShapeHashLookupSubjects({ ...subjectsArgs, context: ab }, schemaHash)).toBe(
+        requestShapeHashLookupSubjects({ ...subjectsArgs, context: ba }, schemaHash),
+      );
+    });
+
+    it("keeps the two op kinds' hashes distinct even over aligned fields", () => {
+      // "LR" vs "LS" is the leading field of the hashed shape, so a LookupSubjects cursor can
+      // never resume a LookupResources walk that happens to share every other segment.
+      expect(requestShapeHashLookupSubjects(subjectsArgs, schemaHash)).not.toBe(
+        requestShapeHashLookupResources(resourcesArgs, schemaHash),
+      );
     });
   });
 });

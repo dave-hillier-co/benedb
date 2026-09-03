@@ -351,6 +351,168 @@ describe("ReferenceDatastore reads and writes", () => {
     expect(results[0]!.optionalCaveat?.caveatName).toBe("only_office");
   });
 
+  it("produces no relationship change at that revision for a touch with an identical payload", async () => {
+    // Upstream (spicedb internal/datastore/memdb/readwrite.go): a TOUCH whose caveat name, caveat
+    // context, and expiration exactly match the live row is a no-op - no row churn, no Watch event.
+    const ds = new ReferenceDatastore();
+    const relationship = withCaveat(rel("document", "doc1", "viewer", "user", "alice"), {
+      caveatName: "biz_hours",
+      context: new Map<string, unknown>([["hour", 9]]),
+    });
+
+    const rev1 = await ds.readWriteTx(async (tx) => {
+      await tx.writeRelationships([touch(relationship)]);
+    });
+
+    const controller = new AbortController();
+    const collected: RevisionChange[] = [];
+    const watching = (async () => {
+      for await (const change of ds.watch(
+        rev1,
+        { content: WatchContent.relationships | WatchContent.checkpoints },
+        controller.signal,
+      )) {
+        collected.push(change);
+        if (change.isCheckpoint === true) break;
+      }
+    })();
+
+    // A second, identical TOUCH: must not surface as a relationship change.
+    const rev2 = await ds.readWriteTx(async (tx) => {
+      await tx.writeRelationships([touch(relationship)]);
+    });
+
+    await watching;
+    controller.abort();
+
+    // Only the (empty-content) checkpoint at rev2 is observed - no relationship-change entry for
+    // the no-op touch.
+    expect(collected).toHaveLength(1);
+    const checkpoint = collected[0]!;
+    expect(checkpoint.isCheckpoint).toBe(true);
+    expect(checkpoint.relationshipChanges).toEqual([]);
+    expect(checkpoint.revision.equals(rev2)).toBe(true);
+
+    // And the identity still resolves to exactly one live row (the Watch assertion above is the
+    // real no-op discriminator; row payload identity is covered by the wire-shapes test below).
+    const results = await collect(ds.snapshotReader(rev2).queryRelationships({}));
+    expect(results).toHaveLength(1);
+  });
+
+  it("produces no relationship change for a touch with an identical nested context in wire shapes", async () => {
+    // The production gRPC write path converts protobuf Struct context into fresh object graphs on
+    // every request (and, in the grain path, the existing row is a distinct deserialized instance),
+    // so an identical re-TOUCH arrives as a DISTINCT object graph - payload equality must be
+    // structural, or the no-op shortcut would delete-and-recreate and this test would observe a
+    // spurious relationship change. The C# additionally exercises JsonElement-vs-CLR and
+    // cross-width numeric mixes; TypeScript has one number type, but core's context values may be
+    // `Map`s or plain objects, so the two graphs below deliberately mix those shapes.
+    function wireShapedContext(nested: "map" | "object"): ReadonlyMap<string, unknown> {
+      return new Map<string, unknown>([
+        ["hour", 9],
+        [
+          "office",
+          nested === "map"
+            ? new Map<string, unknown>([
+                ["city", "london"],
+                ["floor", 3],
+              ])
+            : { city: "london", floor: 3 },
+        ],
+        ["days", ["mon", "tue", true, 1.5]],
+      ]);
+    }
+
+    const ds = new ReferenceDatastore();
+    const first = withCaveat(rel("document", "doc1", "viewer", "user", "alice"), {
+      caveatName: "biz_hours",
+      context: wireShapedContext("map"),
+    });
+    const second = withCaveat(rel("document", "doc1", "viewer", "user", "alice"), {
+      caveatName: "biz_hours",
+      context: wireShapedContext("object"),
+    });
+
+    const rev1 = await ds.readWriteTx(async (tx) => {
+      await tx.writeRelationships([touch(first)]);
+    });
+
+    const controller = new AbortController();
+    const collected: RevisionChange[] = [];
+    const watching = (async () => {
+      for await (const change of ds.watch(
+        rev1,
+        { content: WatchContent.relationships | WatchContent.checkpoints },
+        controller.signal,
+      )) {
+        collected.push(change);
+        if (change.isCheckpoint === true) break;
+      }
+    })();
+
+    const rev2 = await ds.readWriteTx(async (tx) => {
+      await tx.writeRelationships([touch(second)]);
+    });
+
+    await watching;
+    controller.abort();
+
+    expect(collected).toHaveLength(1);
+    const checkpoint = collected[0]!;
+    expect(checkpoint.isCheckpoint).toBe(true);
+    expect(checkpoint.relationshipChanges).toEqual([]);
+    expect(checkpoint.revision.equals(rev2)).toBe(true);
+  });
+
+  it("still replaces the row for a touch with a changed caveat context", async () => {
+    // A TOUCH whose caveat context actually differs must still delete-and-recreate (the no-op
+    // shortcut must not swallow real changes).
+    const ds = new ReferenceDatastore();
+    const relationship = withCaveat(rel("document", "doc1", "viewer", "user", "alice"), {
+      caveatName: "biz_hours",
+      context: new Map<string, unknown>([["hour", 9]]),
+    });
+    const changed = withCaveat(relationship, {
+      caveatName: "biz_hours",
+      context: new Map<string, unknown>([["hour", 17]]),
+    });
+
+    const rev1 = await ds.readWriteTx(async (tx) => {
+      await tx.writeRelationships([touch(relationship)]);
+    });
+
+    const controller = new AbortController();
+    const collected: RevisionChange[] = [];
+    const watching = (async () => {
+      for await (const change of ds.watch(
+        rev1,
+        { content: WatchContent.relationships },
+        controller.signal,
+      )) {
+        collected.push(change);
+        break;
+      }
+    })();
+
+    const rev2 = await ds.readWriteTx(async (tx) => {
+      await tx.writeRelationships([touch(changed)]);
+    });
+
+    await watching;
+    controller.abort();
+
+    expect(collected).toHaveLength(1);
+    const change = collected[0]!;
+    expect(change.relationshipChanges).toHaveLength(1);
+    const update = change.relationshipChanges[0]!;
+    expect(update.operation).toBe("touch");
+    expect(relationshipEquals(update.relationship, changed)).toBe(true);
+
+    const results = await collect(ds.snapshotReader(rev2).queryRelationships({}));
+    expect(results).toHaveLength(1);
+    expect(relationshipEquals(results[0]!, changed)).toBe(true);
+  });
+
   it("filters by resource id", async () => {
     const ds = new ReferenceDatastore();
     const rev = await ds.readWriteTx(async (tx) => {
