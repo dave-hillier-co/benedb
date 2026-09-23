@@ -36,6 +36,10 @@ pnpm --filter @benedb/api start   # run a host; attended and manual, never from 
 - Thresh is linked from the sibling checkout, so a change there takes effect here immediately —
   and a broken Thresh working tree breaks this build. Check `git -C ../thresh status` when
   something fails for no reason attributable to this repo.
+- **The two repos are developed together.** A Thresh API change needs the matching change here in
+  the same piece of work, and a Thresh change is not done until this repo's `pnpm typecheck` and
+  `pnpm test` pass against it. Conversely, when work here needs a Thresh change, make it in Thresh
+  (test-first) and keep both trees green.
 - Regenerating `packages/protos/generated` needs `protoc` on PATH. The generated tree is not
   committed; the vendored `.proto` files are.
 
