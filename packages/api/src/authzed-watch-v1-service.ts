@@ -94,16 +94,6 @@ export class AuthzedWatchV1Service {
       );
     }
 
-    // Validate and convert each relationship filter BEFORE opening the changefeed - an unknown
-    // definition/relation or a malformed filter is a request-shape error, not a stream fault.
-    const relationshipFilters =
-      request.optionalRelationshipFilters.length === 0
-        ? undefined
-        : request.optionalRelationshipFilters.map((filter) => {
-            validateRelationshipFilter(filter, this.#schemaProvider.current);
-            return filter;
-          });
-
     // Empty => no filter; otherwise emit only updates whose resource object type is in the set.
     const objectTypeFilter =
       request.optionalObjectTypes.length === 0
@@ -131,6 +121,18 @@ export class AuthzedWatchV1Service {
       const head = await this.#datastore.headRevision(signal);
       afterRevision = head.revision;
     }
+
+    // Validate each relationship filter AFTER resolving the start cursor (SpiceDB's order: decode
+    // the cursor, read the schema, then `buildRelationshipFilters`) but BEFORE opening the
+    // changefeed - an unknown definition/relation or a malformed filter is a request-shape error,
+    // not a stream fault.
+    const relationshipFilters =
+      request.optionalRelationshipFilters.length === 0
+        ? undefined
+        : request.optionalRelationshipFilters.map((filter) => {
+            validateRelationshipFilter(filter, this.#schemaProvider.current);
+            return filter;
+          });
 
     const datastoreId = await this.#datastore.getUniqueId(signal);
     const options: WatchOptions = { content: resolveContent(request) };

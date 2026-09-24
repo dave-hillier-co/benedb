@@ -453,6 +453,26 @@ describe("optional_relationship_filters", () => {
     expect(error.details).toBe("object definition `nonexistent` not found");
   });
 
+  it("decodes the start cursor BEFORE validating relationship filters, as SpiceDB does", async () => {
+    // SpiceDB's Watch decodes the start cursor, then reads the schema at that revision and only
+    // then validates the filters, so a request with both a bad cursor and a bad filter reports
+    // the cursor.
+    const h = harness();
+
+    const error = await rpcErrorFrom(
+      h.service.watch(
+        request({
+          optionalStartCursor: { token: "not-a-token!!" },
+          optionalRelationshipFilters: [relFilter({ resourceType: "nonexistent" })],
+        }),
+        h.writer,
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toBe("invalid start cursor");
+  });
+
   it("rejects an unknown resource relation in a filter", async () => {
     const h = harness();
 

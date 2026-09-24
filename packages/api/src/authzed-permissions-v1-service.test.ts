@@ -1008,6 +1008,28 @@ describe("writeRelationships", () => {
     expect(h.grain.writeArgs).toHaveLength(0);
   });
 
+  it("checks the transaction metadata size BEFORE the update-shape limits, as SpiceDB does", async () => {
+    // SpiceDB's WriteRelationships calls validateTransactionMetadata first, ahead of the
+    // updates-count, preconditions-count and duplicate-update checks, so a request breaking both
+    // reports the metadata error.
+    const h = harness();
+    const duplicated = update(RelationshipUpdate_Operation.OPERATION_TOUCH);
+
+    const error = await rpcErrorFrom(
+      h.service.writeRelationships(
+        WriteRelationshipsRequest.fromPartial({
+          updates: [duplicated, duplicated],
+          optionalTransactionMetadata: { blob: "x".repeat(70_000) },
+        }),
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toMatch(
+      /^metadata size of \d+ is greater than maximum allowed of 65000$/,
+    );
+  });
+
   it("passes no preconditions as undefined and maps the two specified operations", async () => {
     const h = harness();
 
