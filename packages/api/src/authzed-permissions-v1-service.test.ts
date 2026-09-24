@@ -30,6 +30,7 @@ import { SchemaSnapshot, type ISchemaProvider } from "@benedb/grains/i-schema-pr
 import { DeleteLimitExceededException } from "@benedb/grains/delete-limit-exceeded-exception";
 import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
 import type { RelationshipReads } from "@benedb/grains/relationship-reads";
+import { RelationshipSchemaViolationException } from "@benedb/grains/relationship-schema-violation-exception";
 import type {
   BulkExportRelationshipsArgs,
   BulkImportRelationshipsArgs,
@@ -1068,6 +1069,10 @@ describe("writeRelationships", () => {
       [new WriteConflictException("createExisting", "already existed"), status.ALREADY_EXISTS],
       [new WriteConflictException("serialization", "conflict"), status.ABORTED],
       [new SequencerOverloadedException("shed"), status.RESOURCE_EXHAUSTED],
+      [
+        new RelationshipSchemaViolationException("object definition `folder` not found"),
+        status.FAILED_PRECONDITION,
+      ],
     ];
 
     for (const [thrown, expected] of cases) {

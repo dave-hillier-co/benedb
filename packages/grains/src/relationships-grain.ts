@@ -16,6 +16,10 @@ import type {
   SubjectsSelector,
 } from "@benedb/datastore/relationships-filter";
 import { resolveRevision } from "@benedb/datastore/revision-resolver";
+import {
+  RelationshipTypeException,
+  validateAllRelationships,
+} from "@benedb/engine/relationship-schema-validator";
 import { SchemaTypeException } from "@benedb/engine/schema-type-exception";
 import { validateSchemaTypes } from "@benedb/engine/schema-type-validator";
 import type { CompiledSchema } from "@benedb/schema/compiled-schema";
@@ -40,6 +44,7 @@ import type { ISnapshotScanner } from "./i-snapshot-scanner";
 import type { LogWatchHub } from "./log-watch-hub";
 import { PreconditionFailedException } from "./precondition-failed-exception";
 import { tryParsePreconditionFailure } from "./precondition-messages";
+import { RelationshipSchemaViolationException } from "./relationship-schema-violation-exception";
 import type {
   BulkImportRelationshipsArgs,
   BulkImportRelationshipsReply,
@@ -68,7 +73,7 @@ import {
 import { computeChecks, evaluateWithScanner } from "./schema-change-validator";
 import { SchemaWriteValidationException } from "./schema-write-validation-exception";
 import type { SequencerAdmission } from "./sequencer-admission";
-import { toFullFilter } from "./wire-convert";
+import { toFullFilter, toRelationship } from "./wire-convert";
 import { WriteConflictException } from "./write-conflict-exception";
 
 /**
@@ -300,6 +305,23 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
   async writeRelationships(args: WriteRelationshipsArgs): Promise<WriteRelationshipsReply> {
     if (args === undefined || args === null) {
       throw new InvalidArgumentError("args is required");
+    }
+
+    // Validate every update against the LIVE schema before any commit is even attempted: SpiceDB
+    // rejects an update whose resource definition, relation, subject type/subrelation, or caveat
+    // the schema does not allow, so a client can never persist a tuple the schema forbids. Reading
+    // `schemaProvider.current` (rather than the datastore's own stored schema bytes) matches how
+    // Check/Read already validate namespaces and relations at this same service boundary.
+    try {
+      validateAllRelationships(
+        this.#require.schemaProvider.current.schema,
+        args.updates.map((u) => toRelationship(u.relationship)),
+      );
+    } catch (error) {
+      if (error instanceof RelationshipTypeException) {
+        throw new RelationshipSchemaViolationException(error.message);
+      }
+      throw error;
     }
 
     // One declarative commit: the sequencer evaluates the preconditions against the same snapshot

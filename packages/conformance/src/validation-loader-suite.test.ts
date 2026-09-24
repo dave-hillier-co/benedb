@@ -9,15 +9,15 @@ import type { RelationshipUpdate } from "@benedb/core/relationship-update";
 import { formatRelationship } from "@benedb/core/tuple-strings";
 import { CreateRelationshipExistsException } from "@benedb/datastore/datastore-exceptions";
 import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
+import {
+  RelationshipTypeException,
+  validateAllRelationships,
+} from "@benedb/engine/relationship-schema-validator";
 import { SchemaTypeException } from "@benedb/engine/schema-type-exception";
 import { validateSchemaTypes } from "@benedb/engine/schema-type-validator";
 import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
 import { compileSchema } from "@benedb/schema/schema-compiler";
 
-import {
-  RelationshipTypeException,
-  validateAllRelationships,
-} from "./relationship-schema-validator";
 import { loadResolvedValidationFile, ValidationFileLoadException } from "./validation-file-loader";
 
 /**

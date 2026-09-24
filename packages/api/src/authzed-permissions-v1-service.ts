@@ -24,6 +24,7 @@ import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
 import { DeleteLimitExceededException } from "@benedb/grains/delete-limit-exceeded-exception";
 import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
 import type { RelationshipReads } from "@benedb/grains/relationship-reads";
+import { RelationshipSchemaViolationException } from "@benedb/grains/relationship-schema-violation-exception";
 import type {
   PreconditionWire,
   RelationshipsFilterWire,
@@ -292,6 +293,12 @@ export class AuthzedPermissionsV1Service {
       return { writtenAt: { token: reply.writtenAtToken } };
     } catch (error) {
       if (error instanceof PreconditionFailedException) {
+        throw new RpcError(status.FAILED_PRECONDITION, error.message);
+      }
+      if (error instanceof RelationshipSchemaViolationException) {
+        // Unknown definition/relation, a disallowed subject type/subrelation, or caveat misuse:
+        // the same schema-mismatch family `checkNamespaceAndRelations` reports for Check/Read
+        // (see `schema-validation.ts`), so it maps to the same FailedPrecondition code.
         throw new RpcError(status.FAILED_PRECONDITION, error.message);
       }
       if (error instanceof WriteConflictException) {

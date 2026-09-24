@@ -13,11 +13,15 @@ import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 /**
  * Mirrors SpiceDB's write-time `relationships.ValidateRelationshipsForCreateOrTouch`: a written
  * relationship's (subject type, subrelation, caveat) must match one of the relation's allowed
- * types. Spiceport's production write path does NOT perform this check (a known gap vs SpiceDB),
- * so the loader-robustness suite applies it explicitly before writing.
+ * types.
  *
  * Ported from Spiceport `Loading/RelationshipSchemaValidator.cs`. The C# static class becomes
  * module functions; its nested `RelationshipTypeException` becomes a sibling export.
+ *
+ * Lives in `@benedb/engine` (not `@benedb/conformance`) because it is production code:
+ * `RelationshipsGrain.writeRelationships` (`@benedb/grains`) calls it on every declarative
+ * `WriteRelationships` commit, and the conformance loader-robustness suite reuses this same
+ * copy rather than keeping a second one.
  */
 
 /** Raised when a written relationship is not permitted by the relation's allowed types. */

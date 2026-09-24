@@ -43,6 +43,7 @@ import type {
   RelationshipWire,
   RelationshipsFilterWire,
 } from "./relationships-dtos";
+import { RelationshipSchemaViolationException } from "./relationship-schema-violation-exception";
 import { RelationshipsGrain } from "./relationships-grain";
 import { SchemaWriteValidationException } from "./schema-write-validation-exception";
 import { SequencerAdmission } from "./sequencer-admission";
@@ -887,6 +888,139 @@ describe("RelationshipsGrain", () => {
 
       // `if (reply.Revision is { } revision) hub.Pulse(revision);` sits BEFORE the failure mapping.
       expect(f.hub.pulses).toEqual([6_000n]);
+    });
+
+    describe("live-schema validation", () => {
+      it("rejects an unknown resource definition before any commit", async () => {
+        const f = await start();
+
+        const error = await target(f)
+          .writeRelationships({
+            updates: [
+              {
+                operation: "touch",
+                relationship: {
+                  resourceType: "folder",
+                  resourceId: "root",
+                  resourceRelation: "viewer",
+                  subjectType: "user",
+                  subjectId: "alice",
+                  subjectRelation: ELLIPSIS,
+                },
+              },
+            ],
+          })
+          .then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+
+        expect(error).toBeInstanceOf(RelationshipSchemaViolationException);
+        expect((error as Error).message).toBe("object definition `folder` not found");
+        expect(script.commits).toHaveLength(0);
+      });
+
+      it("rejects an unknown relation under a known definition", async () => {
+        const f = await start();
+
+        const error = await target(f)
+          .writeRelationships({
+            updates: [
+              {
+                operation: "touch",
+                relationship: {
+                  resourceType: "document",
+                  resourceId: "readme",
+                  resourceRelation: "editor",
+                  subjectType: "user",
+                  subjectId: "alice",
+                  subjectRelation: ELLIPSIS,
+                },
+              },
+            ],
+          })
+          .then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+
+        expect(error).toBeInstanceOf(RelationshipSchemaViolationException);
+        expect((error as Error).message).toBe(
+          "relation/permission `editor` not found under definition `document`",
+        );
+        expect(script.commits).toHaveLength(0);
+      });
+
+      it("rejects a subject type the relation's schema does not allow", async () => {
+        const f = await start();
+
+        const error = await target(f)
+          .writeRelationships({
+            updates: [
+              {
+                operation: "touch",
+                relationship: {
+                  resourceType: "document",
+                  resourceId: "readme",
+                  resourceRelation: "viewer",
+                  subjectType: "group",
+                  subjectId: "eng",
+                  subjectRelation: "member",
+                },
+              },
+            ],
+          })
+          .then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+
+        expect(error).toBeInstanceOf(RelationshipSchemaViolationException);
+        expect((error as Error).message).toBe(
+          "subjects of type `group` are not allowed on relation `document#viewer`",
+        );
+        expect(script.commits).toHaveLength(0);
+      });
+
+      it("accepts a schema-legal update and commits it unchanged", async () => {
+        const f = await start();
+        script.replies = [ok(4_000n)];
+
+        await target(f).writeRelationships({
+          updates: [{ operation: "touch", relationship: rel("readme", "alice") }],
+        });
+
+        expect(onlyCommit().updates).toHaveLength(1);
+      });
+
+      it("validates every update, not only the first", async () => {
+        const f = await start();
+
+        const error = await target(f)
+          .writeRelationships({
+            updates: [
+              { operation: "touch", relationship: rel("readme", "alice") },
+              {
+                operation: "touch",
+                relationship: {
+                  resourceType: "folder",
+                  resourceId: "root",
+                  resourceRelation: "viewer",
+                  subjectType: "user",
+                  subjectId: "alice",
+                  subjectRelation: ELLIPSIS,
+                },
+              },
+            ],
+          })
+          .then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+
+        expect(error).toBeInstanceOf(RelationshipSchemaViolationException);
+        expect(script.commits).toHaveLength(0);
+      });
     });
   });
 
