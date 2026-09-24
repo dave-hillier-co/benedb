@@ -16,6 +16,8 @@ import type { RevisionChange, WatchOptions } from "@benedb/datastore/watch";
 import { WatchContent } from "@benedb/datastore/watch";
 import { MutableSchemaProvider } from "@benedb/grains/i-schema-provider";
 import { RelationshipUpdate_Operation } from "@benedb/protos/authzed/api/v1/core";
+import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
+import { RelationshipFilter as RelationshipFilterMessage } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { WatchRequest, WatchResponse } from "@benedb/protos/authzed/api/v1/watch_service";
 import { WatchKind } from "@benedb/protos/authzed/api/v1/watch_service";
 import { GrainTaskCanceledError } from "@thresh/core/errors";
@@ -92,7 +94,11 @@ import type { ServerStreamWriter } from "./server-stream-writer";
  */
 
 const DATASTORE_ID = "datastore-under-test";
-const SCHEMA = "definition user {}";
+const SCHEMA = `definition user {}
+
+definition document {
+    relation viewer: user
+}`;
 
 // ---------------------------------------------------------------- fakes
 
@@ -201,6 +207,13 @@ function request(overrides: Partial<WatchRequest> = {}): WatchRequest {
     optionalUpdateKinds: [],
     ...overrides,
   };
+}
+
+/** A `RelationshipFilter` with every proto default filled in, overridden per case. */
+function relFilter(
+  overrides: Parameters<typeof RelationshipFilterMessage.fromPartial>[0],
+): RelationshipFilter {
+  return RelationshipFilterMessage.fromPartial(overrides);
 }
 
 function touchUpdate(objectType: string, objectId: string, userId: string): RelationshipUpdate {
@@ -402,6 +415,238 @@ describe("optional_object_types", () => {
     await h.service.watch(request({ optionalObjectTypes: ["user"] }), h.writer);
 
     expect(h.writer.collected).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------- optional_relationship_filters
+
+describe("optional_relationship_filters", () => {
+  it("rejects a request that specifies both object types and relationship filters", async () => {
+    const h = harness();
+
+    const error = await rpcErrorFrom(
+      h.service.watch(
+        request({
+          optionalObjectTypes: ["document"],
+          optionalRelationshipFilters: [relFilter({ resourceType: "document" })],
+        }),
+        h.writer,
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toBe("cannot specify both object types and relationship filters");
+    expect(h.datastore.watchCalls).toHaveLength(0);
+  });
+
+  it("rejects an unknown resource type in a filter, mirroring schema validation", async () => {
+    const h = harness();
+
+    const error = await rpcErrorFrom(
+      h.service.watch(
+        request({ optionalRelationshipFilters: [relFilter({ resourceType: "nonexistent" })] }),
+        h.writer,
+      ),
+    );
+
+    expect(error.code).toBe(status.FAILED_PRECONDITION);
+    expect(error.details).toBe("object definition `nonexistent` not found");
+  });
+
+  it("rejects an unknown resource relation in a filter", async () => {
+    const h = harness();
+
+    const error = await rpcErrorFrom(
+      h.service.watch(
+        request({
+          optionalRelationshipFilters: [
+            relFilter({ resourceType: "document", optionalRelation: "editor" }),
+          ],
+        }),
+        h.writer,
+      ),
+    );
+
+    expect(error.code).toBe(status.FAILED_PRECONDITION);
+    expect(error.details).toBe(
+      "relation/permission `editor` not found under definition `document`",
+    );
+  });
+
+  it("rejects an unknown subject type in a filter's subject filter", async () => {
+    const h = harness();
+
+    const error = await rpcErrorFrom(
+      h.service.watch(
+        request({
+          optionalRelationshipFilters: [
+            relFilter({
+              resourceType: "document",
+              optionalSubjectFilter: { subjectType: "nonexistent" },
+            }),
+          ],
+        }),
+        h.writer,
+      ),
+    );
+
+    expect(error.code).toBe(status.FAILED_PRECONDITION);
+    expect(error.details).toBe("object definition `nonexistent` not found");
+  });
+
+  it("rejects a filter with both a resource id and a resource id prefix", async () => {
+    const h = harness();
+
+    const error = await rpcErrorFrom(
+      h.service.watch(
+        request({
+          optionalRelationshipFilters: [
+            relFilter({
+              resourceType: "document",
+              optionalResourceId: "doc1",
+              optionalResourceIdPrefix: "d",
+            }),
+          ],
+        }),
+        h.writer,
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toBe(
+      "the relationship filter provided is not valid: resource_id and resource_id_prefix cannot " +
+        "be set at the same time",
+    );
+  });
+
+  it("rejects a completely empty filter", async () => {
+    const h = harness();
+
+    const error = await rpcErrorFrom(
+      h.service.watch(request({ optionalRelationshipFilters: [relFilter({})] }), h.writer),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toBe(
+      "the relationship filter provided is not valid: at least one field must be set",
+    );
+  });
+
+  it("emits an update that matches the single supplied filter", async () => {
+    const h = harness([
+      changeStep(
+        change({
+          relationshipChanges: [
+            touchUpdate("document", "doc1", "alice"),
+            touchUpdate("document", "doc2", "bob"),
+          ],
+        }),
+      ),
+    ]);
+
+    await h.service.watch(
+      request({
+        optionalRelationshipFilters: [
+          relFilter({ resourceType: "document", optionalResourceId: "doc1" }),
+        ],
+      }),
+      h.writer,
+    );
+
+    const updates = h.writer.collected[0]?.updates ?? [];
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.relationship?.resource?.objectId).toBe("doc1");
+  });
+
+  it("emits an update that matches AT LEAST ONE of several supplied filters", async () => {
+    const h = harness([
+      changeStep(
+        change({
+          relationshipChanges: [
+            touchUpdate("document", "doc1", "alice"),
+            touchUpdate("document", "doc2", "bob"),
+            touchUpdate("document", "doc3", "carol"),
+          ],
+        }),
+      ),
+    ]);
+
+    await h.service.watch(
+      request({
+        optionalRelationshipFilters: [
+          relFilter({ resourceType: "document", optionalResourceId: "doc1" }),
+          relFilter({ resourceType: "document", optionalResourceId: "doc3" }),
+        ],
+      }),
+      h.writer,
+    );
+
+    const objectIds = (h.writer.collected[0]?.updates ?? []).map(
+      (u) => u.relationship?.resource?.objectId,
+    );
+    expect(objectIds).toEqual(["doc1", "doc3"]);
+  });
+
+  it("matches a filter's subject constraints, not just the resource", async () => {
+    const h = harness([
+      changeStep(
+        change({
+          relationshipChanges: [
+            touchUpdate("document", "doc1", "alice"),
+            touchUpdate("document", "doc1", "bob"),
+          ],
+        }),
+      ),
+    ]);
+
+    await h.service.watch(
+      request({
+        optionalRelationshipFilters: [
+          relFilter({
+            resourceType: "document",
+            optionalSubjectFilter: { subjectType: "user", optionalSubjectId: "bob" },
+          }),
+        ],
+      }),
+      h.writer,
+    );
+
+    const updates = h.writer.collected[0]?.updates ?? [];
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.relationship?.subject?.object?.objectId).toBe("bob");
+  });
+
+  it("skips a response whose every update was filtered out", async () => {
+    const h = harness([
+      changeStep(change({ relationshipChanges: [touchUpdate("document", "doc9", "alice")] })),
+    ]);
+
+    await h.service.watch(
+      request({
+        optionalRelationshipFilters: [
+          relFilter({ resourceType: "document", optionalResourceId: "doc1" }),
+        ],
+      }),
+      h.writer,
+    );
+
+    expect(h.writer.collected).toEqual([]);
+  });
+
+  it("still emits a checkpoint through a relationship filter", async () => {
+    const h = harness([changeStep(change({ isCheckpoint: true }))]);
+
+    await h.service.watch(
+      request({
+        optionalRelationshipFilters: [
+          relFilter({ resourceType: "document", optionalResourceId: "doc1" }),
+        ],
+      }),
+      h.writer,
+    );
+
+    expect(h.writer.collected).toHaveLength(1);
+    expect(h.writer.collected[0]?.isCheckpoint).toBe(true);
   });
 });
 
