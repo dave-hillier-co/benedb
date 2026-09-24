@@ -167,6 +167,72 @@ describe("validateWriteRelationships", () => {
     ).not.toThrow();
   });
 
+  describe("malformed submessages", () => {
+    it("rejects an update with no relationship at all", () => {
+      const malformed = RelationshipUpdate.fromPartial({
+        operation: RelationshipUpdate_Operation.OPERATION_CREATE,
+      });
+
+      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("relationship is required");
+    });
+
+    it("rejects a relationship with no resource", () => {
+      const malformed = update(
+        Relationship.fromPartial({
+          relation: "viewer",
+          subject: { object: { objectType: "user", objectId: "alice" } },
+        }),
+      );
+
+      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("relationship.resource is required");
+    });
+
+    it("rejects a relationship with no subject", () => {
+      const malformed = update(
+        Relationship.fromPartial({
+          resource: { objectType: "document", objectId: "firstdoc" },
+          relation: "viewer",
+        }),
+      );
+
+      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("relationship.subject is required");
+    });
+
+    it("rejects a subject with no object", () => {
+      const malformed = update(
+        Relationship.fromPartial({
+          resource: { objectType: "document", objectId: "firstdoc" },
+          relation: "viewer",
+          subject: { optionalRelation: "member" },
+        }),
+      );
+
+      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("relationship.subject.object is required");
+    });
+
+    it("checks shape before the update-count limit, so it never scans past a malformed entry", () => {
+      const malformed = RelationshipUpdate.fromPartial({
+        operation: RelationshipUpdate_Operation.OPERATION_CREATE,
+      });
+
+      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+
+      expect(error.details).toBe("relationship is required");
+    });
+  });
+
   describe("update count", () => {
     const distinctUpdates = (count: number): RelationshipUpdate[] =>
       Array.from({ length: count }, (_unused, index) =>

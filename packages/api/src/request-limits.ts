@@ -1,5 +1,10 @@
 import { status } from "@grpc/grpc-js";
-import { ContextualizedCaveat, type Relationship } from "@benedb/protos/authzed/api/v1/core";
+import {
+  ContextualizedCaveat,
+  type ObjectReference,
+  type Relationship,
+  type RelationshipUpdate,
+} from "@benedb/protos/authzed/api/v1/core";
 import type { WriteRelationshipsRequest } from "@benedb/protos/authzed/api/v1/permission_service";
 import { Struct } from "@benedb/protos/google/protobuf/struct";
 
@@ -42,9 +47,10 @@ export const MAX_CAVEAT_CONTEXT_SIZE = 4096;
  * Validates the shape of a `WriteRelationships` request, throwing an {@link RpcError} with
  * `INVALID_ARGUMENT` for: more than {@link MAX_UPDATES_PER_WRITE} updates
  * (ERROR_REASON_TOO_MANY_UPDATES_IN_REQUEST), more than {@link MAX_PRECONDITIONS_COUNT}
- * preconditions, a relationship appearing in more than one update (NewDuplicateRelationshipErr),
- * or a per-relationship caveat context larger than {@link MAX_RELATIONSHIP_CONTEXT_SIZE} bytes.
- * Mirrors SpiceDB's `WriteRelationships` validation.
+ * preconditions, a missing `relationship`/`relationship.resource`/`relationship.subject`/
+ * `relationship.subject.object` submessage, a relationship appearing in more than one update
+ * (NewDuplicateRelationshipErr), or a per-relationship caveat context larger than
+ * {@link MAX_RELATIONSHIP_CONTEXT_SIZE} bytes. Mirrors SpiceDB's `WriteRelationships` validation.
  */
 export function validateWriteRelationships(request: WriteRelationshipsRequest): void {
   if (request.updates.length > MAX_UPDATES_PER_WRITE)
@@ -66,7 +72,7 @@ export function validateWriteRelationships(request: WriteRelationshipsRequest): 
   // DELETE of the same tuple in one request is also a duplicate.
   const seen = new Set<string>();
   for (const update of request.updates) {
-    const relationship = update.relationship!;
+    const relationship = requireRelationshipShape(update);
     const key = relationshipKeyWithoutCaveatOrExpiration(relationship);
     if (seen.has(key))
       throw new RpcError(
@@ -111,11 +117,40 @@ export function validateCaveatContextSize(
   return context;
 }
 
-function relationshipKeyWithoutCaveatOrExpiration(rel: Relationship): string {
-  const subject = rel.subject!;
+/** A `Relationship` whose required submessages are known to be present. */
+type ShapedRelationship = Relationship & { resource: ObjectReference; subject: ShapedSubject };
+type ShapedSubject = { object: ObjectReference; optionalRelation: string };
+
+/**
+ * Rejects an update whose `relationship`, `relationship.resource`, `relationship.subject`, or
+ * `relationship.subject.object` is missing, mirroring SpiceDB's protobuf request-shape validation
+ * at the service boundary (see `internal/services/v1/relationships.go` `WriteRelationships`).
+ * ts-proto leaves an absent required submessage as `undefined` rather than a default instance, so
+ * without this guard a malformed request throws a raw `TypeError` before it can be reported as
+ * `INVALID_ARGUMENT`.
+ */
+function requireRelationshipShape(update: RelationshipUpdate): ShapedRelationship {
+  const relationship = update.relationship;
+  if (relationship === undefined)
+    throw new RpcError(status.INVALID_ARGUMENT, "relationship is required");
+
+  if (relationship.resource === undefined)
+    throw new RpcError(status.INVALID_ARGUMENT, "relationship.resource is required");
+
+  if (relationship.subject === undefined)
+    throw new RpcError(status.INVALID_ARGUMENT, "relationship.subject is required");
+
+  if (relationship.subject.object === undefined)
+    throw new RpcError(status.INVALID_ARGUMENT, "relationship.subject.object is required");
+
+  return relationship as ShapedRelationship;
+}
+
+function relationshipKeyWithoutCaveatOrExpiration(rel: ShapedRelationship): string {
+  const subject = rel.subject;
   const subjectRelation = !subject.optionalRelation ? "" : "#" + subject.optionalRelation;
   return (
-    `${rel.resource!.objectType}:${rel.resource!.objectId}#${rel.relation}@` +
-    `${subject.object!.objectType}:${subject.object!.objectId}${subjectRelation}`
+    `${rel.resource.objectType}:${rel.resource.objectId}#${rel.relation}@` +
+    `${subject.object.objectType}:${subject.object.objectId}${subjectRelation}`
   );
 }
