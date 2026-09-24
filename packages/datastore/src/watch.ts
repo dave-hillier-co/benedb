@@ -70,4 +70,12 @@ export interface RevisionChange {
    * revision progress. Mirrors SpiceDB's `RevisionChanges.IsCheckpoint`. Absent means false.
    */
   readonly isCheckpoint?: boolean | undefined;
+  /**
+   * The optional transaction metadata blob(s) committed alongside this revision, mirroring
+   * SpiceDB's `RevisionChanges.Metadatas`: most datastores commit one transaction per revision, so
+   * this is usually zero or one entries, but some (e.g. CockroachDB) can merge concurrent
+   * transactions into a single revision, hence the list. Absent or empty means no metadata was
+   * supplied for this revision.
+   */
+  readonly transactionMetadatas?: readonly ReadonlyMap<string, unknown>[] | undefined;
 }

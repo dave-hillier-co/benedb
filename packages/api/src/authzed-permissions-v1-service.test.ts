@@ -963,6 +963,94 @@ describe("writeRelationships", () => {
     );
   });
 
+  it("converts optional_transaction_metadata to a wire map and passes it through", async () => {
+    const h = harness();
+
+    await h.service.writeRelationships(
+      WriteRelationshipsRequest.fromPartial({
+        updates: [update(RelationshipUpdate_Operation.OPERATION_TOUCH)],
+        optionalTransactionMetadata: { requestId: "abc-123" },
+      }),
+    );
+
+    expect(h.grain.writeArgs[0]?.transactionMetadata).toEqual(new Map([["requestId", "abc-123"]]));
+  });
+
+  it("leaves the transaction metadata undefined when none is supplied", async () => {
+    const h = harness();
+
+    await h.service.writeRelationships(
+      WriteRelationshipsRequest.fromPartial({
+        updates: [update(RelationshipUpdate_Operation.OPERATION_TOUCH)],
+      }),
+    );
+
+    expect(h.grain.writeArgs[0]?.transactionMetadata).toBeUndefined();
+  });
+
+  it("rejects transaction metadata over the 65,000-byte limit before reaching the grain", async () => {
+    const h = harness();
+    const oversized = { blob: "x".repeat(70_000) };
+
+    const error = await rpcErrorFrom(
+      h.service.writeRelationships(
+        WriteRelationshipsRequest.fromPartial({
+          updates: [update(RelationshipUpdate_Operation.OPERATION_TOUCH)],
+          optionalTransactionMetadata: oversized,
+        }),
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toMatch(
+      /^metadata size of \d+ is greater than maximum allowed of 65000$/,
+    );
+    expect(h.grain.writeArgs).toHaveLength(0);
+  });
+
+  it("checks the transaction metadata size BEFORE the update-shape limits, as SpiceDB does", async () => {
+    // SpiceDB's WriteRelationships calls validateTransactionMetadata first, ahead of the
+    // updates-count, preconditions-count and duplicate-update checks, so a request breaking both
+    // reports the metadata error.
+    const h = harness();
+    const duplicated = update(RelationshipUpdate_Operation.OPERATION_TOUCH);
+
+    const error = await rpcErrorFrom(
+      h.service.writeRelationships(
+        WriteRelationshipsRequest.fromPartial({
+          updates: [duplicated, duplicated],
+          optionalTransactionMetadata: { blob: "x".repeat(70_000) },
+        }),
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toMatch(
+      /^metadata size of \d+ is greater than maximum allowed of 65000$/,
+    );
+  });
+
+  it("reports a missing required submessage BEFORE the transaction metadata size", async () => {
+    // protoc-gen-validate runs in SpiceDB's interceptor, before the handler's
+    // validateTransactionMetadata, so a malformed update wins over oversized metadata.
+    const h = harness();
+
+    const error = await rpcErrorFrom(
+      h.service.writeRelationships(
+        WriteRelationshipsRequest.fromPartial({
+          updates: [{ operation: RelationshipUpdate_Operation.OPERATION_TOUCH }],
+          optionalTransactionMetadata: { blob: "x".repeat(70_000) },
+        }),
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toBe(
+      "invalid WriteRelationshipsRequest.Updates[0]: embedded message failed validation | " +
+        "caused by: invalid RelationshipUpdate.Relationship: value is required",
+    );
+  });
+
   it("passes no preconditions as undefined and maps the two specified operations", async () => {
     const h = harness();
 
@@ -1402,6 +1490,39 @@ describe("deleteRelationships", () => {
     expect(h.grain.deleteArgs[0]?.optionalLimit).toBe(10n);
     expect(h.grain.deleteArgs[0]?.allowPartialDeletions).toBe(true);
     expect(h.grain.deleteArgs[0]?.filter.resourceIds).toEqual(["readme"]);
+  });
+
+  it("converts optional_transaction_metadata to a wire map and passes it through", async () => {
+    const h = harness();
+
+    await h.service.deleteRelationships(
+      DeleteRelationshipsRequest.fromPartial({
+        relationshipFilter: { resourceType: "document" },
+        optionalTransactionMetadata: { requestId: "abc-123" },
+      }),
+    );
+
+    expect(h.grain.deleteArgs[0]?.transactionMetadata).toEqual(new Map([["requestId", "abc-123"]]));
+  });
+
+  it("rejects transaction metadata over the 65,000-byte limit before reaching the grain", async () => {
+    const h = harness();
+    const oversized = { blob: "x".repeat(70_000) };
+
+    const error = await rpcErrorFrom(
+      h.service.deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document" },
+          optionalTransactionMetadata: oversized,
+        }),
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toMatch(
+      /^metadata size of \d+ is greater than maximum allowed of 65000$/,
+    );
+    expect(h.grain.deleteArgs).toHaveLength(0);
   });
 
   it("reports COMPLETE when the limit was not reached and DeleteLimitExceeded as INVALID_ARGUMENT", async () => {

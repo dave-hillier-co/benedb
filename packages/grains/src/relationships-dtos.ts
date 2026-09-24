@@ -121,6 +121,12 @@ export interface WriteRelationshipsArgs {
   readonly updates: readonly RelationshipUpdateWire[];
   /** The preconditions, or absent for none (distinct from an empty list, as in the C#). */
   readonly preconditions?: readonly PreconditionWire[] | undefined;
+  /**
+   * Optional caller-supplied transaction metadata (SpiceDB's `optional_transaction_metadata`),
+   * carried through to the committed revision's log event and echoed by Watch. Absent means none
+   * was supplied.
+   */
+  readonly transactionMetadata?: ReadonlyMap<string, unknown> | undefined;
 }
 
 /** Reply for `IRelationshipsGrain.writeRelationships`. */
@@ -145,6 +151,12 @@ export interface DeleteRelationshipsArgs {
   readonly preconditions?: readonly PreconditionWire[] | undefined;
   /** Whether a limited delete may truncate rather than reject; absent means false. */
   readonly allowPartialDeletions?: boolean | undefined;
+  /**
+   * Optional caller-supplied transaction metadata (SpiceDB's `optional_transaction_metadata`),
+   * carried through to the committed revision's log event and echoed by Watch. Absent means none
+   * was supplied.
+   */
+  readonly transactionMetadata?: ReadonlyMap<string, unknown> | undefined;
 }
 
 /**

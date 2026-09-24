@@ -90,6 +90,12 @@ export interface CommitRequest {
    * seeded store).
    */
   readonly expectedHead?: bigint | undefined;
+  /**
+   * Optional caller-supplied transaction metadata to attach to the minted revision's `LogEvent`,
+   * carried through to Watch's `optional_transaction_metadata` / `full_revision_metadata`
+   * (mirroring SpiceDB's `WithMetadata` option). Absent means no metadata was supplied.
+   */
+  readonly transactionMetadata?: ReadonlyMap<string, unknown> | undefined;
 }
 
 /**

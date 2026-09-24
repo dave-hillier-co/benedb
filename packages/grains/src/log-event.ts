@@ -48,6 +48,13 @@ export interface LogEvent {
    * replays no changes at all.
    */
   readonly gcFloor?: bigint | undefined;
+  /**
+   * The optional transaction metadata supplied on the `CommitRequest` that produced this event, or
+   * absent when none was supplied. Always absent on a GC event. Carried through unfolded (it is not
+   * part of the datastore state) so Watch can echo it on the `RevisionChange` it derives from this
+   * event.
+   */
+  readonly transactionMetadata?: ReadonlyMap<string, unknown> | undefined;
 }
 
 /** A bounded page of the event log, plus the head revision observed at read time. */

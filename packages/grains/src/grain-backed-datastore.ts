@@ -493,6 +493,7 @@ function buildChange(ev: LogEvent, options: WatchOptions): RevisionChange | unde
     revision: new TimestampRevision(ev.revision),
     relationshipChanges: relChanges,
     schemaChanged,
+    transactionMetadatas: ev.transactionMetadata !== undefined ? [ev.transactionMetadata] : [],
   };
 }
 

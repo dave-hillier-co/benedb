@@ -44,6 +44,13 @@ export const MAX_RELATIONSHIP_CONTEXT_SIZE = 25_000;
 export const MAX_CAVEAT_CONTEXT_SIZE = 4096;
 
 /**
+ * Maximum bytes of a request's `optional_transaction_metadata`, serialized as JSON (SpiceDB:
+ * `MaximumTransactionMetadataSize`, `internal/services/v1/relationships.go`) - "Limited by the BLOB
+ * size used in MySQL driver".
+ */
+export const MAX_TRANSACTION_METADATA_SIZE = 65_000;
+
+/**
  * Validates the shape of a `WriteRelationships` request, throwing an {@link RpcError} with
  * `INVALID_ARGUMENT` for: more than {@link MAX_UPDATES_PER_WRITE} updates
  * (ERROR_REASON_TOO_MANY_UPDATES_IN_REQUEST), more than {@link MAX_PRECONDITIONS_COUNT}
@@ -56,6 +63,9 @@ export function validateWriteRelationships(request: WriteRelationshipsRequest): 
   // SpiceDB validates the request message (protoc-gen-validate) before its handler runs, so a
   // missing required submessage is reported ahead of the update-count and precondition limits.
   const relationships = request.updates.map(requireRelationshipShape);
+
+  // The handler then checks the metadata size ahead of the update and precondition limits.
+  validateTransactionMetadataSize(request.optionalTransactionMetadata);
 
   if (request.updates.length > MAX_UPDATES_PER_WRITE)
     throw new RpcError(
@@ -162,6 +172,25 @@ function requireRelationshipShape(update: RelationshipUpdate, index: number): Sh
     );
 
   return relationship as ShapedRelationship;
+}
+
+/**
+ * Rejects `optional_transaction_metadata` larger than {@link MAX_TRANSACTION_METADATA_SIZE} bytes,
+ * mirroring SpiceDB's `validateTransactionMetadata`. The size is the metadata's JSON-serialized byte
+ * length (`(*structpb.Struct).MarshalJSON`), NOT a protobuf-encoded size - a deliberate difference
+ * from {@link validateCaveatContextSize}. An absent metadata is always allowed.
+ */
+export function validateTransactionMetadataSize(
+  metadata: Record<string, unknown> | undefined,
+): void {
+  if (metadata === undefined) return;
+
+  const size = new TextEncoder().encode(JSON.stringify(metadata)).length;
+  if (size > MAX_TRANSACTION_METADATA_SIZE)
+    throw new RpcError(
+      status.INVALID_ARGUMENT,
+      `metadata size of ${size} is greater than maximum allowed of ${MAX_TRANSACTION_METADATA_SIZE}`,
+    );
 }
 
 function relationshipKeyWithoutCaveatOrExpiration(rel: ShapedRelationship): string {
