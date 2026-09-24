@@ -53,6 +53,10 @@ export const MAX_CAVEAT_CONTEXT_SIZE = 4096;
  * {@link MAX_RELATIONSHIP_CONTEXT_SIZE} bytes. Mirrors SpiceDB's `WriteRelationships` validation.
  */
 export function validateWriteRelationships(request: WriteRelationshipsRequest): void {
+  // SpiceDB validates the request message (protoc-gen-validate) before its handler runs, so a
+  // missing required submessage is reported ahead of the update-count and precondition limits.
+  const relationships = request.updates.map(requireRelationshipShape);
+
   if (request.updates.length > MAX_UPDATES_PER_WRITE)
     throw new RpcError(
       status.INVALID_ARGUMENT,
@@ -71,8 +75,7 @@ export function validateWriteRelationships(request: WriteRelationshipsRequest): 
   // caveat and expiration (SpiceDB: V1StringRelationshipWithoutCaveatOrExpiration), so a CREATE and a
   // DELETE of the same tuple in one request is also a duplicate.
   const seen = new Set<string>();
-  for (const update of request.updates) {
-    const relationship = requireRelationshipShape(update);
+  for (const relationship of relationships) {
     const key = relationshipKeyWithoutCaveatOrExpiration(relationship);
     if (seen.has(key))
       throw new RpcError(
@@ -121,27 +124,42 @@ export function validateCaveatContextSize(
 type ShapedRelationship = Relationship & { resource: ObjectReference; subject: ShapedSubject };
 type ShapedSubject = { object: ObjectReference; optionalRelation: string };
 
+/** protoc-gen-validate's separator between a failed field and the nested failure it wraps. */
+const EMBEDDED = "embedded message failed validation | caused by: ";
+
 /**
  * Rejects an update whose `relationship`, `relationship.resource`, `relationship.subject`, or
- * `relationship.subject.object` is missing, mirroring SpiceDB's protobuf request-shape validation
- * at the service boundary (see `internal/services/v1/relationships.go` `WriteRelationships`).
- * ts-proto leaves an absent required submessage as `undefined` rather than a default instance, so
- * without this guard a malformed request throws a raw `TypeError` before it can be reported as
- * `INVALID_ARGUMENT`.
+ * `relationship.subject.object` is missing, with SpiceDB's own INVALID_ARGUMENT message: its
+ * protoc-gen-validate request validation at the service boundary (verified against a real SpiceDB
+ * container). ts-proto leaves an absent required submessage as `undefined` rather than a default
+ * instance, so without this guard a malformed request throws a raw `TypeError` - an UNKNOWN server
+ * fault - before it can be reported.
  */
-function requireRelationshipShape(update: RelationshipUpdate): ShapedRelationship {
+function requireRelationshipShape(update: RelationshipUpdate, index: number): ShapedRelationship {
+  const invalid = (cause: string): RpcError =>
+    new RpcError(
+      status.INVALID_ARGUMENT,
+      `invalid WriteRelationshipsRequest.Updates[${index}]: ${EMBEDDED}${cause}`,
+    );
+  const inRelationship = (cause: string): string =>
+    `invalid RelationshipUpdate.Relationship: ${EMBEDDED}${cause}`;
+
   const relationship = update.relationship;
   if (relationship === undefined)
-    throw new RpcError(status.INVALID_ARGUMENT, "relationship is required");
+    throw invalid("invalid RelationshipUpdate.Relationship: value is required");
 
   if (relationship.resource === undefined)
-    throw new RpcError(status.INVALID_ARGUMENT, "relationship.resource is required");
+    throw invalid(inRelationship("invalid Relationship.Resource: value is required"));
 
   if (relationship.subject === undefined)
-    throw new RpcError(status.INVALID_ARGUMENT, "relationship.subject is required");
+    throw invalid(inRelationship("invalid Relationship.Subject: value is required"));
 
   if (relationship.subject.object === undefined)
-    throw new RpcError(status.INVALID_ARGUMENT, "relationship.subject.object is required");
+    throw invalid(
+      inRelationship(
+        `invalid Relationship.Subject: ${EMBEDDED}invalid SubjectReference.Object: value is required`,
+      ),
+    );
 
   return relationship as ShapedRelationship;
 }

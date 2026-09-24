@@ -17,11 +17,12 @@ import { SpiceDbGrpcClient } from "./spice-db-grpc-client";
 import { resetSpiceDb } from "./spice-db-reset";
 
 /**
- * Directed differential gate for BeneDB issue #1: `WriteRelationships` validates every update
+ * Directed differential gate for BeneDB issues #1 and #4. Issue #1: `WriteRelationships` validates every update
  * against the schema (SpiceDB `relationships.ValidateRelationshipUpdates`) before persisting it.
  * Each case submits the SAME request to a real `authzed/spicedb` container and to BeneDB's
  * in-process `AuthzedPermissionsV1Service`, and asserts both give the same outcome: the same gRPC
- * status code and the same detail text, or success on both.
+ * status code and the same detail text, or success on both. Issue #4: a missing required
+ * submessage is INVALID_ARGUMENT with SpiceDB's own protoc-gen-validate text, never an UNKNOWN fault.
  */
 
 const fixture = useSpiceDbContainer();
@@ -155,6 +156,29 @@ const Cases: readonly (readonly [
   ],
 ];
 
+const Malformed: readonly (readonly [
+  name: string,
+  relationship: Partial<Relationship> | undefined,
+])[] = [
+  ["missing_relationship", undefined],
+  [
+    "missing_resource",
+    {
+      relation: "viewer",
+      subject: { object: { objectType: "user", objectId: "a" }, optionalRelation: "" },
+    },
+  ],
+  ["missing_subject", { resource: { objectType: "document", objectId: "d" }, relation: "viewer" }],
+  [
+    "missing_subject_object",
+    {
+      resource: { objectType: "document", objectId: "d" },
+      relation: "viewer",
+      subject: { object: undefined, optionalRelation: "" },
+    },
+  ],
+];
+
 interface Outcome {
   readonly code: number;
   readonly details: string;
@@ -202,6 +226,39 @@ describe.sequential("WriteRelationshipsSchemaValidationDifferentialTests", () =>
         });
 
         expect(benedb).toEqual(spiceDb);
+      } finally {
+        await cluster.dispose();
+      }
+    });
+  }
+
+  for (const [name, relationship] of Malformed) {
+    it(`WriteRelationships malformed submessage agrees with SpiceDB [${name}]`, async (ctx) => {
+      ctx.skip(!spiceDbAvailable, spiceDbSkipReason);
+      const build = (): WriteRelationshipsRequest =>
+        WriteRelationshipsRequest.fromPartial({ updates: [{ operation: TOUCH, relationship }] });
+
+      let spiceDb: Outcome;
+      const spiceDbClient = new SpiceDbGrpcClient(fixture().address, fixture().preSharedKey);
+      try {
+        await resetSpiceDb(spiceDbClient);
+        await spiceDbClient.writeSchema(WriteSchemaRequest.fromPartial({ schema: Schema }));
+        spiceDb = await outcome(spiceDbClient.writeRelationships(build()));
+        expect(spiceDb.code).toBe(status.INVALID_ARGUMENT);
+      } finally {
+        spiceDbClient.close();
+      }
+
+      const cluster = await MeshTestCluster.create(Schema);
+      try {
+        const service = new AuthzedPermissionsV1Service(
+          cluster.checker,
+          cluster.grainFactory,
+          cluster.reverseOps,
+          cluster.relationshipReads,
+          cluster.schemaProvider,
+        );
+        expect(await outcome(service.writeRelationships(build()))).toEqual(spiceDb);
       } finally {
         await cluster.dispose();
       }
