@@ -704,6 +704,12 @@ export class DatastoreGrain
     if (request.expectedHead !== undefined && request.counterChanges.length > 0)
       ev = { ...ev, counterChanges: request.counterChanges };
 
+    // The caller's optional transaction metadata is not part of the datastore state - `eventFromState`
+    // derives only the state diff - so it rides the event directly, exactly like the compatibility
+    // path's counter deltas above.
+    if (request.transactionMetadata !== undefined)
+      ev = { ...ev, transactionMetadata: request.transactionMetadata };
+
     // 12. PRE-SEED the dirty buffer for every key the event touches (the seeding rule). The merge
     //     into the shared buffer is SYNCHRONOUS - no await between the merge and the append - so an
     //     interleaved reader sees either no entry or a complete, content-correct seed.

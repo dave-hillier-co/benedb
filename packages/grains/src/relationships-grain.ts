@@ -300,6 +300,7 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
     const reply = await this.#commitValidatedUpdates(
       args.updates,
       toCommitPreconditions(args.preconditions),
+      args.transactionMetadata,
     );
 
     if (reply.failure !== undefined) throw relationshipWriteFailure(reply.failure);
@@ -329,6 +330,7 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
       expectedSchemaHash: undefined,
       counterChanges: [],
       expectedHead: undefined,
+      transactionMetadata: args.transactionMetadata,
     });
 
     if (reply.failure !== undefined) throw relationshipWriteFailure(reply.failure);
@@ -481,6 +483,7 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
   async #commitValidatedUpdates(
     updates: readonly RelationshipUpdateWire[],
     preconditions: readonly CommitPreconditionWire[],
+    transactionMetadata?: CommitRequest["transactionMetadata"],
   ): Promise<CommitReply> {
     for (let attempt = 0; ; attempt++) {
       const head = await this.#require.datastore.headRevision();
@@ -511,6 +514,7 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
         expectedSchemaHash: head.schemaHash ?? "",
         counterChanges: [],
         expectedHead: undefined,
+        transactionMetadata,
       });
 
       if (reply.failure?.kind !== "schemaHashMoved") return reply;

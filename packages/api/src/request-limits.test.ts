@@ -17,8 +17,10 @@ import {
   MAX_CAVEAT_CONTEXT_SIZE,
   MAX_PRECONDITIONS_COUNT,
   MAX_RELATIONSHIP_CONTEXT_SIZE,
+  MAX_TRANSACTION_METADATA_SIZE,
   MAX_UPDATES_PER_WRITE,
   validateCaveatContextSize,
+  validateTransactionMetadataSize,
   validateWriteRelationships,
 } from "./request-limits";
 import { RpcError } from "./rpc-error";
@@ -109,6 +111,24 @@ function contextOfSize(target: number): Record<string, unknown> {
     if (padding < 0) break;
   }
   throw new Error(`could not build a context of exactly ${target} serialized bytes`);
+}
+
+/** The JSON-serialized byte size {@link validateTransactionMetadataSize} measures. */
+function jsonSize(metadata: Record<string, unknown>): number {
+  return new TextEncoder().encode(JSON.stringify(metadata)).length;
+}
+
+/** Metadata whose JSON-serialized size is exactly `target` bytes. */
+function metadataOfSize(target: number): Record<string, unknown> {
+  let padding = target;
+  for (let attempt = 0; attempt < 64; attempt++) {
+    const metadata = { k: "x".repeat(padding) };
+    const size = jsonSize(metadata);
+    if (size === target) return metadata;
+    padding += target - size;
+    if (padding < 0) break;
+  }
+  throw new Error(`could not build metadata of exactly ${target} serialized bytes`);
 }
 
 /** A caveat whose whole serialized size (name field included) is exactly `target` bytes. */
@@ -612,5 +632,48 @@ describe("validateCaveatContextSize", () => {
     const error = expectRpcError(() => validateCaveatContextSize(context));
 
     expect(error.code).toBe(status.INVALID_ARGUMENT);
+  });
+});
+
+describe("validateTransactionMetadataSize", () => {
+  // Ported from SpiceDB `internal/services/v1/relationships.go` `validateTransactionMetadata`:
+  // an absent metadata is always allowed, and the size measured is the metadata's JSON-serialized
+  // byte length (`(*structpb.Struct).MarshalJSON`), NOT a protobuf-encoded size like the caveat
+  // context checks above.
+
+  it("does not throw for an absent metadata", () => {
+    expect(() => validateTransactionMetadataSize(undefined)).not.toThrow();
+  });
+
+  it("accepts an empty metadata", () => {
+    expect(() => validateTransactionMetadataSize({})).not.toThrow();
+  });
+
+  it("accepts metadata of exactly the maximum size", () => {
+    const metadata = metadataOfSize(MAX_TRANSACTION_METADATA_SIZE);
+    expect(jsonSize(metadata)).toBe(MAX_TRANSACTION_METADATA_SIZE);
+
+    expect(() => validateTransactionMetadataSize(metadata)).not.toThrow();
+  });
+
+  it("rejects one byte over, reporting the exact SpiceDB message", () => {
+    const metadata = metadataOfSize(MAX_TRANSACTION_METADATA_SIZE + 1);
+
+    const error = expectRpcError(() => validateTransactionMetadataSize(metadata));
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toBe(
+      `metadata size of ${MAX_TRANSACTION_METADATA_SIZE + 1} is greater than maximum allowed of ` +
+        `${MAX_TRANSACTION_METADATA_SIZE}`,
+    );
+  });
+
+  it("measures serialized bytes, not UTF-16 characters", () => {
+    // Well under the limit as UTF-16 characters, over it once encoded as UTF-8.
+    const metadata = { k: "é".repeat(MAX_TRANSACTION_METADATA_SIZE - 10) };
+    expect(JSON.stringify(metadata).length).toBeLessThan(MAX_TRANSACTION_METADATA_SIZE);
+    expect(jsonSize(metadata)).toBeGreaterThan(MAX_TRANSACTION_METADATA_SIZE);
+
+    expect(() => validateTransactionMetadataSize(metadata)).toThrow();
   });
 });

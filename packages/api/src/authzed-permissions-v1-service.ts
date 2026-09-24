@@ -100,7 +100,11 @@ import type { Status as RpcStatus } from "@benedb/protos/google/rpc/status";
 import { isCancellationError } from "@thresh/core/errors";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
-import { validateCaveatContextSize, validateWriteRelationships } from "./request-limits";
+import {
+  validateCaveatContextSize,
+  validateTransactionMetadataSize,
+  validateWriteRelationships,
+} from "./request-limits";
 import { relationshipSchemaViolationRpcError } from "./relationship-schema-violation-status";
 import { RpcError } from "./rpc-error";
 import {
@@ -286,11 +290,17 @@ export class AuthzedPermissionsV1Service {
     // Reject over-limit/duplicate/oversized-context requests up front (SpiceDB validates the
     // request shape before applying it). All of these are InvalidArgument, not FailedPrecondition.
     validateWriteRelationships(request);
+    validateTransactionMetadataSize(request.optionalTransactionMetadata);
 
     const updates = request.updates.map(toWireRelationshipUpdate);
     const preconditions = toWirePreconditions(request.optionalPreconditions);
+    const transactionMetadata = structToMap(request.optionalTransactionMetadata);
     try {
-      const reply = await this.#relationships.writeRelationships({ updates, preconditions });
+      const reply = await this.#relationships.writeRelationships({
+        updates,
+        preconditions,
+        transactionMetadata,
+      });
       return { writtenAt: { token: reply.writtenAtToken } };
     } catch (error) {
       if (error instanceof PreconditionFailedException) {
@@ -357,12 +367,15 @@ export class AuthzedPermissionsV1Service {
   async deleteRelationships(
     request: DeleteRelationshipsRequest,
   ): Promise<DeleteRelationshipsResponse> {
+    validateTransactionMetadataSize(request.optionalTransactionMetadata);
+
     try {
       const reply = await this.#relationships.deleteRelationships({
         filter: toWireFilter(request.relationshipFilter ?? EMPTY_RELATIONSHIP_FILTER),
         optionalLimit: request.optionalLimit === 0 ? undefined : BigInt(request.optionalLimit),
         preconditions: toWirePreconditions(request.optionalPreconditions),
         allowPartialDeletions: request.optionalAllowPartialDeletions,
+        transactionMetadata: structToMap(request.optionalTransactionMetadata),
       });
 
       return {

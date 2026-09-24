@@ -204,6 +204,97 @@ describe("Stage3WatchOverLogTests", () => {
   }, 120_000);
 
   /**
+   * End-to-end thread test for optional transaction metadata (issue #2): a `writeRelationships`
+   * call's `transactionMetadata` rides the declarative commit into the minted revision's `LogEvent`
+   * and comes back out on the `RevisionChange` the log-driven changefeed yields, as the single-entry
+   * `transactionMetadatas` list Watch later turns into `optional_transaction_metadata` /
+   * `full_revision_metadata`.
+   */
+  it("Watch_observes_the_transaction_metadata_a_write_supplied", async () => {
+    const cluster = await MeshTestCluster.create(SCHEMA);
+    const { controller, dispose: releaseTimer } = timeoutController(20_000);
+    try {
+      const ds = cluster.datastore;
+      const head = (await ds.headRevision()).revision;
+
+      const changes = collect(
+        ds.watch(head, { content: WatchContent.relationships }, controller.signal),
+        1,
+        controller,
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const metadata = new Map<string, unknown>([["requestId", "abc-123"]]);
+      await cluster.relationships.writeRelationships({
+        updates: [
+          {
+            operation: "create",
+            relationship: {
+              resourceType: "document",
+              resourceId: "doc1",
+              resourceRelation: "viewer",
+              subjectType: "user",
+              subjectId: "alice",
+              subjectRelation: ELLIPSIS,
+            },
+          },
+        ],
+        transactionMetadata: metadata,
+      });
+
+      const [observed] = await changes;
+      expect(observed?.transactionMetadatas).toEqual([metadata]);
+    } finally {
+      releaseTimer();
+      controller.abort();
+      await cluster.dispose();
+    }
+  }, 120_000);
+
+  /**
+   * A write with NO transaction metadata leaves the `RevisionChange` field empty, never a
+   * one-element list of an absent blob.
+   */
+  it("Watch_leaves_transaction_metadatas_empty_when_none_was_supplied", async () => {
+    const cluster = await MeshTestCluster.create(SCHEMA);
+    const { controller, dispose: releaseTimer } = timeoutController(20_000);
+    try {
+      const ds = cluster.datastore;
+      const head = (await ds.headRevision()).revision;
+
+      const changes = collect(
+        ds.watch(head, { content: WatchContent.relationships }, controller.signal),
+        1,
+        controller,
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await cluster.relationships.writeRelationships({
+        updates: [
+          {
+            operation: "create",
+            relationship: {
+              resourceType: "document",
+              resourceId: "doc2",
+              resourceRelation: "viewer",
+              subjectType: "user",
+              subjectId: "bob",
+              subjectRelation: ELLIPSIS,
+            },
+          },
+        ],
+      });
+
+      const [observed] = await changes;
+      expect(observed?.transactionMetadatas ?? []).toEqual([]);
+    } finally {
+      releaseTimer();
+      controller.abort();
+      await cluster.dispose();
+    }
+  }, 120_000);
+
+  /**
    * Clean-teardown gate for the DI-owned hub: the per-silo `LogWatchHub` is disposable, so
    * cluster/silo disposal must dispose it (a bounded, timeout-guarded unsubscribe from the
    * DatastoreGrain's observer set) without hanging or throwing, even after a Watch stream started

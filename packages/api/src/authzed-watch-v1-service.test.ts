@@ -892,6 +892,53 @@ describe("toProto", () => {
   });
 });
 
+// ---------------------------------------------------------------- transaction metadata
+
+describe("transaction metadata", () => {
+  it("leaves both metadata fields unset/empty when the change carries none", async () => {
+    const h = harness([changeStep(change())]);
+
+    await h.service.watch(request(), h.writer);
+
+    expect(h.writer.collected[0]?.optionalTransactionMetadata).toBeUndefined();
+    expect(h.writer.collected[0]?.fullRevisionMetadata).toEqual([]);
+  });
+
+  it("populates optional_transaction_metadata when EXACTLY ONE blob is present", async () => {
+    const metadata = new Map<string, unknown>([["requestId", "abc-123"]]);
+    const h = harness([changeStep(change({ transactionMetadatas: [metadata] }))]);
+
+    await h.service.watch(request(), h.writer);
+
+    expect(h.writer.collected[0]?.optionalTransactionMetadata).toEqual({ requestId: "abc-123" });
+    expect(h.writer.collected[0]?.fullRevisionMetadata).toEqual([{ requestId: "abc-123" }]);
+  });
+
+  it("leaves optional_transaction_metadata UNSET when multiple blobs merge at one revision", async () => {
+    const first = new Map<string, unknown>([["a", 1]]);
+    const second = new Map<string, unknown>([["b", 2]]);
+    const h = harness([changeStep(change({ transactionMetadatas: [first, second] }))]);
+
+    await h.service.watch(request(), h.writer);
+
+    // Ambiguous which one to return - the field stays absent, but the full list still carries both.
+    expect(h.writer.collected[0]?.optionalTransactionMetadata).toBeUndefined();
+    expect(h.writer.collected[0]?.fullRevisionMetadata).toEqual([{ a: 1 }, { b: 2 }]);
+  });
+
+  it("carries metadata through on a checkpoint response too", async () => {
+    const metadata = new Map<string, unknown>([["requestId", "abc-123"]]);
+    const h = harness([
+      changeStep(change({ isCheckpoint: true, transactionMetadatas: [metadata] })),
+    ]);
+
+    await h.service.watch(request(), h.writer);
+
+    expect(h.writer.collected[0]?.isCheckpoint).toBe(true);
+    expect(h.writer.collected[0]?.optionalTransactionMetadata).toEqual({ requestId: "abc-123" });
+  });
+});
+
 // ---------------------------------------------------------------- the loop
 
 describe("watch loop", () => {

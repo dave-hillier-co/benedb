@@ -210,14 +210,16 @@ export class AuthzedWatchV1Service {
       this.#schemaProvider.current.schemaHash,
       datastoreId,
     );
+    const metadatas = change.transactionMetadatas ?? [];
     const response: WatchResponse = {
       updates: [],
       changesThrough: { token: token.token },
       schemaUpdated: change.schemaChanged ?? false,
       isCheckpoint: change.isCheckpoint ?? false,
-      // Not set by the C# at all; the proto default for a repeated field, spelled out because a
-      // ts-proto message is a plain object with no defaults of its own.
-      fullRevisionMetadata: [],
+      // Ambiguity rule (SpiceDB watch.go): exactly one blob resolves `optional_transaction_metadata`;
+      // zero or more than one leaves it unset (absent, or ambiguous which one to return).
+      optionalTransactionMetadata: metadatas.length === 1 ? mapToStruct(metadatas[0]) : undefined,
+      fullRevisionMetadata: metadatas.map((m) => mapToStruct(m) ?? {}),
     };
 
     // A checkpoint carries no content, only the revision - the updates list stays EMPTY even when

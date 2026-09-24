@@ -963,6 +963,51 @@ describe("writeRelationships", () => {
     );
   });
 
+  it("converts optional_transaction_metadata to a wire map and passes it through", async () => {
+    const h = harness();
+
+    await h.service.writeRelationships(
+      WriteRelationshipsRequest.fromPartial({
+        updates: [update(RelationshipUpdate_Operation.OPERATION_TOUCH)],
+        optionalTransactionMetadata: { requestId: "abc-123" },
+      }),
+    );
+
+    expect(h.grain.writeArgs[0]?.transactionMetadata).toEqual(new Map([["requestId", "abc-123"]]));
+  });
+
+  it("leaves the transaction metadata undefined when none is supplied", async () => {
+    const h = harness();
+
+    await h.service.writeRelationships(
+      WriteRelationshipsRequest.fromPartial({
+        updates: [update(RelationshipUpdate_Operation.OPERATION_TOUCH)],
+      }),
+    );
+
+    expect(h.grain.writeArgs[0]?.transactionMetadata).toBeUndefined();
+  });
+
+  it("rejects transaction metadata over the 65,000-byte limit before reaching the grain", async () => {
+    const h = harness();
+    const oversized = { blob: "x".repeat(70_000) };
+
+    const error = await rpcErrorFrom(
+      h.service.writeRelationships(
+        WriteRelationshipsRequest.fromPartial({
+          updates: [update(RelationshipUpdate_Operation.OPERATION_TOUCH)],
+          optionalTransactionMetadata: oversized,
+        }),
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toMatch(
+      /^metadata size of \d+ is greater than maximum allowed of 65000$/,
+    );
+    expect(h.grain.writeArgs).toHaveLength(0);
+  });
+
   it("passes no preconditions as undefined and maps the two specified operations", async () => {
     const h = harness();
 
@@ -1402,6 +1447,39 @@ describe("deleteRelationships", () => {
     expect(h.grain.deleteArgs[0]?.optionalLimit).toBe(10n);
     expect(h.grain.deleteArgs[0]?.allowPartialDeletions).toBe(true);
     expect(h.grain.deleteArgs[0]?.filter.resourceIds).toEqual(["readme"]);
+  });
+
+  it("converts optional_transaction_metadata to a wire map and passes it through", async () => {
+    const h = harness();
+
+    await h.service.deleteRelationships(
+      DeleteRelationshipsRequest.fromPartial({
+        relationshipFilter: { resourceType: "document" },
+        optionalTransactionMetadata: { requestId: "abc-123" },
+      }),
+    );
+
+    expect(h.grain.deleteArgs[0]?.transactionMetadata).toEqual(new Map([["requestId", "abc-123"]]));
+  });
+
+  it("rejects transaction metadata over the 65,000-byte limit before reaching the grain", async () => {
+    const h = harness();
+    const oversized = { blob: "x".repeat(70_000) };
+
+    const error = await rpcErrorFrom(
+      h.service.deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document" },
+          optionalTransactionMetadata: oversized,
+        }),
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toMatch(
+      /^metadata size of \d+ is greater than maximum allowed of 65000$/,
+    );
+    expect(h.grain.deleteArgs).toHaveLength(0);
   });
 
   it("reports COMPLETE when the limit was not reached and DeleteLimitExceeded as INVALID_ARGUMENT", async () => {

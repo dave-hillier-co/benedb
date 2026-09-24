@@ -764,6 +764,30 @@ describe("RelationshipsGrain", () => {
       );
     });
 
+    it("threads optional transaction metadata through to the commit request", async () => {
+      const f = await start();
+      script.replies = [ok(4_000n)];
+      const metadata = new Map<string, unknown>([["requestId", "abc-123"]]);
+
+      await target(f).writeRelationships({
+        updates: [{ operation: "touch", relationship: rel("readme", "alice") }],
+        transactionMetadata: metadata,
+      });
+
+      expect(onlyCommit().transactionMetadata).toBe(metadata);
+    });
+
+    it("leaves the commit's transaction metadata absent when none is supplied", async () => {
+      const f = await start();
+      script.replies = [ok(4_000n)];
+
+      await target(f).writeRelationships({
+        updates: [{ operation: "touch", relationship: rel("readme", "alice") }],
+      });
+
+      expect(onlyCommit().transactionMetadata).toBeUndefined();
+    });
+
     it("sends an empty precondition list when none are supplied", async () => {
       const f = await start();
       script.replies = [ok(4_000n)];
@@ -1104,6 +1128,19 @@ describe("RelationshipsGrain", () => {
       await target(f).deleteRelationships({ filter: { resourceType: "document" } });
 
       expect(onlyCommit().deleteByFilter?.limit).toBeUndefined();
+    });
+
+    it("threads optional transaction metadata through to the commit request", async () => {
+      const f = await start();
+      script.replies = [ok(7_000n)];
+      const metadata = new Map<string, unknown>([["requestId", "abc-123"]]);
+
+      await target(f).deleteRelationships({
+        filter: { resourceType: "document" },
+        transactionMetadata: metadata,
+      });
+
+      expect(onlyCommit().transactionMetadata).toBe(metadata);
     });
   });
 
