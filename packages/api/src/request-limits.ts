@@ -64,6 +64,9 @@ export function validateWriteRelationships(request: WriteRelationshipsRequest): 
   // missing required submessage is reported ahead of the update-count and precondition limits.
   const relationships = request.updates.map(requireRelationshipShape);
 
+  // The handler then checks the metadata size ahead of the update and precondition limits.
+  validateTransactionMetadataSize(request.optionalTransactionMetadata);
+
   if (request.updates.length > MAX_UPDATES_PER_WRITE)
     throw new RpcError(
       status.INVALID_ARGUMENT,

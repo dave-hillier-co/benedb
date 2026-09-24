@@ -1030,6 +1030,27 @@ describe("writeRelationships", () => {
     );
   });
 
+  it("reports a missing required submessage BEFORE the transaction metadata size", async () => {
+    // protoc-gen-validate runs in SpiceDB's interceptor, before the handler's
+    // validateTransactionMetadata, so a malformed update wins over oversized metadata.
+    const h = harness();
+
+    const error = await rpcErrorFrom(
+      h.service.writeRelationships(
+        WriteRelationshipsRequest.fromPartial({
+          updates: [{ operation: RelationshipUpdate_Operation.OPERATION_TOUCH }],
+          optionalTransactionMetadata: { blob: "x".repeat(70_000) },
+        }),
+      ),
+    );
+
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toBe(
+      "invalid WriteRelationshipsRequest.Updates[0]: embedded message failed validation | " +
+        "caused by: invalid RelationshipUpdate.Relationship: value is required",
+    );
+  });
+
   it("passes no preconditions as undefined and maps the two specified operations", async () => {
     const h = harness();
 

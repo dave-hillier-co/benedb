@@ -287,11 +287,9 @@ export class AuthzedPermissionsV1Service {
   async writeRelationships(
     request: WriteRelationshipsRequest,
   ): Promise<WriteRelationshipsResponse> {
-    // Reject over-limit/duplicate/oversized-context requests up front (SpiceDB validates the
-    // request shape before applying it). All of these are InvalidArgument, not FailedPrecondition.
-    // The metadata size is checked FIRST: SpiceDB's WriteRelationships runs
-    // validateTransactionMetadata ahead of the update/precondition limits.
-    validateTransactionMetadataSize(request.optionalTransactionMetadata);
+    // Reject malformed/over-limit/duplicate/oversized requests up front, in SpiceDB's order: the
+    // required-submessage shape, then the metadata size, then the update/precondition limits. All
+    // of these are InvalidArgument, not FailedPrecondition.
     validateWriteRelationships(request);
 
     const updates = request.updates.map(toWireRelationshipUpdate);
