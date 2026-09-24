@@ -20,6 +20,7 @@ import {
   RELATIONSHIPS_GRAIN_KEY,
 } from "@benedb/grains/i-relationships-grain";
 import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
+import { RelationshipSchemaViolationException } from "@benedb/grains/relationship-schema-violation-exception";
 import type { RelationshipReads } from "@benedb/grains/relationship-reads";
 import type {
   PreconditionWire,
@@ -87,6 +88,7 @@ import type { Membership } from "@benedb/engine/membership";
 import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
+import { relationshipSchemaViolationRpcError } from "./relationship-schema-violation-status";
 import { RpcError } from "./rpc-error";
 
 /**
@@ -318,6 +320,9 @@ export class PermissionsGrpcService {
     } catch (ex) {
       if (ex instanceof PreconditionFailedException) {
         throw new RpcError(status.FAILED_PRECONDITION, ex.message);
+      }
+      if (ex instanceof RelationshipSchemaViolationException) {
+        throw relationshipSchemaViolationRpcError(ex);
       }
       if (ex instanceof SequencerOverloadedException) {
         // Sequencer overload shed by the admission gate: retryable RESOURCE_EXHAUSTED.

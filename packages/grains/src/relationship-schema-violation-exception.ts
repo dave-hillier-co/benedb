@@ -1,31 +1,40 @@
+import type { RelationshipTypeReason } from "@benedb/engine/relationship-schema-validator";
 import { registerSurrogate } from "@thresh/core/value-codec";
 
 /**
- * Thrown when a `WriteRelationships` update does not match the live schema: an unknown resource
- * definition, an unknown relation/permission, a subject type/subrelation the relation's schema does
- * not allow, or a caveat the relation does not permit. Nothing from the request commits. Mirrors
- * SpiceDB's write-time `relationships.ValidateRelationshipsForCreateOrTouch`
- * (`internal/services/v1/relationships.go`), which validates every update against the schema reader
- * inside the same transaction that applies them, before persisting.
+ * Thrown when a `WriteRelationships` / `ImportBulkRelationships` update does not match the schema
+ * the commit is gated on: an unknown resource or subject definition, an unknown relation or
+ * subrelation, a write to a permission, or a subject type / caveat / expiration the relation does
+ * not allow. Nothing from the request commits. Mirrors SpiceDB's write-time
+ * `relationships.ValidateRelationshipUpdates` (`internal/services/v1/relationships.go`), which
+ * validates every update against the schema reader inside the same transaction that applies them.
  *
- * `RelationshipsGrain.writeRelationships` re-wraps `@benedb/engine`'s `RelationshipTypeException`
- * in this one boundary-crossing exception (the same shape `SchemaWriteValidationException` and
- * `WriteConflictException` already use) so the gRPC front door can map it without depending on the
- * engine package, and so it round-trips the grain boundary via the surrogate registered below.
+ * `RelationshipsGrain` re-wraps `@benedb/engine`'s `RelationshipTypeException` in this one
+ * boundary-crossing exception (the same shape `WriteConflictException` uses), carrying the
+ * {@link RelationshipTypeReason} the gRPC front door needs to pick SpiceDB's status code:
+ * FAILED_PRECONDITION for an unknown definition/relation, INVALID_ARGUMENT for a write to a
+ * permission or a disallowed subject type.
  */
 export class RelationshipSchemaViolationException extends Error {
-  /** Creates the exception carrying the schema-validator's own message, verbatim. */
-  constructor(message: string) {
+  /** Which SpiceDB validation error this is. */
+  readonly reason: RelationshipTypeReason;
+
+  /** Creates the exception carrying the schema-validator's reason and message, verbatim. */
+  constructor(reason: RelationshipTypeReason, message: string) {
     super(message);
     Object.setPrototypeOf(this, new.target.prototype);
     this.name = "RelationshipSchemaViolationException";
+    this.reason = reason;
   }
 }
 
-// The message is the sole distinguishing state.
 registerSurrogate<RelationshipSchemaViolationException>({
   tag: "benedb.relationshipSchemaViolationException",
   test: (value) => value instanceof RelationshipSchemaViolationException,
-  encode: (error) => ({ message: error.message }),
-  decode: (fields) => new RelationshipSchemaViolationException(fields.message as string),
+  encode: (error) => ({ reason: error.reason, message: error.message }),
+  decode: (fields) =>
+    new RelationshipSchemaViolationException(
+      fields.reason as RelationshipTypeReason,
+      fields.message as string,
+    ),
 });

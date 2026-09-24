@@ -40,6 +40,7 @@ import { mustMatchFailedMessage, mustNotMatchFailedMessage } from "./preconditio
 import { CounterOperationException } from "./relationships-dtos";
 import type {
   PreconditionWire,
+  RelationshipUpdateWire,
   RelationshipWire,
   RelationshipsFilterWire,
 } from "./relationships-dtos";
@@ -147,6 +148,19 @@ definition document {
     permission view = editor
 }`;
 
+/** The seed plus a relation that only allows a caveated subject. */
+const CAVEATED_SCHEMA = `definition user {}
+
+caveat only_on_tuesday(day string) {
+    day == "tuesday"
+}
+
+definition document {
+    relation viewer: user
+    relation caveated_viewer: user with only_on_tuesday
+    permission view = viewer
+}`;
+
 // --- the scripted sequencer -------------------------------------------------------------------
 
 interface Script {
@@ -154,6 +168,8 @@ interface Script {
   readonly commits: CommitRequest[];
   /** Replies handed back in order; the LAST entry repeats forever. */
   replies: CommitReply[];
+  /** Runs once after each commit is recorded: a concurrent write landing at the sequencer. */
+  onCommit?: (() => void) | undefined;
 }
 
 let script: Script = { commits: [], replies: [] };
@@ -186,6 +202,9 @@ function rejected(kind: CommitFailureKind, detail?: string): CommitReply {
 class ScriptedSequencerGrain extends Grain {
   async commit(request: CommitRequest): Promise<CommitReply> {
     script.commits.push(request);
+    const onCommit = script.onCommit;
+    script.onCommit = undefined;
+    onCommit?.();
     const next = script.replies.length > 1 ? script.replies.shift()! : script.replies[0];
     if (next === undefined) throw new Error("scripted sequencer: no reply queued");
     return next;
@@ -729,7 +748,8 @@ describe("RelationshipsGrain", () => {
       expect(commit.preconditions.map((p) => p.mustMatch)).toEqual([true, false]);
       expect(commit.preconditions[0]!.filter.optionalResourceType).toBe("document");
       expect(commit.schemaBytes).toBeUndefined();
-      expect(commit.expectedSchemaHash).toBeUndefined();
+      // Gated on the stored schema the updates were validated against (the fake head's hash).
+      expect(commit.expectedSchemaHash).toBe("hash-1");
       expect(commit.expectedHead).toBeUndefined();
       expect(commit.counterChanges).toEqual([]);
       expect(commit.deleteByFilter).toBeUndefined();
@@ -890,32 +910,30 @@ describe("RelationshipsGrain", () => {
       expect(f.hub.pulses).toEqual([6_000n]);
     });
 
-    describe("live-schema validation", () => {
-      it("rejects an unknown resource definition before any commit", async () => {
-        const f = await start();
-
-        const error = await target(f)
-          .writeRelationships({
-            updates: [
-              {
-                operation: "touch",
-                relationship: {
-                  resourceType: "folder",
-                  resourceId: "root",
-                  resourceRelation: "viewer",
-                  subjectType: "user",
-                  subjectId: "alice",
-                  subjectRelation: ELLIPSIS,
-                },
-              },
-            ],
-          })
+    describe("schema validation", () => {
+      /** Rejection of a write, captured rather than thrown. */
+      function writeError(f: Fixture, updates: RelationshipUpdateWire[]): Promise<unknown> {
+        return target(f)
+          .writeRelationships({ updates })
           .then(
             () => undefined,
             (e: unknown) => e,
           );
+      }
+
+      function touch(relationship: RelationshipWire): RelationshipUpdateWire {
+        return { operation: "touch", relationship };
+      }
+
+      it("rejects an unknown resource definition before any commit", async () => {
+        const f = await start();
+
+        const error = await writeError(f, [
+          touch({ ...rel("root", "alice"), resourceType: "folder" }),
+        ]);
 
         expect(error).toBeInstanceOf(RelationshipSchemaViolationException);
+        expect((error as RelationshipSchemaViolationException).reason).toBe("unknownDefinition");
         expect((error as Error).message).toBe("object definition `folder` not found");
         expect(script.commits).toHaveLength(0);
       });
@@ -923,28 +941,11 @@ describe("RelationshipsGrain", () => {
       it("rejects an unknown relation under a known definition", async () => {
         const f = await start();
 
-        const error = await target(f)
-          .writeRelationships({
-            updates: [
-              {
-                operation: "touch",
-                relationship: {
-                  resourceType: "document",
-                  resourceId: "readme",
-                  resourceRelation: "editor",
-                  subjectType: "user",
-                  subjectId: "alice",
-                  subjectRelation: ELLIPSIS,
-                },
-              },
-            ],
-          })
-          .then(
-            () => undefined,
-            (e: unknown) => e,
-          );
+        const error = await writeError(f, [
+          touch({ ...rel("readme", "alice"), resourceRelation: "editor" }),
+        ]);
 
-        expect(error).toBeInstanceOf(RelationshipSchemaViolationException);
+        expect((error as RelationshipSchemaViolationException).reason).toBe("unknownRelation");
         expect((error as Error).message).toBe(
           "relation/permission `editor` not found under definition `document`",
         );
@@ -954,72 +955,119 @@ describe("RelationshipsGrain", () => {
       it("rejects a subject type the relation's schema does not allow", async () => {
         const f = await start();
 
-        const error = await target(f)
-          .writeRelationships({
-            updates: [
-              {
-                operation: "touch",
-                relationship: {
-                  resourceType: "document",
-                  resourceId: "readme",
-                  resourceRelation: "viewer",
-                  subjectType: "group",
-                  subjectId: "eng",
-                  subjectRelation: "member",
-                },
-              },
-            ],
-          })
-          .then(
-            () => undefined,
-            (e: unknown) => e,
-          );
+        const error = await writeError(f, [
+          touch({ ...rel("readme", "other"), subjectType: "document" }),
+        ]);
 
-        expect(error).toBeInstanceOf(RelationshipSchemaViolationException);
+        expect((error as RelationshipSchemaViolationException).reason).toBe("invalidSubjectType");
         expect((error as Error).message).toBe(
-          "subjects of type `group` are not allowed on relation `document#viewer`",
+          "subjects of type `document` are not allowed on relation `document#viewer`",
         );
         expect(script.commits).toHaveLength(0);
-      });
-
-      it("accepts a schema-legal update and commits it unchanged", async () => {
-        const f = await start();
-        script.replies = [ok(4_000n)];
-
-        await target(f).writeRelationships({
-          updates: [{ operation: "touch", relationship: rel("readme", "alice") }],
-        });
-
-        expect(onlyCommit().updates).toHaveLength(1);
       });
 
       it("validates every update, not only the first", async () => {
         const f = await start();
 
-        const error = await target(f)
-          .writeRelationships({
-            updates: [
-              { operation: "touch", relationship: rel("readme", "alice") },
-              {
-                operation: "touch",
-                relationship: {
-                  resourceType: "folder",
-                  resourceId: "root",
-                  resourceRelation: "viewer",
-                  subjectType: "user",
-                  subjectId: "alice",
-                  subjectRelation: ELLIPSIS,
-                },
-              },
-            ],
-          })
-          .then(
-            () => undefined,
-            (e: unknown) => e,
-          );
+        const error = await writeError(f, [
+          touch(rel("readme", "alice")),
+          touch({ ...rel("root", "alice"), resourceType: "folder" }),
+        ]);
 
         expect(error).toBeInstanceOf(RelationshipSchemaViolationException);
         expect(script.commits).toHaveLength(0);
+      });
+
+      it("holds a delete to SpiceDB's deletion rule, not the create rule", async () => {
+        const f = await start();
+        f.schemaSource.stored = bytes(CAVEATED_SCHEMA);
+        script.replies = [ok(4_000n)];
+
+        await target(f).writeRelationships({
+          updates: [
+            {
+              operation: "delete",
+              relationship: { ...rel("readme", "alice"), resourceRelation: "caveated_viewer" },
+            },
+          ],
+        });
+
+        expect(onlyCommit().updates[0]!.operation).toBe("delete");
+      });
+
+      it("gates the commit on the stored-schema hash the updates were validated against", async () => {
+        const f = await start();
+        script.replies = [ok(4_000n)];
+
+        await target(f).writeRelationships({ updates: [touch(rel("readme", "alice"))] });
+
+        expect(onlyCommit().expectedSchemaHash).toBe("hash-1");
+      });
+
+      it("expects the EMPTY hash before any schema is stored", async () => {
+        const f = await start();
+        f.datastore.head = { revision: new TimestampRevision(1_000n), schemaHash: undefined };
+        script.replies = [ok(4_000n)];
+
+        await target(f).writeRelationships({ updates: [touch(rel("readme", "alice"))] });
+
+        expect(onlyCommit().expectedSchemaHash).toBe("");
+      });
+
+      it("validates against the STORED schema at the pinned head, not the live snapshot", async () => {
+        const f = await start();
+        // Another silo already stored a schema that adds `editor`; this silo's live snapshot has
+        // not caught up. The stored schema is the one the commit is gated on, so it decides.
+        f.schemaSource.stored = bytes(SCHEMA_WITH_EDITOR);
+        script.replies = [ok(4_000n)];
+
+        await target(f).writeRelationships({
+          updates: [touch({ ...rel("readme", "alice"), resourceRelation: "editor" })],
+        });
+
+        expect(onlyCommit().updates).toHaveLength(1);
+        expect(f.schemaSource.readAt).toEqual([f.datastore.head.revision]);
+      });
+
+      it("re-validates against the new schema when a schema write lands before the commit", async () => {
+        const f = await start();
+        // The first attempt validates against the seed; a schema write removing `viewer` lands
+        // before the commit, so the sequencer rejects it. The retry must re-read the stored schema
+        // and reject the now-orphaned tuple rather than commit it.
+        script.replies = [rejected("schemaHashMoved"), ok(4_000n)];
+        script.onCommit = () => {
+          f.datastore.head = { revision: new TimestampRevision(2_000n), schemaHash: "hash-2" };
+          f.schemaSource.stored = bytes(SCHEMA_WITHOUT_VIEWER);
+        };
+
+        const error = await writeError(f, [touch(rel("readme", "alice"))]);
+
+        expect((error as RelationshipSchemaViolationException).reason).toBe("unknownRelation");
+        expect(script.commits).toHaveLength(1);
+      });
+
+      it("commits on the retry when the moved schema still allows the updates", async () => {
+        const f = await start();
+        script.replies = [rejected("schemaHashMoved"), ok(4_000n)];
+        script.onCommit = () => {
+          f.datastore.head = { revision: new TimestampRevision(2_000n), schemaHash: "hash-2" };
+          f.schemaSource.stored = bytes(SCHEMA_WITH_EDITOR);
+        };
+
+        await target(f).writeRelationships({ updates: [touch(rel("readme", "alice"))] });
+
+        expect(script.commits.map((c) => c.expectedSchemaHash)).toEqual(["hash-1", "hash-2"]);
+      });
+
+      it("raises the retryable serialization conflict when the schema never settles", async () => {
+        const f = await start();
+        script.replies = [rejected("schemaHashMoved")];
+
+        const error = await writeError(f, [touch(rel("readme", "alice"))]);
+
+        expect(error).toBeInstanceOf(WriteConflictException);
+        expect((error as WriteConflictException).kind).toBe("serialization");
+        expect(script.commits).toHaveLength(50);
       });
     });
   });
@@ -1161,6 +1209,36 @@ describe("RelationshipsGrain", () => {
 
       expect(reply.numLoaded).toBe(0n);
       expect(onlyCommit().updates).toEqual([]);
+    });
+
+    it("validates every row against the stored schema before committing any", async () => {
+      // SpiceDB's ImportBulkRelationships runs ValidateOneRelationship (create rule) on each row.
+      const f = await start();
+      script.replies = [ok(9_000n)];
+
+      const error = await target(f)
+        .bulkImportRelationships({
+          relationships: [rel("a", "alice"), { ...rel("b", "bob"), resourceRelation: "view" }],
+        })
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+
+      expect(error).toBeInstanceOf(RelationshipSchemaViolationException);
+      expect((error as RelationshipSchemaViolationException).reason).toBe(
+        "cannotWriteToPermission",
+      );
+      expect(script.commits).toHaveLength(0);
+    });
+
+    it("gates the import commit on the stored-schema hash", async () => {
+      const f = await start();
+      script.replies = [ok(9_000n)];
+
+      await target(f).bulkImportRelationships({ relationships: [rel("a", "alice")] });
+
+      expect(onlyCommit().expectedSchemaHash).toBe("hash-1");
     });
   });
 

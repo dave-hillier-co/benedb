@@ -15,6 +15,7 @@ import type {
   RelationshipStreamItem,
   RelationshipWire,
 } from "@benedb/grains/relationships-dtos";
+import { RelationshipSchemaViolationException } from "@benedb/grains/relationship-schema-violation-exception";
 import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
 import { WriteConflictException } from "@benedb/grains/write-conflict-exception";
 import type {
@@ -417,6 +418,29 @@ describe("importBulkRelationships", () => {
 
     expect(error.code).toBe(status.ABORTED);
     expect(error.details).toBe("serialization failure");
+  });
+
+  it("maps a schema violation to SpiceDB's code for its reason", async () => {
+    const cases: readonly [RelationshipSchemaViolationException, status][] = [
+      [
+        new RelationshipSchemaViolationException("unknownRelation", "relation/permission"),
+        status.FAILED_PRECONDITION,
+      ],
+      [
+        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type"),
+        status.INVALID_ARGUMENT,
+      ],
+    ];
+
+    for (const [thrown, expected] of cases) {
+      const h = harness();
+      h.grain.throws = thrown;
+      const error = await rpcErrorFrom(
+        h.service.importBulkRelationships(streamOf(batch(protoViewer("doc0")))),
+      );
+      expect(error.code).toBe(expected);
+      expect(error.details).toBe(thrown.message);
+    }
   });
 
   it("maps a shed commit to RESOURCE_EXHAUSTED", async () => {

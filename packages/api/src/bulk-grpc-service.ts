@@ -17,6 +17,7 @@ import type {
   RelationshipStreamItem,
   RelationshipWire,
 } from "@benedb/grains/relationships-dtos";
+import { RelationshipSchemaViolationException } from "@benedb/grains/relationship-schema-violation-exception";
 import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
 import { WriteConflictException } from "@benedb/grains/write-conflict-exception";
 import type {
@@ -31,6 +32,7 @@ import type {
 import { isCancellationError } from "@thresh/core/errors";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
+import { relationshipSchemaViolationRpcError } from "./relationship-schema-violation-status";
 import { RpcError } from "./rpc-error";
 import type { ServerStreamWriter } from "./server-stream-writer";
 
@@ -114,6 +116,9 @@ export class BulkGrpcService {
         loadedAt: { token: reply.loadedAtToken },
       };
     } catch (error) {
+      if (error instanceof RelationshipSchemaViolationException) {
+        throw relationshipSchemaViolationRpcError(error);
+      }
       if (error instanceof WriteConflictException) {
         // CREATE-conflict is permanent (do not retry the doomed import); a genuine write-write
         // serialization conflict is retryable - the same split the authzed surface maps.

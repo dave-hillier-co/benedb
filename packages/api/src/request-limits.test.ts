@@ -222,13 +222,23 @@ describe("validateWriteRelationships", () => {
       expect(error.details).toBe("relationship.subject.object is required");
     });
 
-    it("checks shape before the update-count limit, so it never scans past a malformed entry", () => {
+    it("rejects a malformed update even when an earlier update is well formed", () => {
+      const wellFormed = update(
+        Relationship.fromPartial({
+          resource: { objectType: "document", objectId: "firstdoc" },
+          relation: "viewer",
+          subject: { object: { objectType: "user", objectId: "alice" } },
+        }),
+      );
       const malformed = RelationshipUpdate.fromPartial({
         operation: RelationshipUpdate_Operation.OPERATION_CREATE,
       });
 
-      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+      const error = expectRpcError(() =>
+        validateWriteRelationships(request([wellFormed, malformed])),
+      );
 
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
       expect(error.details).toBe("relationship is required");
     });
   });

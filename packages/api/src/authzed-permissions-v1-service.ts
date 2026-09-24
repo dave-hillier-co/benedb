@@ -101,6 +101,7 @@ import { isCancellationError } from "@thresh/core/errors";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
 import { validateCaveatContextSize, validateWriteRelationships } from "./request-limits";
+import { relationshipSchemaViolationRpcError } from "./relationship-schema-violation-status";
 import { RpcError } from "./rpc-error";
 import {
   checkNamespaceAndRelations,
@@ -296,10 +297,7 @@ export class AuthzedPermissionsV1Service {
         throw new RpcError(status.FAILED_PRECONDITION, error.message);
       }
       if (error instanceof RelationshipSchemaViolationException) {
-        // Unknown definition/relation, a disallowed subject type/subrelation, or caveat misuse:
-        // the same schema-mismatch family `checkNamespaceAndRelations` reports for Check/Read
-        // (see `schema-validation.ts`), so it maps to the same FailedPrecondition code.
-        throw new RpcError(status.FAILED_PRECONDITION, error.message);
+        throw relationshipSchemaViolationRpcError(error);
       }
       if (error instanceof WriteConflictException) {
         // CreateExisting -> AlreadyExists (SpiceDB CreateRelationshipExistsError): a permanent
@@ -847,6 +845,9 @@ export class AuthzedPermissionsV1Service {
       // a STRING minted from the reply's bigint, never a JS number.
       return { numLoaded: String(reply.numLoaded) };
     } catch (error) {
+      if (error instanceof RelationshipSchemaViolationException) {
+        throw relationshipSchemaViolationRpcError(error);
+      }
       if (error instanceof WriteConflictException) {
         throw new RpcError(toStatusCode(error.kind), error.message);
       }

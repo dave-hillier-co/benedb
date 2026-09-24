@@ -93,14 +93,16 @@ import { RpcError } from "./rpc-error";
  *    `optional_expires_at` survives write-then-read as a millisecond-precision ts-proto `Date`.
  */
 
-const Schema = `definition user {}
+const Schema = `use expiration
+
+definition user {}
 
 caveat over_limit(limit int, requested int) {
     requested <= limit
 }
 
 definition document {
-    relation viewer: user | user with over_limit
+    relation viewer: user | user with over_limit | user with expiration
     relation editor: user
     permission view = viewer + editor
 }`;
@@ -702,6 +704,135 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
 
       expect(writer.collected).toHaveLength(1);
       expect(writer.collected[0]?.relationship?.optionalExpiresAt).toEqual(expiresAt);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships schema violations carry SpiceDB's codes and commit nothing", async () => {
+    // SpiceDB validates every update against the schema inside the write transaction: an unknown
+    // definition or relation is FAILED_PRECONDITION, a write to a permission or a disallowed subject
+    // type is INVALID_ARGUMENT.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const write = (
+        resourceType: string,
+        relation: string,
+        subjectType: string,
+        subjectRelation = "",
+      ): Promise<unknown> =>
+        service(cluster).writeRelationships(
+          WriteRelationshipsRequest.fromPartial({
+            updates: [
+              {
+                operation: RelationshipUpdate_Operation.OPERATION_TOUCH,
+                relationship: {
+                  resource: { objectType: resourceType, objectId: "readme" },
+                  relation,
+                  subject: {
+                    object: { objectType: subjectType, objectId: "alice" },
+                    optionalRelation: subjectRelation,
+                  },
+                },
+              },
+            ],
+          }),
+        );
+
+      const unknownDefinition = await expectRpcError(write("folder", "viewer", "user"));
+      expect(unknownDefinition.code).toBe(status.FAILED_PRECONDITION);
+      expect(unknownDefinition.details).toBe("object definition `folder` not found");
+
+      const unknownRelation = await expectRpcError(write("document", "owner", "user"));
+      expect(unknownRelation.code).toBe(status.FAILED_PRECONDITION);
+
+      const permission = await expectRpcError(write("document", "view", "user"));
+      expect(permission.code).toBe(status.INVALID_ARGUMENT);
+      expect(permission.details).toBe(
+        "cannot write a relationship to permission `view` under definition `document`",
+      );
+
+      const subjectType = await expectRpcError(write("document", "editor", "document"));
+      expect(subjectType.code).toBe(status.INVALID_ARGUMENT);
+      expect(subjectType.details).toBe(
+        "subjects of type `document` are not allowed on relation `document#editor`",
+      );
+
+      const writer = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({ relationshipFilter: { resourceType: "document" } }),
+        writer,
+      );
+      expect(writer.collected).toHaveLength(0);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships deletes an expiring tuple without restating its expiration", async () => {
+    // SpiceDB's deletion rule: an uncaveated DELETE is held to the subject type only.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await service(cluster).writeRelationships(
+        WriteRelationshipsRequest.fromPartial({
+          updates: [
+            {
+              operation: RelationshipUpdate_Operation.OPERATION_TOUCH,
+              relationship: {
+                resource: { objectType: "document", objectId: "readme" },
+                relation: "viewer",
+                subject: userSubject("alice"),
+                optionalExpiresAt: new Date(Date.UTC(2099, 0, 1)),
+              },
+            },
+          ],
+        }),
+      );
+
+      await service(cluster).writeRelationships(
+        writeReq(RelationshipUpdate_Operation.OPERATION_DELETE, "readme", "alice"),
+      );
+
+      const writer = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({ relationshipFilter: { resourceType: "document" } }),
+        writer,
+      );
+      expect(writer.collected).toHaveLength(0);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ImportBulkRelationships rejects a schema-invalid row and loads nothing", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const request = ImportBulkRelationshipsRequest.fromPartial({
+        relationships: [
+          {
+            resource: { objectType: "document", objectId: "readme" },
+            relation: "viewer",
+            subject: userSubject("alice"),
+          },
+          {
+            resource: { objectType: "document", objectId: "readme" },
+            relation: "editor",
+            subject: { object: { objectType: "document", objectId: "x" }, optionalRelation: "" },
+          },
+        ],
+      });
+
+      const error = await expectRpcError(
+        service(cluster).importBulkRelationships(asyncStream(request)),
+      );
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+
+      const writer = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({ relationshipFilter: { resourceType: "document" } }),
+        writer,
+      );
+      expect(writer.collected).toHaveLength(0);
     } finally {
       await cluster.dispose();
     }
