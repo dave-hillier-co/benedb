@@ -30,6 +30,7 @@ import { SchemaSnapshot, type ISchemaProvider } from "@benedb/grains/i-schema-pr
 import { DeleteLimitExceededException } from "@benedb/grains/delete-limit-exceeded-exception";
 import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
 import type { RelationshipReads } from "@benedb/grains/relationship-reads";
+import { RelationshipSchemaViolationException } from "@benedb/grains/relationship-schema-violation-exception";
 import type {
   BulkExportRelationshipsArgs,
   BulkImportRelationshipsArgs,
@@ -1068,6 +1069,25 @@ describe("writeRelationships", () => {
       [new WriteConflictException("createExisting", "already existed"), status.ALREADY_EXISTS],
       [new WriteConflictException("serialization", "conflict"), status.ABORTED],
       [new SequencerOverloadedException("shed"), status.RESOURCE_EXHAUSTED],
+      // SpiceDB's write-validation codes: an unknown definition/relation is FAILED_PRECONDITION
+      // (NamespaceNotFoundError / RelationNotFoundError); a write to a permission or a disallowed
+      // subject type is INVALID_ARGUMENT (CannotWriteToPermissionError / InvalidSubjectTypeError).
+      [
+        new RelationshipSchemaViolationException("unknownDefinition", "object definition"),
+        status.FAILED_PRECONDITION,
+      ],
+      [
+        new RelationshipSchemaViolationException("unknownRelation", "relation/permission"),
+        status.FAILED_PRECONDITION,
+      ],
+      [
+        new RelationshipSchemaViolationException("cannotWriteToPermission", "permission"),
+        status.INVALID_ARGUMENT,
+      ],
+      [
+        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type"),
+        status.INVALID_ARGUMENT,
+      ],
     ];
 
     for (const [thrown, expected] of cases) {
@@ -2386,6 +2406,14 @@ describe("importBulkRelationships", () => {
       ],
       [new WriteConflictException("serialization", "conflict"), status.ABORTED],
       [new SequencerOverloadedException("shed"), status.RESOURCE_EXHAUSTED],
+      [
+        new RelationshipSchemaViolationException("unknownDefinition", "object definition"),
+        status.FAILED_PRECONDITION,
+      ],
+      [
+        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type"),
+        status.INVALID_ARGUMENT,
+      ],
     ];
 
     for (const [thrown, expected] of cases) {

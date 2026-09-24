@@ -9,13 +9,17 @@ import {
   CreateRelationshipExistsException,
   SerializationException,
 } from "@benedb/datastore/datastore-exceptions";
-import type { IDatastore } from "@benedb/datastore/i-datastore";
+import type { IDatastore, RevisionWithSchemaHash } from "@benedb/datastore/i-datastore";
 import type {
   RelationshipsFilter,
   SubjectRelationFilter,
   SubjectsSelector,
 } from "@benedb/datastore/relationships-filter";
 import { resolveRevision } from "@benedb/datastore/revision-resolver";
+import {
+  RelationshipTypeException,
+  validateRelationshipUpdates,
+} from "@benedb/engine/relationship-schema-validator";
 import { SchemaTypeException } from "@benedb/engine/schema-type-exception";
 import { validateSchemaTypes } from "@benedb/engine/schema-type-validator";
 import type { CompiledSchema } from "@benedb/schema/compiled-schema";
@@ -40,6 +44,7 @@ import type { ISnapshotScanner } from "./i-snapshot-scanner";
 import type { LogWatchHub } from "./log-watch-hub";
 import { PreconditionFailedException } from "./precondition-failed-exception";
 import { tryParsePreconditionFailure } from "./precondition-messages";
+import { RelationshipSchemaViolationException } from "./relationship-schema-violation-exception";
 import type {
   BulkImportRelationshipsArgs,
   BulkImportRelationshipsReply,
@@ -68,7 +73,7 @@ import {
 import { computeChecks, evaluateWithScanner } from "./schema-change-validator";
 import { SchemaWriteValidationException } from "./schema-write-validation-exception";
 import type { SequencerAdmission } from "./sequencer-admission";
-import { toFullFilter } from "./wire-convert";
+import { toFullFilter, toRelationship } from "./wire-convert";
 import { WriteConflictException } from "./write-conflict-exception";
 
 /**
@@ -123,6 +128,9 @@ const MAX_COMMIT_ATTEMPTS = 50;
 @grain({ stateless: true })
 export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
   readonly #deps: RelationshipsGrainOptions | undefined;
+
+  /** The last stored schema compiled for write validation, keyed by its stored hash. */
+  #storedSchema: { readonly hash: string; readonly schema: CompiledSchema } | undefined;
 
   /**
    * The C# takes its six collaborators as REQUIRED primary-constructor parameters, resolved by the
@@ -210,26 +218,10 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
       // snapshot; the gate then expects the empty hash (which is what an absent stored hash
       // matches).
       const storedBytes = await schemaSource.readSchemaAt(head.revision);
-      let current: CompiledSchema;
-      if (storedBytes === undefined) {
-        current = schemaProvider.current.schema;
-      } else {
-        // This compile is of the STORED schema (the diff base), never the caller's input: those
-        // bytes were validated when written, so a compile failure here is server-side corruption.
-        // It must surface as a loud Internal failure - the InvalidArgumentError at the top of this
-        // method is reserved for the caller's NEW schema, and blaming the caller for a corrupt
-        // stored schema would be wrong.
-        try {
-          current = compileSchema(new TextDecoder().decode(storedBytes));
-        } catch (ex) {
-          const message = ex instanceof Error ? ex.message : String(ex);
-          throw new Error(
-            "stored schema failed to compile; the persisted schema at the pinned revision is " +
-              `corrupt: ${message}`,
-            { cause: ex },
-          );
-        }
-      }
+      const current =
+        storedBytes === undefined
+          ? schemaProvider.current.schema
+          : compileStoredSchema(storedBytes);
 
       const checks = computeChecks(current, nextCompiled);
       await evaluateWithScanner(checks, scanner, head.revision);
@@ -302,18 +294,13 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
       throw new InvalidArgumentError("args is required");
     }
 
-    // One declarative commit: the sequencer evaluates the preconditions against the same snapshot
-    // the updates commit at and applies the updates with Create preserved, so a duplicate create is
-    // rejected there and nothing commits.
-    const reply = await this.#commitDeclarative({
-      preconditions: toCommitPreconditions(args.preconditions),
-      updates: args.updates,
-      deleteByFilter: undefined,
-      schemaBytes: undefined,
-      expectedSchemaHash: undefined,
-      counterChanges: [],
-      expectedHead: undefined,
-    });
+    // Validated against the stored schema and gated on its hash, in one retry loop: SpiceDB
+    // validates the updates inside the write transaction, so neither a stale live snapshot nor a
+    // concurrent schema write can let a tuple the schema forbids commit.
+    const reply = await this.#commitValidatedUpdates(
+      args.updates,
+      toCommitPreconditions(args.preconditions),
+    );
 
     if (reply.failure !== undefined) throw relationshipWriteFailure(reply.failure);
 
@@ -374,15 +361,8 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
       relationship: r,
     }));
 
-    const reply = await this.#commitDeclarative({
-      preconditions: [],
-      updates,
-      deleteByFilter: undefined,
-      schemaBytes: undefined,
-      expectedSchemaHash: undefined,
-      counterChanges: [],
-      expectedHead: undefined,
-    });
+    // SpiceDB's ImportBulkRelationships validates each row (create rule) against the schema too.
+    const reply = await this.#commitValidatedUpdates(updates, []);
 
     if (reply.failure !== undefined) throw relationshipWriteFailure(reply.failure);
 
@@ -487,9 +467,104 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
     }
   }
 
+  /**
+   * Validates relationship updates against the schema stored at a pinned head (SpiceDB's
+   * `ValidateRelationshipUpdates`) and submits them as one declarative commit gated on that
+   * schema's hash, the same `expectedSchemaHash` gate `writeSchema` uses. A schema write landing
+   * between validation and commit is rejected by the sequencer (`schemaHashMoved`), and the loop
+   * re-pins, re-reads and re-validates - so an update is only ever committed under the schema it
+   * was validated against. Exhaustion raises the retryable serialization conflict, as
+   * {@link commitDeclarative} does.
+   *
+   * @throws {RelationshipSchemaViolationException} for the first update the schema forbids.
+   */
+  async #commitValidatedUpdates(
+    updates: readonly RelationshipUpdateWire[],
+    preconditions: readonly CommitPreconditionWire[],
+  ): Promise<CommitReply> {
+    for (let attempt = 0; ; attempt++) {
+      const head = await this.#require.datastore.headRevision();
+      const schema = await this.#storedSchemaAt(head);
+
+      try {
+        validateRelationshipUpdates(
+          schema,
+          updates.map((u) => ({
+            relationship: toRelationship(u.relationship),
+            operation: u.operation,
+          })),
+        );
+      } catch (error) {
+        if (error instanceof RelationshipTypeException) {
+          throw new RelationshipSchemaViolationException(error.reason, error.message);
+        }
+        throw error;
+      }
+
+      const reply = await this.#commitDeclarative({
+        preconditions,
+        updates,
+        deleteByFilter: undefined,
+        schemaBytes: undefined,
+        // `head.SchemaHash ?? string.Empty`, exactly as `writeSchema`: an ABSENT current hash (the
+        // pre-first-schema seed window) matches only the EMPTY expected hash.
+        expectedSchemaHash: head.schemaHash ?? "",
+        counterChanges: [],
+        expectedHead: undefined,
+      });
+
+      if (reply.failure?.kind !== "schemaHashMoved") return reply;
+
+      if (attempt + 1 >= MAX_COMMIT_ATTEMPTS) {
+        throw new WriteConflictException("serialization", new SerializationException().message);
+      }
+    }
+  }
+
+  /**
+   * The compiled schema stored at `head` - the one `head.schemaHash` names - read through the
+   * `ISchemaSource` seam exactly as `writeSchema` pins its diff base. Pre-first-schema falls back to
+   * the host-seeded live snapshot. The compile is cached by stored hash (content-addressed, so it
+   * can never go stale) and reuses the live snapshot's compile when the stored text is the live
+   * text, so the steady state costs no read and no compile.
+   */
+  async #storedSchemaAt(head: RevisionWithSchemaHash): Promise<CompiledSchema> {
+    const { schemaProvider, schemaSource } = this.#require;
+    const cached = this.#storedSchema;
+    if (head.schemaHash !== undefined && cached?.hash === head.schemaHash) return cached.schema;
+
+    const storedBytes = await schemaSource.readSchemaAt(head.revision);
+    if (storedBytes === undefined) return schemaProvider.current.schema;
+
+    const live = schemaProvider.current;
+    const storedText = new TextDecoder().decode(storedBytes);
+    const schema = storedText === live.sourceText ? live.schema : compileStoredSchema(storedBytes);
+    if (head.schemaHash !== undefined) this.#storedSchema = { hash: head.schemaHash, schema };
+    return schema;
+  }
+
   async #mintToken(revision: IRevision, schemaHash: string): Promise<string> {
     const datastoreId = await this.#require.datastore.getUniqueId();
     return zedTokenFromRevision(revision, schemaHash, datastoreId).token;
+  }
+}
+
+/**
+ * Compiles the STORED schema bytes. Those bytes were validated when written, so a compile failure
+ * here is server-side corruption and must surface as a loud Internal failure - never as the
+ * InvalidArgumentError reserved for a caller's NEW schema, since blaming the caller for a corrupt
+ * stored schema would be wrong.
+ */
+function compileStoredSchema(storedBytes: Uint8Array): CompiledSchema {
+  try {
+    return compileSchema(new TextDecoder().decode(storedBytes));
+  } catch (ex) {
+    const message = ex instanceof Error ? ex.message : String(ex);
+    throw new Error(
+      "stored schema failed to compile; the persisted schema at the pinned revision is " +
+        `corrupt: ${message}`,
+      { cause: ex },
+    );
   }
 }
 

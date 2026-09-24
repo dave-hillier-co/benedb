@@ -27,6 +27,7 @@ import type {
 } from "@benedb/grains/i-permission-checker";
 import { IRelationshipsGrain, RELATIONSHIPS_GRAIN_KEY } from "@benedb/grains/i-relationships-grain";
 import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
+import { RelationshipSchemaViolationException } from "@benedb/grains/relationship-schema-violation-exception";
 import type { RelationshipReads } from "@benedb/grains/relationship-reads";
 import type {
   DeleteRelationshipsArgs,
@@ -1094,6 +1095,14 @@ describe("writeRelationships", () => {
         status.FAILED_PRECONDITION,
       ],
       [new SequencerOverloadedException("shed"), status.RESOURCE_EXHAUSTED],
+      [
+        new RelationshipSchemaViolationException("unknownDefinition", "object definition"),
+        status.FAILED_PRECONDITION,
+      ],
+      [
+        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type"),
+        status.INVALID_ARGUMENT,
+      ],
     ];
 
     for (const [thrown, expected] of cases) {

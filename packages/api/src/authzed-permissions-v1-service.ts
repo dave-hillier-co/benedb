@@ -24,6 +24,7 @@ import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
 import { DeleteLimitExceededException } from "@benedb/grains/delete-limit-exceeded-exception";
 import { PreconditionFailedException } from "@benedb/grains/precondition-failed-exception";
 import type { RelationshipReads } from "@benedb/grains/relationship-reads";
+import { RelationshipSchemaViolationException } from "@benedb/grains/relationship-schema-violation-exception";
 import type {
   PreconditionWire,
   RelationshipsFilterWire,
@@ -100,6 +101,7 @@ import { isCancellationError } from "@thresh/core/errors";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
 import { validateCaveatContextSize, validateWriteRelationships } from "./request-limits";
+import { relationshipSchemaViolationRpcError } from "./relationship-schema-violation-status";
 import { RpcError } from "./rpc-error";
 import {
   checkNamespaceAndRelations,
@@ -293,6 +295,9 @@ export class AuthzedPermissionsV1Service {
     } catch (error) {
       if (error instanceof PreconditionFailedException) {
         throw new RpcError(status.FAILED_PRECONDITION, error.message);
+      }
+      if (error instanceof RelationshipSchemaViolationException) {
+        throw relationshipSchemaViolationRpcError(error);
       }
       if (error instanceof WriteConflictException) {
         // CreateExisting -> AlreadyExists (SpiceDB CreateRelationshipExistsError): a permanent
@@ -840,6 +845,9 @@ export class AuthzedPermissionsV1Service {
       // a STRING minted from the reply's bigint, never a JS number.
       return { numLoaded: String(reply.numLoaded) };
     } catch (error) {
+      if (error instanceof RelationshipSchemaViolationException) {
+        throw relationshipSchemaViolationRpcError(error);
+      }
       if (error instanceof WriteConflictException) {
         throw new RpcError(toStatusCode(error.kind), error.message);
       }

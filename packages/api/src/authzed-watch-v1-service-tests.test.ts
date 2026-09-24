@@ -43,9 +43,12 @@ import { CollectingStreamWriter } from "./collecting-stream-writer";
  * pinned below, following the source's fixes (`21dc4d3`, `ad647b4`).
  */
 
-const SchemaText = `definition user {}
+// `document#viewer` allows `user with expiration` so the expiration round trip writes a tuple the
+// schema permits: SpiceDB rejects an expiring tuple on a relation without the expiration trait.
+const SchemaText = `use expiration
+definition user {}
 definition document {
-    relation viewer: user
+    relation viewer: user | user with expiration
     permission view = viewer
 }
 definition folder {

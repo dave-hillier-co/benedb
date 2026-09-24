@@ -167,6 +167,119 @@ describe("validateWriteRelationships", () => {
     ).not.toThrow();
   });
 
+  describe("malformed submessages", () => {
+    // SpiceDB's protoc-gen-validate text for a missing required submessage, verified against a
+    // real SpiceDB container.
+    const UPDATE_0 =
+      "invalid WriteRelationshipsRequest.Updates[0]: embedded message failed validation | caused by: ";
+    const RELATIONSHIP = "invalid RelationshipUpdate.Relationship: ";
+    const EMBEDDED = "embedded message failed validation | caused by: ";
+
+    it("rejects an update with no relationship at all", () => {
+      const malformed = RelationshipUpdate.fromPartial({
+        operation: RelationshipUpdate_Operation.OPERATION_CREATE,
+      });
+
+      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe(
+        UPDATE_0 + "invalid RelationshipUpdate.Relationship: value is required",
+      );
+    });
+
+    it("rejects a relationship with no resource", () => {
+      const malformed = update(
+        Relationship.fromPartial({
+          relation: "viewer",
+          subject: { object: { objectType: "user", objectId: "alice" } },
+        }),
+      );
+
+      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe(
+        UPDATE_0 + RELATIONSHIP + EMBEDDED + "invalid Relationship.Resource: value is required",
+      );
+    });
+
+    it("rejects a relationship with no subject", () => {
+      const malformed = update(
+        Relationship.fromPartial({
+          resource: { objectType: "document", objectId: "firstdoc" },
+          relation: "viewer",
+        }),
+      );
+
+      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe(
+        UPDATE_0 + RELATIONSHIP + EMBEDDED + "invalid Relationship.Subject: value is required",
+      );
+    });
+
+    it("rejects a subject with no object", () => {
+      const malformed = update(
+        Relationship.fromPartial({
+          resource: { objectType: "document", objectId: "firstdoc" },
+          relation: "viewer",
+          subject: { optionalRelation: "member" },
+        }),
+      );
+
+      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe(
+        UPDATE_0 +
+          RELATIONSHIP +
+          EMBEDDED +
+          "invalid Relationship.Subject: " +
+          EMBEDDED +
+          "invalid SubjectReference.Object: value is required",
+      );
+    });
+
+    it("rejects a malformed update even when an earlier update is well formed", () => {
+      const wellFormed = update(
+        Relationship.fromPartial({
+          resource: { objectType: "document", objectId: "firstdoc" },
+          relation: "viewer",
+          subject: { object: { objectType: "user", objectId: "alice" } },
+        }),
+      );
+      const malformed = RelationshipUpdate.fromPartial({
+        operation: RelationshipUpdate_Operation.OPERATION_CREATE,
+      });
+
+      const error = expectRpcError(() =>
+        validateWriteRelationships(request([wellFormed, malformed])),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      // The index names the malformed update, as protoc-gen-validate's message does.
+      expect(error.details).toBe(
+        "invalid WriteRelationshipsRequest.Updates[1]: embedded message failed validation | " +
+          "caused by: invalid RelationshipUpdate.Relationship: value is required",
+      );
+    });
+
+    it("reports a malformed update ahead of the update-count limit", () => {
+      // SpiceDB validates the request message before its handler checks the update count.
+      const updates = Array.from({ length: MAX_UPDATES_PER_WRITE + 1 }, () =>
+        RelationshipUpdate.fromPartial({ operation: RelationshipUpdate_Operation.OPERATION_TOUCH }),
+      );
+
+      const error = expectRpcError(() => validateWriteRelationships(request(updates)));
+
+      expect(error.details).toBe(
+        UPDATE_0 + "invalid RelationshipUpdate.Relationship: value is required",
+      );
+    });
+  });
+
   describe("update count", () => {
     const distinctUpdates = (count: number): RelationshipUpdate[] =>
       Array.from({ length: count }, (_unused, index) =>
