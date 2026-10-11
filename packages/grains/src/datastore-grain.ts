@@ -118,7 +118,8 @@ import "./revision-not-found-surrogate";
  *     `grainReferenceIdentity(...).grainId` string, because Thresh grain references (unlike
  *     Orleans') have no value equality - the C#'s `Subscribe(watcher, watcher)` would otherwise
  *     accumulate a duplicate registration per heartbeat instead of refreshing one.
- *  6. `Task.WhenAll` over shard and index calls becomes `Promise.all`.
+ *  6. `Task.WhenAll` over shard and index calls becomes `Promise.all`, in batches of
+ *     {@link MAX_CONCURRENT_SHARD_CALLS} through {@link inBatches}, as the C#'s `InBatches`.
  */
 @grain()
 export class DatastoreGrain
@@ -265,7 +266,7 @@ export class DatastoreGrain
         keys.add(graphShardGrainKeyBuild(key));
     }
 
-    const states = await Promise.all([...keys].map((key) => this.#currentShardState(meta, key)));
+    const states = await inBatches([...keys], (key) => this.#currentShardState(meta, key));
 
     const rows: StoredRelationshipWire[] = [];
     let floor = meta.gcFloor;
@@ -406,8 +407,8 @@ export class DatastoreGrain
       await this.#addFilterCandidates(request.deleteByFilter.filter, meta, candidates);
     this.#metrics?.recordCommitCandidates(candidates.size);
 
-    const shards = await Promise.all(
-      [...candidates].map((candidate) => this.#currentShardState(meta, candidate)),
+    const shards = await inBatches([...candidates], (candidate) =>
+      this.#currentShardState(meta, candidate),
     );
     const candidateRows: StoredRelationshipWire[] = [];
     // `readonly record struct CandidateRowIdentity` used as a Dictionary KEY: value equality over
@@ -850,16 +851,14 @@ export class DatastoreGrain
       }
     }
 
-    const projected = await Promise.all(
-      [...eventsByKey].map(async ([shardKey, events]) => ({
-        key: graphShardGrainKeyParse(shardKey),
-        populated: await this.getGrain(IGraphShardGrain, shardKey).project(
-          events,
-          through,
-          meta.gcFloor,
-        ),
-      })),
-    );
+    const projected = await inBatches([...eventsByKey], async ([shardKey, events]) => ({
+      key: graphShardGrainKeyParse(shardKey),
+      populated: await this.getGrain(IGraphShardGrain, shardKey).project(
+        events,
+        through,
+        meta.gcFloor,
+      ),
+    }));
 
     const buckets = new Map<string, string[]>();
     for (const { key, populated } of projected) {
@@ -872,8 +871,8 @@ export class DatastoreGrain
       }
       ids.push(key.objectId);
     }
-    await Promise.all(
-      [...buckets].map(([bucket, ids]) => this.getGrain(IShardIndexGrain, bucket).add(ids)),
+    await inBatches([...buckets], ([bucket, ids]) =>
+      this.getGrain(IShardIndexGrain, bucket).add(ids),
     );
 
     this.raiseEvent({ kind: "projected", through });
@@ -899,6 +898,25 @@ const GC_REMINDER_NAME = "mvcc-gc";
  * the retention of `readFrom`, whose floor is the projection boundary.
  */
 const FLUSH_INTERVAL = 64;
+
+/**
+ * The most shard or index grain calls the sequencer has in flight at once. A flush touches up to
+ * two keys per event, and every one of those grains persists through the storage provider:
+ * unbounded, a flush opens as many storage connections as it touches keys and exhausts the
+ * database's connection limit, failing the projection.
+ */
+const MAX_CONCURRENT_SHARD_CALLS = 16;
+
+/** Runs `call` over `items` with at most {@link MAX_CONCURRENT_SHARD_CALLS} in flight. */
+async function inBatches<T, TResult>(
+  items: readonly T[],
+  call: (item: T) => Promise<TResult>,
+): Promise<TResult[]> {
+  const results: TResult[] = [];
+  for (let i = 0; i < items.length; i += MAX_CONCURRENT_SHARD_CALLS)
+    results.push(...(await Promise.all(items.slice(i, i + MAX_CONCURRENT_SHARD_CALLS).map(call))));
+  return results;
+}
 
 /**
  * How long a watcher registration lives without a `subscribeWatch` refresh. 10x the hubs'
