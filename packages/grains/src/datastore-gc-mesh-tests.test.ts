@@ -178,7 +178,6 @@ async function buildCluster(
       let datastore: IDatastore | undefined;
       services = addSpiceportGrainServices(builder, {
         schemaText: SCHEMA,
-        datastoreStorage: storage,
         datastoreGcOptions: options,
         datastore: () =>
           (datastore ??= new GrainBackedDatastore(

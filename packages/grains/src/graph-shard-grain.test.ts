@@ -11,10 +11,12 @@ import type {
   PlacementContext,
   PlacementStrategy,
 } from "@thresh/runtime/placement/placement-strategy";
+import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { FullRelationshipsFilterWire, StoredRelationshipWire } from "./datastore-dtos";
+import type { ShardTailWire } from "./datastore-meta-state";
 import { GraphLocalityPlacementDirector } from "./graph-locality-placement-director";
 import { GRAPH_LOCALITY_PLACEMENT_STRATEGY } from "./graph-locality-placement";
 import { GraphShardGrain } from "./graph-shard-grain";
@@ -26,7 +28,7 @@ import { GRAPH_SHARD_STATE_EMPTY } from "./graph-shard-state";
 import { IDatastoreGrain } from "./i-datastore-grain";
 import { IGraphShardGrain } from "./i-graph-shard-grain";
 import type { LogEvent, LogSegment } from "./log-event";
-import type { RelationshipWire } from "./relationships-dtos";
+import type { RelationshipUpdateWire, RelationshipWire } from "./relationships-dtos";
 import { shardFoldApplyEvent, shardFoldVisibleAt } from "./shard-fold";
 import { toFullFilter, toRelationship } from "./wire-convert";
 // The surrogate is what lets `RevisionNotFoundException` cross the grain boundary as its own
@@ -81,11 +83,14 @@ import "./revision-not-found-surrogate";
 
 /** One recorded call the shard made to the singleton. */
 type SequencerCall =
-  | { readonly kind: "readShard"; readonly key: string; readonly at: number }
+  | { readonly kind: "readShardTail"; readonly key: string; readonly at: number }
   | { readonly kind: "readFrom"; readonly afterRevision: bigint; readonly maxCount: number };
 
 interface Script {
-  /** What `readShard` answers, per canonical shard-key string. Consumed in order when several. */
+  /**
+   * The state a hydration should arrive at, per canonical shard-key string. Consumed in order when
+   * several. `readShardTail` answers with the events that fold to it over an empty projection.
+   */
   readonly shards: Map<string, GraphShardState[]>;
   /** What `readFrom` answers (or throws), consumed in order; the last entry repeats. */
   readonly pages: Array<LogSegment | RevisionNotFoundException>;
@@ -98,13 +103,49 @@ function resetScript(): void {
   script = { shards: new Map(), pages: [], calls: [] };
 }
 
-/** Queues the answer(s) `readShard` gives for `key`, in order; the last queued answer repeats. */
+/** Queues the state(s) a hydration of `key` arrives at, in order; the last queued one repeats. */
 function stubShard(key: GraphShardKeyWire, ...states: GraphShardState[]): void {
   script.shards.set(graphShardKeyString(key), [...states]);
 }
 
 function readShardCalls(): readonly SequencerCall[] {
-  return script.calls.filter((c) => c.kind === "readShard");
+  return script.calls.filter((c) => c.kind === "readShardTail");
+}
+
+/**
+ * The tail a hydrating shard folds over its (here empty) projection to arrive at `state`: a touch
+ * at each row's created revision and a delete at its deleted revision, grouped into one event per
+ * revision (deletes first, so a same-revision replace folds exactly as the sequencer's would), with
+ * the head and floor `state` carries.
+ */
+function tailFor(state: GraphShardState): ShardTailWire {
+  const byRevision = new Map<
+    bigint,
+    { deletes: RelationshipUpdateWire[]; touches: RelationshipUpdateWire[] }
+  >();
+  const at = (revision: bigint) => {
+    let changes = byRevision.get(revision);
+    if (changes === undefined) {
+      changes = { deletes: [], touches: [] };
+      byRevision.set(revision, changes);
+    }
+    return changes;
+  };
+  for (const row of state.rows) {
+    at(row.createdRevision).touches.push({ operation: "touch", relationship: row.relationship });
+    if (row.deletedRevision !== undefined)
+      at(row.deletedRevision).deletes.push({ operation: "delete", relationship: row.relationship });
+  }
+  const events: LogEvent[] = [...byRevision.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([revision, changes]) => ({
+      revision,
+      relationshipChanges: [...changes.deletes, ...changes.touches],
+      schemaChange: undefined,
+      counterChanges: [],
+      gcFloor: undefined,
+    }));
+  return { events, headRevision: state.appliedRevision, gcFloor: state.gcFloor };
 }
 
 function readFromCalls(): ReadonlyArray<Extract<SequencerCall, { kind: "readFrom" }>> {
@@ -115,18 +156,18 @@ function readFromCalls(): ReadonlyArray<Extract<SequencerCall, { kind: "readFrom
 
 /**
  * The scripted stand-in for the cluster-singleton sequencer. Only the two members
- * `GraphShardGrain` reaches - `readShard` and `readFrom` - are implemented; every other
+ * `GraphShardGrain` reaches - `readShardTail` and `readFrom` - are implemented; every other
  * `IDatastoreGrain` member is deliberately absent, so a port that reaches for one (a per-read
  * `getHead` floor probe, say - the exact "fix" the GC-floor stance forbids) fails loudly here
  * rather than passing with the wrong design.
  */
 @grain()
 class ScriptedDatastoreGrain extends Grain {
-  async readShard(key: GraphShardKeyWire): Promise<GraphShardState> {
-    script.calls.push({ kind: "readShard", key: graphShardKeyString(key), at: Date.now() });
+  async readShardTail(key: GraphShardKeyWire): Promise<ShardTailWire> {
+    script.calls.push({ kind: "readShardTail", key: graphShardKeyString(key), at: Date.now() });
     const queued = script.shards.get(graphShardKeyString(key));
-    if (queued === undefined || queued.length === 0) return GRAPH_SHARD_STATE_EMPTY;
-    return queued.length === 1 ? queued[0]! : queued.shift()!;
+    if (queued === undefined || queued.length === 0) return tailFor(GRAPH_SHARD_STATE_EMPTY);
+    return tailFor(queued.length === 1 ? queued[0]! : queued.shift()!);
   }
 
   async readFrom(afterRevision: bigint, maxCount: number): Promise<LogSegment> {
@@ -177,6 +218,8 @@ async function start(): Promise<Fixture> {
     ],
     configureSilo: (builder) => {
       builder.addPlacementStrategy(GRAPH_LOCALITY_PLACEMENT_STRATEGY, placement);
+      // The shard grain persists its projection through the `datastore` provider.
+      builder.addStorage("datastore", new MemoryGrainStorage());
     },
   });
   fixture = { cluster, placement };
@@ -280,7 +323,7 @@ describe("GraphShardGrain", () => {
      * the compaction floor and a from-zero replay would silently miss compacted history. A port
      * that "simplifies" hydration into a log replay passes almost every other case here.
      */
-    it("hydrates a cold shard via readShard, never by replaying readFrom from zero", async () => {
+    it("hydrates a cold shard via readShardTail, never by replaying readFrom from zero", async () => {
       const { cluster } = await start();
       stubShard(DOC, state(100n, [row(wire("user", "alice"), 50n)]));
 

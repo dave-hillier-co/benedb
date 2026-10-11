@@ -15,93 +15,61 @@ import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
 import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 import type { RevisionChange } from "@benedb/datastore/watch";
 import { WatchContent } from "@benedb/datastore/watch";
-import type { GrainStorage, StateHolder } from "@thresh/core/grain-storage";
-import { grainReferenceIdentity } from "@thresh/core/grain-reference";
 import { JournaledGrain } from "@thresh/core/journaled-grain";
 import { IManagementGrain } from "@thresh/core/management-grain";
 
 import type { CommitPreconditionWire, CommitRequest } from "./commit-contract";
-import type {
-  DatastoreMetaEntry,
-  KeyIndexBucketEntry,
-  KeyIndexDeltaEntry,
-} from "./datastore-meta-state";
-import {
-  DEFAULT_BUCKET_COUNT,
-  KEY_INDEX_TOMBSTONE,
-  datastoreMetaStateEmpty,
-  keyIndexLayoutBucketOf,
-} from "./datastore-meta-state";
-import type { LogHeadEntry, StoredRelationshipWire } from "./datastore-dtos";
-import { DatastoreGrain, datastoreGrainInternals } from "./datastore-grain";
+import { datastoreMetaStateEmpty } from "./datastore-meta-state";
+import type { StoredRelationshipWire } from "./datastore-dtos";
+import { DatastoreGrain } from "./datastore-grain";
 import { graphShardGrainKeyBuild } from "./graph-shard-grain-key";
-import { graphShardKeyForResource, graphShardKeyForSubject } from "./graph-shard-key";
-import type { GraphShardState } from "./graph-shard-state";
+import { graphShardKeyForResource } from "./graph-shard-key";
 import { GRAPH_SHARD_STATE_EMPTY } from "./graph-shard-state";
 import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "./i-datastore-grain";
-import { IGraphShardGrain } from "./i-graph-shard-grain";
+import { IGraphShardGrain, IShardIndexGrain } from "./i-graph-shard-grain";
 import type { LogEvent } from "./log-event";
 import { MeshTestCluster } from "./mesh-test-cluster";
 import type { RelationshipUpdateWire } from "./relationships-dtos";
 import { shardFoldApplyEvent } from "./shard-fold";
+import { shardIndexList } from "./shard-index-grain";
 import { ShardedGraphReader } from "./sharded-graph-reader";
 import { toFullFilter, toRelationship, toWire } from "./wire-convert";
 
 /**
- * Ported from Spiceport `tests/Spiceport.Grains.Tests/ThinSequencerTests.cs`.
+ * Ported from Spiceport `tests/Spiceport.Grains.Tests/ProjectionSequencerTests.cs`.
  *
- * Closing gates for the THIN-SEQUENCER flush protocol (docs/graph-sharded-datastore.md section 6):
- * the `DatastoreGrain` journals only the small `DatastoreMetaState`, keeps a dirty buffer of touched
- * shard keys, and every `FLUSH_INTERVAL` (64) events writes the dirty keys' version-qualified
- * `shard/{flushVersion}/{dir}/{type}/{id}` rows, writes a `meta/{version}` row carrying the chunked
- * key-index layout, and trims the log.
- *
- * These tests pin: flush-boundary integrity (reads at head through the sharded reader AND the scan
- * seam stay exact after the buffer has been flushed and the log trimmed), the memory ceiling itself
- * (the journaled state type carries NO relationship-row collections), the clean-key relabel rule (a
- * stored row's content is complete unless an event touched its key - `shard-fold-lemma-tests`), lazy
- * row-GC (floor enforced on every serve path while stored rows compact only at their next
- * dirty+flush), the partial write base (Commit candidate-key resolution pulls in keys named only by
- * precondition filters, forward AND reverse), and recovery fidelity across a genuine deactivation
- * (head/schema/counters/rows/Watch tail all rebuilt from head+meta+shard rows+log tail).
+ * Closing gates for the journaled sequencer and its shard projection
+ * (docs/graph-sharded-datastore.md): the `DatastoreGrain` journals only the small
+ * `DatastoreMetaState` plus the pending tail, and every `FLUSH_INTERVAL` (64) events projects the
+ * tail into the shard grains it touches and the shard index. These tests pin: flush-boundary
+ * integrity (reads at head through the sharded reader AND the scan seam stay exact across a
+ * projection), the memory ceiling (the journaled state carries NO relationship-row collections),
+ * the clean-key relabel rule (a projected state is complete unless a pending event touches its key
+ * - `shard-fold-lemma-tests`), lazy row-GC (floor enforced on every serve path while projected
+ * rows compact only at their key's next projection), the partial write base (Commit candidate-key
+ * resolution pulls in keys named only by precondition filters, forward AND reverse), projection
+ * idempotence, and recovery fidelity across a genuine deactivation.
  *
  * PORT DECISIONS.
  *
- *  1. STORAGE HANDLE. `cluster.Services.GetRequiredKeyedService<IGrainStorage>("datastore")` has no
- *     counterpart: Thresh has no keyed DI and the ported wiring passes the provider in as
- *     `SpiceportGrainServicesOptions.datastoreStorage`. `MeshTestCluster` now exposes the ONE shared
- *     provider it constructs as {@link MeshTestCluster.datastoreStorage} (its port decision 10), so
- *     these gates read the rows the grain actually wrote rather than a test-owned duplicate store
- *     that would grade nothing. `IGrainStorage.ReadStateAsync(name, id, entry)` ->
- *     `GrainStorage.read(name, id, holder)`, `GrainState<T>.RecordExists`/`.State` -> the
- *     `StateHolder<T>`'s `exists`/`value`.
- *  2. `((GrainReference)grain).GrainId` -> `grainReferenceIdentity(grain).grainId`, Thresh's
- *     reference-identity accessor - the same substitution `datastore-interleaved-read-tests` makes.
- *     The state NAMES are storage-visible strings and are transcribed verbatim: `head`,
- *     `meta/{version}`, `log/{version}`, `indexb/{version}/{dir}/{bucket}`, `indexd/{version}`.
- *  3. `ForceActivationCollection(TimeSpan.Zero)` + `GetDetailedGrainStatistics()` -> Thresh's
+ *  1. `ForceActivationCollection(TimeSpan.Zero)` + `GetDetailedGrainStatistics()` -> Thresh's
  *     `IManagementGrain` at the integer key `0n`. The "the sequencer activation is really gone"
  *     assertion stays a CASE-INSENSITIVE SUBSTRING on the registered grain-type name, but the
  *     literal shortens from `"datastoregrain"` to {@link SEQUENCER_GRAIN_TYPE_MATCH}: Thresh
  *     registers a grain under its class name MINUS the `Grain` suffix, so the C#'s spelling would
  *     never hit and the control would pass vacuously - exactly the failure `cold-start-tests`
  *     records for `graphshardgrain`.
- *  4. `DatastoreGrain.CreationBucketCount` (a mutable static the C# overrides and restores in a
- *     `finally`) -> the {@link datastoreGrainInternals} holder, overridden and restored in the same
- *     `finally`. An ES module binding cannot be reassigned from outside, hence the holder; the
- *     restore is what keeps the override from leaking into the neighbouring cases.
- *  5. THE REFLECTION TRIPWIRE IS RE-EXPRESSED STRUCTURALLY - see the comment on
+ *  2. THE REFLECTION TRIPWIRE IS RE-EXPRESSED STRUCTURALLY - see the comment on
  *     `Journaled_state_carries_no_relationship_rows_anywhere_in_its_shape`. TypeScript erases types,
  *     so there is no type graph to walk; the claim is re-made over VALUES.
- *  6. Caveat-context assertions become plain `ReadonlyMap` lookups (`'eu'`, `7`) rather than
+ *  3. Caveat-context assertions become plain `ReadonlyMap` lookups (`'eu'`, `7`) rather than
  *     `JsonElement.GetRawText()` strings: the port carries caveat context as a
  *     `ReadonlyMap<string, unknown>` of decoded JSON values, so there is no raw text to compare.
- *     `Expiry` stays a FIXED instant, transcribed as its epoch-nanos `bigint` (the representation
- *     `Relationship.optionalExpiration` chose), and must survive recovery byte-exact.
- *  7. `await using var cluster` -> an explicit `try { ... } finally { await cluster.dispose(); }`.
- *  8. Protocol constants are transcribed, never rounded: FlushInterval 64, the 67-/130-commit loops,
- *     the two flush boundaries (64 and 128) that leave the chunked key index genuinely
- *     MID-ROTATION, and the three-boundary full rotation at B=2.
+ *     `Expiry` stays a FIXED instant, transcribed as its epoch-nanos `bigint`, and must survive
+ *     recovery byte-exact.
+ *  4. `await using var cluster` -> an explicit `try { ... } finally { await cluster.dispose(); }`.
+ *  5. Protocol constants are transcribed, never rounded: FlushInterval 64, the 67-/130-commit
+ *     loops, the two flush boundaries (64 and 128).
  */
 
 const requireFromHere = createRequire(import.meta.url);
@@ -169,14 +137,14 @@ function canonical(rel: Relationship): string {
   );
 }
 
-/** Reads one raw storage row of the sequencer through the SAME provider the grain uses. */
-async function readRow<T>(cluster: MeshTestCluster, stateName: string): Promise<StateHolder<T>> {
-  const storage: GrainStorage = cluster.datastoreStorage;
-  const identity = grainReferenceIdentity(sequencer(cluster));
-  expect(identity, "the sequencer reference carries no grain identity").toBeDefined();
-  const entry: StateHolder<T> = { value: undefined as unknown as T, exists: false };
-  await storage.read(stateName, identity!.grainId, entry);
-  return entry;
+/** The object ids the shard index lists for a forward type. */
+async function listForwardIds(cluster: MeshTestCluster, type: string): Promise<string[]> {
+  const keys = await shardIndexList(
+    (key) => cluster.grainFactory.getGrain(IShardIndexGrain, key),
+    "forward",
+    type,
+  );
+  return keys.map((key) => key.objectId);
 }
 
 /** Drops every activation in the cluster and proves the sequencer's is really gone. */
@@ -193,26 +161,17 @@ async function forceCollectAllActivations(cluster: MeshTestCluster): Promise<voi
   ).toEqual([]);
 }
 
-/** The single live subject id of a shard state (the C#'s local `LiveSubject`). */
-function liveSubject(shard: GraphShardState): string {
-  const live = shard.rows.filter((r) => r.deletedRevision === undefined);
-  expect(live).toHaveLength(1);
-  return live[0]!.relationship.subjectId;
-}
-
-describe("ThinSequencerTests", () => {
-  // ---- (a) Flush-boundary integrity: dirty-buffer flush + log trim + meta write. ----
+describe("ProjectionSequencerTests", () => {
+  // ---- (a) Flush-boundary integrity across a projection. ----
 
   /**
    * More than `FLUSH_INTERVAL` (64) commits across several keys - creates, a delete, a touch, and a
    * post-flush key - then, WITHOUT any restart, reads at head through BOTH the shard mesh
    * (`ShardedGraphReader`) and the scan seam (`ISnapshotScanner`) must equal the
-   * independently-tracked expectation. The storage-level probes then pin that the flush protocol
-   * actually ran: the head row's `snapshotVersion` sits on the 64-boundary, the `meta/{version}` row
-   * exists, the seed `meta/0` row and every log entry at or below the flush boundary are trimmed,
-   * and the post-flush log tail is still present.
+   * independently-tracked expectation. Probes of the shard grains' projected state and the shard
+   * index then pin that the projection actually ran, and that an explicit flush projects the rest.
    */
-  it("Reads_stay_exact_after_the_dirty_buffer_flush_trims_the_log", async () => {
+  it("Reads_stay_exact_across_a_projection_flush", async () => {
     const cluster = await MeshTestCluster.create(SCHEMA);
     try {
       const ds = cluster.datastore;
@@ -287,328 +246,32 @@ describe("ThinSequencerTests", () => {
 
       // Storage-level: the flush protocol really ran. 70 commits => logVersion 70, flush boundary
       // 64.
-      const headRow = await readRow<LogHeadEntry>(cluster, "head");
-      expect(headRow.exists).toBe(true);
-      const logVersion = headRow.value.logVersion;
-      const flushVersion = headRow.value.snapshotVersion;
-      expect(
-        logVersion >= 70,
-        `expected at least the 70 test commits, saw logVersion ${logVersion}`,
-      ).toBe(true);
-      // The meta row is the latest 64-boundary.
-      expect(flushVersion).toBe(logVersion - (logVersion % 64));
-      expect(flushVersion >= 64, "no flush happened - the gate exercised nothing").toBe(true);
-
-      const metaRow = await readRow<DatastoreMetaEntry>(cluster, `meta/${flushVersion}`);
-      expect(metaRow.exists, "the flush's meta/{version} row is missing").toBe(true);
-      expect(metaRow.value.flushedThroughLogVersion).toBe(flushVersion);
-
-      // Durable layout v2 (docs/scalability-program.md 3.4): the meta row is SLIM - no inline key
-      // maps (the cardinality-independence tripwire) - and carries the chunked-index layout; the
-      // flush wrote its delta row and rotated bucket 0 in both directions (the rotation cursor
-      // starts at 0, and this store has seen exactly one flush).
-      expect(metaRow.value.indexLayout).toBeDefined();
-      expect([...metaRow.value.meta.forwardKeys]).toEqual([]);
-      expect([...metaRow.value.meta.reverseKeys]).toEqual([]);
-      expect(metaRow.value.indexLayout!.bucketCount).toBe(DEFAULT_BUCKET_COUNT);
-      expect(metaRow.value.indexLayout!.deltaVersions).toContain(flushVersion);
-      const deltaRow = await readRow<KeyIndexDeltaEntry>(cluster, `indexd/${flushVersion}`);
-      expect(deltaRow.exists, "the flush's indexd/{version} delta row is missing").toBe(true);
-      // Every key flushed in the window rides the delta at the flush version (k0..k4 were all
-      // dirty).
-      const k0Forward = graphShardGrainKeyBuild(graphShardKeyForResource("doc", "k0"));
-      expect(deltaRow.value.forwardEntries.get(k0Forward)).toBe(flushVersion);
-      expect(
-        (await readRow<KeyIndexBucketEntry>(cluster, `indexb/${flushVersion}/f/0`)).exists,
-        "the rotated forward bucket row is missing",
-      ).toBe(true);
-      expect(
-        (await readRow<KeyIndexBucketEntry>(cluster, `indexb/${flushVersion}/r/0`)).exists,
-        "the rotated reverse bucket row is missing",
-      ).toBe(true);
-
-      // Log trim: entries at or below the boundary cleared; the post-flush tail retained; the seed
-      // meta/0 row cleared once superseded.
-      expect((await readRow<LogEvent>(cluster, "log/1")).exists, "log/1 survived compaction").toBe(
-        false,
+      // The projection really ran: the pending tail was flushed at 64 events, so k0..k4 (all
+      // touched before the flush) have projected state of their own, and the index lists them. k0's
+      // projected rows hold u0 live - its delete (commit 68) is still pending, folded over at read
+      // time.
+      const k0Shard = cluster.grainFactory.getGrain(
+        IGraphShardGrain,
+        graphShardGrainKeyBuild(graphShardKeyForResource("doc", "k0")),
       );
+      let k0 = await k0Shard.readProjected();
       expect(
-        (await readRow<LogEvent>(cluster, `log/${flushVersion}`)).exists,
-        "the flush-boundary log entry survived compaction",
-      ).toBe(false);
-      expect(
-        (await readRow<LogEvent>(cluster, `log/${flushVersion + 1}`)).exists,
-        "the first post-flush log entry is missing - the tail was over-trimmed",
+        k0.rows.some((r) => r.relationship.subjectId === "u0" && r.deletedRevision === undefined),
       ).toBe(true);
+      let listed = await listForwardIds(cluster, "doc");
+      for (const id of ["k0", "k1", "k2", "k3", "k4"]) expect(listed).toContain(id);
+      expect(listed).not.toContain("k9"); // still only pending
+
+      // An explicit flush projects the rest: k0's projected state now carries the tombstone.
+      await sequencer(cluster).flushProjection();
+      k0 = await k0Shard.readProjected();
       expect(
-        (await readRow<DatastoreMetaEntry>(cluster, "meta/0")).exists,
-        "meta/0 survived compaction",
-      ).toBe(false);
+        k0.rows.some((r) => r.relationship.subjectId === "u0" && r.deletedRevision !== undefined),
+      ).toBe(true);
+      listed = await listForwardIds(cluster, "doc");
+      expect(listed).toContain("k9");
     } finally {
       await cluster.dispose();
-    }
-  }, 300_000);
-
-  /**
-   * The TOMBSTONE path of the chunked key index (durable layout v2): a key whose shard state EMPTIES
-   * at a flush (its rows GC-collected) is dropped from the index with an explicit tombstone entry in
-   * that flush's `indexd/{version}` delta row - and a recovery that reconstructs the index must
-   * REPLAY that tombstone, or the dropped key would resurrect from the earlier delta that added it.
-   * The probed keys are chosen so their buckets are NOT among the ones the two flushes rotate
-   * (buckets 0 and 1), making the delta overlay the ONLY durable carrier of both the key's addition
-   * and its removal - the reconstruction path this test pins deterministically.
-   */
-  it("Key_removed_at_flush_disappears_from_the_index_after_recovery_replays_its_tombstone_delta", async () => {
-    // Window=Zero lets runGc advance the floor to the current head, so dead rows below it are
-    // physically collected at the key's next flush - the only way a key's shard state empties.
-    const cluster = await MeshTestCluster.create(SCHEMA, { gcWindow: { ms: 0 } });
-    try {
-      const ds = cluster.datastore;
-      const grain = sequencer(cluster);
-
-      const bucket = (key: string): number => keyIndexLayoutBucketOf(key, DEFAULT_BUCKET_COUNT);
-      const findId = (prefix: string, keyOf: (id: string) => string): string => {
-        for (let i = 0; i < 10_000; i += 1) {
-          const id = `${prefix}${i}`;
-          if (bucket(keyOf(id)) > 1) return id;
-        }
-        throw new Error(`no ${prefix} id lands outside the rotated buckets`);
-      };
-      const goneId = findId("gone", (id) =>
-        graphShardGrainKeyBuild(graphShardKeyForResource("doc", id)),
-      );
-      const victimId = findId("victim", (id) =>
-        graphShardGrainKeyBuild(graphShardKeyForSubject("user", id)),
-      );
-      const goneForwardKey = graphShardGrainKeyBuild(graphShardKeyForResource("doc", goneId));
-      const victimReverseKey = graphShardGrainKeyBuild(graphShardKeyForSubject("user", victimId));
-
-      // Commits 1-2: create and delete a first row on the key, then 62 fillers cross the first flush
-      // boundary (64): the key's row (a retained tombstoned MVCC row - the floor is still 0) becomes
-      // durable and the key enters the durable index ONLY via delta 64 (its bucket is never
-      // rotated).
-      await write(ds, row(goneId, "seed"));
-      await write(ds, row(goneId, "seed"), "delete");
-      for (let i = 0; i < 62; i += 1) await write(ds, row(`tf${i}`, "filler"));
-
-      // Commits 65-66 re-dirty the key (create+delete the probed victim subject), then a GC puts the
-      // floor above every delete: at the SECOND flush the key's collected state is EMPTY, so the
-      // flush drops it from the index and records tombstones in delta 128 - for the forward key AND
-      // the victim's reverse key (also dirtied to empty in this window, also in an unrotated
-      // bucket).
-      await write(ds, row(goneId, victimId));
-      await write(ds, row(goneId, victimId), "delete");
-      expect(await grain.runGc()).toBeDefined();
-      for (let i = 0; i < 61; i += 1) await write(ds, row(`tg${i}`, "filler"));
-
-      // The second flush really ran and its delta carries the explicit tombstones.
-      const headRow = await readRow<LogHeadEntry>(cluster, "head");
-      expect(headRow.exists).toBe(true);
-      const flushVersion = headRow.value.snapshotVersion;
-      expect(
-        flushVersion >= 128,
-        `expected the second flush boundary, saw snapshotVersion ${flushVersion}`,
-      ).toBe(true);
-      const deltaRow = await readRow<KeyIndexDeltaEntry>(cluster, `indexd/${flushVersion}`);
-      expect(deltaRow.exists, "the second flush's delta row is missing").toBe(true);
-      expect(deltaRow.value.forwardEntries.get(goneForwardKey)).toBe(KEY_INDEX_TOMBSTONE);
-      expect(deltaRow.value.reverseEntries.get(victimReverseKey)).toBe(KEY_INDEX_TOMBSTONE);
-
-      const headBefore = await grain.getHead();
-
-      // Drop every activation so recovery reconstructs the index from bucket rows + deltas.
-      await forceCollectAllActivations(cluster);
-
-      // Negative control (lost state re-seeds a different head), then the tombstone's observable:
-      // the removed key resolves to EMPTY through the reconstructed index - forward and reverse.
-      const headAfter = await grain.getHead();
-      expect(headAfter.head).toBe(headBefore.head);
-      expect((await grain.readShard(graphShardKeyForResource("doc", goneId))).rows).toEqual([]);
-      expect((await grain.readShard(graphShardKeyForSubject("user", victimId))).rows).toEqual([]);
-      const sharded: IGraphReader = new ShardedGraphReader(cluster.grainFactory, headAfter.head);
-      expect(
-        await collect(
-          sharded.queryRelationships({
-            optionalResourceType: "doc",
-            optionalResourceIds: [goneId],
-          }),
-        ),
-      ).toEqual([]);
-      expect(
-        await collect(
-          sharded.reverseQueryRelationships({
-            subjectType: "user",
-            optionalSubjectIds: [victimId],
-          }),
-        ),
-      ).toEqual([]);
-    } finally {
-      await cluster.dispose();
-    }
-  }, 300_000);
-
-  /**
-   * The REPLAY-ORDER discriminator for the pending-delta overlay: a key is deleted so flush A
-   * records its TOMBSTONE in delta A, then RECREATED so flush B records a LIVE entry in delta B -
-   * and after recovery the key must be SERVED at head. Ascending replay applies the tombstone first
-   * and the live entry last (correct); a descending or otherwise disordered replay would apply the
-   * tombstone LAST and visibly lose the recreated key. The key's bucket is chosen provably UNROTATED
-   * across both flushes (only buckets 0 and 1 are rotated), so the two delta rows are the only
-   * durable carriers of both facts - the ordering is the whole story.
-   */
-  it("Recreated_key_survives_recovery_because_delta_replay_is_ascending", async () => {
-    // Window=Zero lets runGc put the floor at head, so the pre-flush delete's rows physically
-    // collect at flush A and the key's state EMPTIES there (the tombstone-producing condition).
-    const cluster = await MeshTestCluster.create(SCHEMA, { gcWindow: { ms: 0 } });
-    try {
-      const ds = cluster.datastore;
-      const grain = sequencer(cluster);
-
-      const bucket = (key: string): number => keyIndexLayoutBucketOf(key, DEFAULT_BUCKET_COUNT);
-      let phoenixId: string | undefined;
-      for (let i = 0; i < 10_000 && phoenixId === undefined; i += 1) {
-        const id = `phoenix${i}`;
-        if (bucket(graphShardGrainKeyBuild(graphShardKeyForResource("doc", id))) > 1)
-          phoenixId = id;
-      }
-      expect(phoenixId, "no phoenix id lands outside the rotated buckets").toBeDefined();
-      const phoenixForwardKey = graphShardGrainKeyBuild(
-        graphShardKeyForResource("doc", phoenixId!),
-      );
-
-      // Window 1 (commits 1..64): create + delete the key, GC the floor past the delete, fill to the
-      // boundary. Flush A (version 64) collects the key to empty and tombstones it in delta 64.
-      await write(ds, row(phoenixId!, "seed"));
-      await write(ds, row(phoenixId!, "seed"), "delete");
-      expect(await grain.runGc()).toBeDefined();
-      for (let i = 0; i < 61; i += 1) await write(ds, row(`ra${i}`, "filler"));
-
-      // Window 2 (commits 65..128): RECREATE the key, fill to the next boundary. Flush B (version
-      // 128) records the live entry in delta 128.
-      await write(ds, row(phoenixId!, "back"));
-      for (let i = 0; i < 63; i += 1) await write(ds, row(`rb${i}`, "filler"));
-
-      // Both flushes ran, and the two deltas carry tombstone-then-live for the SAME key.
-      const headRow = await readRow<LogHeadEntry>(cluster, "head");
-      expect(headRow.exists).toBe(true);
-      expect(headRow.value.snapshotVersion).toBe(128);
-      const deltaA = await readRow<KeyIndexDeltaEntry>(cluster, "indexd/64");
-      expect(deltaA.exists, "flush A's delta row is missing").toBe(true);
-      expect(deltaA.value.forwardEntries.get(phoenixForwardKey)).toBe(KEY_INDEX_TOMBSTONE);
-      const deltaB = await readRow<KeyIndexDeltaEntry>(cluster, "indexd/128");
-      expect(deltaB.exists, "flush B's delta row is missing").toBe(true);
-      expect(deltaB.value.forwardEntries.get(phoenixForwardKey)).toBe(128);
-
-      const headBefore = await grain.getHead();
-
-      // Drop every activation so recovery reconstructs the index from bucket rows + delta overlay.
-      await forceCollectAllActivations(cluster);
-
-      // The recreated key is SERVED at head: delta 128's live entry was applied after delta 64's
-      // tombstone. Descending replay would resolve the key to empty here.
-      const headAfter = await grain.getHead();
-      expect(headAfter.head).toBe(headBefore.head);
-      const shard = await grain.readShard(graphShardKeyForResource("doc", phoenixId!));
-      expect(liveSubject(shard)).toBe("back");
-      const sharded: IGraphReader = new ShardedGraphReader(cluster.grainFactory, headAfter.head);
-      expect(
-        await collect(
-          sharded.queryRelationships({
-            optionalResourceType: "doc",
-            optionalResourceIds: [phoenixId!],
-          }),
-        ),
-      ).toEqual([canonical(row(phoenixId!, "back"))]);
-    } finally {
-      await cluster.dispose();
-    }
-  }, 300_000);
-
-  /**
-   * Delta PRUNING made test-reachable: with the creation bucket count lowered to 2 (the count is
-   * stored in the layout, so this store honors B=2 for its whole life; changing it for an existing
-   * store is forbidden), three flush boundaries drive the rotation over every bucket twice -
-   * `deltaFloorVersion` advances (the MIN over both directions' bucket versions) and the deltas at
-   * or below it are pruned from the layout and cleared from storage. Pins, across a genuine
-   * deactivation: a key tombstoned in a since-PRUNED delta stays gone (its absence carried by the
-   * post-tombstone bucket rows alone), a key whose index entry survives ONLY via bucket rows (its
-   * delta pruned) is still served, and keys from every window survive. A Max-instead-of-Min floor or
-   * an over-eager prune loses one of these observably - this is the only test path that reaches the
-   * floor computation at all.
-   */
-  it("Full_rotation_prunes_deltas_and_recovery_still_serves_exactly", async () => {
-    const originalBucketCount = datastoreGrainInternals.creationBucketCount;
-    datastoreGrainInternals.creationBucketCount = 2;
-    try {
-      const cluster = await MeshTestCluster.create(SCHEMA, { gcWindow: { ms: 0 } });
-      try {
-        const ds = cluster.datastore;
-        const grain = sequencer(cluster);
-
-        // Window 1 (commits 1..64): a key that tombstones at the first flush (create + delete below
-        // the GC floor), a keeper whose only index carriers after pruning are bucket rows, the GC,
-        // and fillers to the boundary. Flush 64 rewrites bucket 0.
-        await write(ds, row("gone", "seed"));
-        await write(ds, row("gone", "seed"), "delete");
-        await write(ds, row("keeper", "keep"));
-        expect(await grain.runGc()).toBeDefined();
-        for (let i = 0; i < 60; i += 1) await write(ds, row(`w1-${i}`, "filler"));
-
-        // Windows 2 and 3 (commits 65..192): flush 128 rewrites bucket 1 - the rotation is FULL, the
-        // floor advances to min(64, 128) = 64 and delta 64 is pruned. Flush 192 rewrites bucket 0
-        // again - floor min(192, 128) = 128, delta 128 pruned.
-        for (let i = 0; i < 64; i += 1) await write(ds, row(`w2-${i}`, "filler"));
-        for (let i = 0; i < 64; i += 1) await write(ds, row(`w3-${i}`, "filler"));
-
-        // Storage-level: the layout really rotated fully and pruned both early deltas.
-        const headRow = await readRow<LogHeadEntry>(cluster, "head");
-        expect(headRow.exists).toBe(true);
-        expect(headRow.value.snapshotVersion).toBe(192);
-        const metaRow = await readRow<DatastoreMetaEntry>(cluster, "meta/192");
-        expect(metaRow.exists, "the third flush's meta row is missing").toBe(true);
-        const layout = metaRow.value.indexLayout;
-        expect(layout).toBeDefined();
-        expect(layout!.bucketCount).toBe(2);
-        expect(layout!.deltaFloorVersion).toBe(128);
-        expect([...layout!.deltaVersions]).toEqual([192]);
-        expect(
-          (await readRow<KeyIndexDeltaEntry>(cluster, "indexd/64")).exists,
-          "delta 64 survived pruning",
-        ).toBe(false);
-        expect(
-          (await readRow<KeyIndexDeltaEntry>(cluster, "indexd/128")).exists,
-          "delta 128 survived pruning",
-        ).toBe(false);
-
-        const headBefore = await grain.getHead();
-
-        // Deactivate + reactivate: recovery must reconstruct the index from the two bucket rows
-        // (versions 192 and 128) plus the single pending delta 192 - deltas 64/128 are gone.
-        await forceCollectAllActivations(cluster);
-
-        const headAfter = await grain.getHead();
-        expect(headAfter.head).toBe(headBefore.head);
-
-        // The key tombstoned in the pruned delta stays gone; the bucket-carried keys - one per
-        // window - are all still served.
-        expect((await grain.readShard(graphShardKeyForResource("doc", "gone"))).rows).toEqual([]);
-        expect(liveSubject(await grain.readShard(graphShardKeyForResource("doc", "keeper")))).toBe(
-          "keep",
-        );
-        expect(liveSubject(await grain.readShard(graphShardKeyForResource("doc", "w1-0")))).toBe(
-          "filler",
-        );
-        expect(liveSubject(await grain.readShard(graphShardKeyForResource("doc", "w2-0")))).toBe(
-          "filler",
-        );
-        expect(liveSubject(await grain.readShard(graphShardKeyForResource("doc", "w3-0")))).toBe(
-          "filler",
-        );
-      } finally {
-        await cluster.dispose();
-      }
-    } finally {
-      datastoreGrainInternals.creationBucketCount = originalBucketCount;
     }
   }, 300_000);
 
@@ -651,15 +314,17 @@ describe("ThinSequencerTests", () => {
     expect(typeof grain.initialState).toBe("function");
     expect(typeof grain.transitionState).toBe("function");
 
-    // (2) The state IS the slim meta state: exactly its six members, no more.
+    // (2) The state IS the slim meta state: exactly its eight members, no more.
     const initial = grain.initialState();
     const metaKeys = Object.keys(datastoreMetaStateEmpty(0n)).sort();
     expect(metaKeys).toEqual([
       "counters",
-      "forwardKeys",
+      "forwardTypes",
       "gcFloor",
       "headRevision",
-      "reverseKeys",
+      "pending",
+      "projectedThrough",
+      "reverseTypes",
       "schemas",
     ]);
     expect(Object.keys(initial).sort()).toEqual(metaKeys);
@@ -677,24 +342,24 @@ describe("ThinSequencerTests", () => {
       gcFloor,
     });
     let folded = initial;
-    folded = grain.transitionState(
-      folded,
-      event(10n, [{ operation: "touch", relationship: toWire(row("d1", "alice")) }]),
-    );
-    folded = grain.transitionState(
-      folded,
-      event(20n, [{ operation: "touch", relationship: toWire(row("d2", "bob")) }]),
-    );
-    folded = grain.transitionState(
-      folded,
-      event(30n, [{ operation: "delete", relationship: toWire(row("d1", "alice")) }]),
-    );
-    folded = grain.transitionState(folded, event(40n, [], 15n));
+    folded = grain.transitionState(folded, {
+      kind: "committed",
+      event: event(10n, [{ operation: "touch", relationship: toWire(row("d1", "alice")) }]),
+    });
+    folded = grain.transitionState(folded, {
+      kind: "committed",
+      event: event(20n, [{ operation: "touch", relationship: toWire(row("d2", "bob")) }]),
+    });
+    folded = grain.transitionState(folded, {
+      kind: "committed",
+      event: event(30n, [{ operation: "delete", relationship: toWire(row("d1", "alice")) }]),
+    });
+    folded = grain.transitionState(folded, { kind: "committed", event: event(40n, [], 15n) });
 
     // The fold really did something - a vacuous walk grades nothing.
     expect(folded.headRevision).toBe(40n);
-    expect(folded.forwardKeys.size).toBeGreaterThan(0);
-    expect(folded.reverseKeys.size).toBeGreaterThan(0);
+    expect(folded.pending.length).toBe(4);
+    expect(folded.forwardTypes).toEqual(["doc"]);
 
     for (const { value, path } of reachableValues(folded)) {
       expect(
@@ -713,7 +378,7 @@ describe("ThinSequencerTests", () => {
    * (pinned as a fold lemma by `shard-fold-lemma-tests`, here proven live): seed a real corpus file,
    * push the sequencer across a flush boundary with commits that never touch the probed resource's
    * forward key, keep committing past the flush - and `readShard` for that clean key must answer
-   * with `appliedRevision === the CURRENT head` (its stored row relabeled, no per-key tail replay)
+   * with `appliedRevision === the CURRENT head` (its projected state relabeled, no per-key replay)
    * while its rows still exactly match the snapshot reader.
    */
   it("Clean_key_ReadShard_serves_its_stored_row_relabeled_to_the_current_head", async () => {
@@ -732,8 +397,8 @@ describe("ThinSequencerTests", () => {
       const probe = file.relationships[0]!;
       const probeResource = probe.reference.resource;
 
-      // 64 filler commits cross the flush boundary (clearing the dirty buffer), then 3 more advance
-      // the head PAST the flush revision - so at read time the probed key's stored row is stamped
+      // 64 filler commits cross the flush boundary (projecting the tail), then 3 more advance the
+      // head PAST the flush revision - so at read time the probed key's projected state is stamped
       // strictly below head and only the relabel rule can make the reply's watermark reach it. The
       // fillers reuse the corpus's own resource type/relation/subject (schema-valid) under fresh
       // resource ids, so the probed FORWARD key is never touched again after the seed commit.
@@ -771,7 +436,7 @@ describe("ThinSequencerTests", () => {
     }
   }, 300_000);
 
-  // ---- (c) Lazy row-GC: floor on every serve path; physical compaction at the next dirty+flush. --
+  // ---- (c) Lazy row-GC: floor on every serve path; physical compaction at the next projection. --
 
   /**
    * Lazy-GC correctness end to end. A key ("cold") accumulates a dead row, is flushed (so its stored
@@ -798,12 +463,12 @@ describe("ThinSequencerTests", () => {
       );
       await write(ds, row("cold", "dead"), "delete");
 
-      // Cross the flush boundary on OTHER keys: "cold"'s stored row (carol live + dead's tombstone)
-      // is durable and its dirty entry cleared - from here on "cold" is the clean key under test.
+      // Cross the flush boundary on OTHER keys: "cold"'s projected state (carol live + dead's
+      // tombstone) is durable and nothing pending touches it - from here on "cold" is the clean key.
       for (let i = 0; i < 64; i += 1) await write(ds, row(`f${i}`, "filler"));
 
       // Dirty a DIFFERENT key, then GC: Window=Zero makes the floor land at the current head, past
-      // the tombstone - but "cold" is never dirtied, so its stored row keeps the dead row lazily.
+      // the tombstone - but "cold" is never touched, so its projection keeps the dead row lazily.
       await write(ds, row("x", "alice"), "delete");
       const floor = await grain.runGc();
       expect(floor).toBeDefined();
@@ -833,7 +498,7 @@ describe("ThinSequencerTests", () => {
         RevisionNotFoundException,
       );
 
-      // Re-dirty "cold" and push another flush past it: this flush is where its stored row
+      // Touch "cold" again and push another flush past it: this flush is where its projection
       // physically compacts (the tombstone is finally dropped from storage).
       await write(ds, row("cold", "late"));
       for (let i = 0; i < 64; i += 1) await write(ds, row(`g${i}`, "filler"));
@@ -883,8 +548,8 @@ describe("ThinSequencerTests", () => {
 
   /**
    * A declarative Commit whose precondition filter names a resource NOT otherwise touched by the
-   * commit - and whose key is CLEAN (flushed to storage, not in the dirty buffer) - so the partial
-   * write base is sufficient only if candidate-key resolution pulls that key in from its stored row.
+   * commit - and whose key is CLEAN (projected, with nothing pending) - so the partial write base is
+   * sufficient only if candidate-key resolution pulls that key in from its shard grain's projection.
    * Both outcomes are pinned: mustMatch satisfied commits the guarded update; mustMatch against a
    * missing resource rejects with `preconditionFailed` and applies nothing.
    */
@@ -896,8 +561,8 @@ describe("ThinSequencerTests", () => {
 
       await write(ds, row("a", "alice"));
 
-      // Flush "a" out of the dirty buffer so the precondition can only be answered from its stored
-      // shard row (the partial-base storage path, not the in-memory overlay).
+      // Project "a" so the precondition can only be answered from its shard grain's projected state
+      // (the partial base's projection path, not the pending overlay).
       for (let i = 0; i < 64; i += 1) await write(ds, row(`pf${i}`, "filler"));
 
       const onA = toFullFilter({
@@ -940,7 +605,7 @@ describe("ThinSequencerTests", () => {
 
       await write(ds, row("a", "alice"));
 
-      // Flush so user:alice's reverse key lives only in its stored row at commit time.
+      // Flush so user:alice's reverse key lives only in its projected state at commit time.
       for (let i = 0; i < 64; i += 1) await write(ds, row(`sf${i}`, "filler"));
 
       const subjectAlice = toFullFilter({
@@ -1030,11 +695,7 @@ describe("ThinSequencerTests", () => {
       });
 
       // Cross TWO flush boundaries (64 and 128), capturing doc:m0's create revision for the
-      // row-level gate below. Two flushes leave the store genuinely MID-ROTATION for the chunked key
-      // index: buckets 0 and 1 hold rows (at different versions), every other bucket has none, and
-      // TWO delta rows are pending - so the recovery below must reconstruct the index almost
-      // entirely from the delta overlay (m0's own entry rides delta 64 unless its bucket happens to
-      // be a rotated one).
+      // row-level gate below.
       let m0CreateRev: IRevision | undefined;
       for (let i = 0; i < 130; i += 1) {
         const rev = await write(ds, row(`m${i}`, `w${i}`));
@@ -1042,8 +703,8 @@ describe("ThinSequencerTests", () => {
       }
 
       // A delete and a real GC event. The delete lands ABOVE the second (128-event) flush boundary,
-      // making doc:m0's forward key TAIL-RESIDENT: recovery must seed it from its flushed row (the
-      // create) and replay the tail's delete on top.
+      // making doc:m0's forward key TAIL-RESIDENT: recovery must take its projected state (the
+      // create) and fold the pending delete on top.
       const m0DeleteRev = await write(ds, row("m0", "w0"), "delete");
       expect(await grain.runGc()).toBeDefined();
 
@@ -1109,7 +770,7 @@ describe("ThinSequencerTests", () => {
       ).toBe(EXPIRY);
 
       // RAW ROW-LEVEL GATE for a TAIL-RESIDENT key: doc:m0's last touch (the delete) sits above the
-      // flush boundary, so its recovered state is a flushed-row seed plus a tail replay. Assert the
+      // flush boundary, so its recovered state is its projected state plus the pending tail. Assert the
       // EXACT row multiset (payload identity + MVCC stamps) equals a fresh ShardFold fold of the
       // key's touching log events from empty - the visibility-filtered reads above cannot see a
       // recovery double-fold (re-applying tail events over a row that already contains them leaves a
@@ -1138,7 +799,7 @@ describe("ThinSequencerTests", () => {
       const m0Shard = await grain.readShard(m0Key);
       expect(rowMultiset(m0Shard.rows)).toEqual(rowMultiset(expectedM0.rows));
       // Explicitly: no two rows share (identity, createdRevision) - the same-revision
-      // tombstone+live duplicate shape a crashed in-place flush used to be able to leave behind.
+      // tombstone+live duplicate shape a double-applied pending event would leave behind.
       expect(new Set(m0Shard.rows.map(rowCreationIdentity)).size).toBe(m0Shard.rows.length);
 
       // Sharded reads at head equal the pre-deactivation capture (m0 was deleted; post-1 present).
@@ -1183,51 +844,58 @@ describe("ThinSequencerTests", () => {
     }
   }, 300_000);
 
-  // ---- (f) Log-row ETag hygiene: a retried append overwrites its own crashed attempt's orphan. ---
+  // ---- (f) Projection idempotence: a replayed projection changes nothing but the label. ----
 
   /**
-   * The Phase 0 hygiene rider (docs/scalability-program.md section 2): a crashed append attempt can
-   * leave an ORPHAN log row - the `log/{version}` entry written but the head never advanced, so the
-   * durable log version still names the row's slot for the next append. Log-row writes must be the
-   * same ETag-tolerant read-then-write the versioned shard/meta rows use, so the retried append
-   * OVERWRITES the orphan instead of ETag-clashing against it (a fresh empty-ETag wrapper would be
-   * rejected by every provider that enforces optimistic concurrency, `MemoryGrainStorage` included).
-   * Plant the orphan directly through the grain's own storage provider at the next log version, then
-   * commit through the grain: the commit must succeed and the row must hold the NEW event.
+   * The sequencer replays a projection whenever it cannot be sure the previous one was journaled (a
+   * failure or a crash between the shard writes and the `projected` entry). Replaying events the
+   * shard already persisted must leave its rows identical - only the label may advance - and
+   * replaying with a label at or below the persisted one must be a no-op.
    */
-  it("Commit_overwrites_an_orphan_log_row_left_by_a_crashed_append_attempt", async () => {
+  it("Replaying_a_projection_leaves_the_shard_rows_unchanged", async () => {
     const cluster = await MeshTestCluster.create(SCHEMA);
     try {
       const ds = cluster.datastore;
+      const created = await write(ds, row("r", "alice"));
+      const deleted = await write(ds, row("r", "alice"), "delete");
+      await sequencer(cluster).flushProjection();
 
-      // A baseline commit so the grain is active and the durable head row exists.
-      await write(ds, row("k0", "u0"));
+      const shard = cluster.grainFactory.getGrain(
+        IGraphShardGrain,
+        graphShardGrainKeyBuild(graphShardKeyForResource("doc", "r")),
+      );
+      const before = await shard.readProjected();
+      expect(before.rows).toHaveLength(1);
+      expect(before.rows[0]!.deletedRevision).toBeDefined();
 
-      const headRow = await readRow<LogHeadEntry>(cluster, "head");
-      expect(headRow.exists, "no durable head after the baseline commit").toBe(true);
-      const nextVersion = headRow.value.logVersion + 1;
+      const replay: LogEvent[] = [
+        {
+          revision: nanos(created),
+          relationshipChanges: [{ operation: "touch", relationship: toWire(row("r", "alice")) }],
+          schemaChange: undefined,
+          counterChanges: [],
+          gcFloor: undefined,
+        },
+        {
+          revision: nanos(deleted),
+          relationshipChanges: [{ operation: "delete", relationship: toWire(row("r", "alice")) }],
+          schemaChange: undefined,
+          counterChanges: [],
+          gcFloor: undefined,
+        },
+      ];
 
-      // Plant the orphan exactly where a crashed append attempt leaves it: the next log version's
-      // row written (with its own storage ETag minted), the head untouched.
-      const storage = cluster.datastoreStorage;
-      const grainId = grainReferenceIdentity(sequencer(cluster))!.grainId;
-      const orphan: LogEvent = {
-        // `long.MaxValue`.
-        revision: 9223372036854775807n,
-        relationshipChanges: [],
-        schemaChange: undefined,
-        counterChanges: [],
-        gcFloor: undefined,
-      };
-      await storage.write(`log/${nextVersion}`, grainId, { value: orphan, exists: false });
+      // At the persisted label: a no-op.
+      await shard.project(replay, before.appliedRevision, before.gcFloor);
+      const unchanged = await shard.readProjected();
+      expect(unchanged.appliedRevision).toBe(before.appliedRevision);
+      expect(unchanged.rows).toEqual(before.rows);
 
-      // The retried append must succeed (no ETag clash) ...
-      const revision = await write(ds, row("k1", "u1"));
-
-      // ... and the slot must hold the NEW commit's event, not the orphan's content.
-      const logRow = await readRow<LogEvent>(cluster, `log/${nextVersion}`);
-      expect(logRow.exists, `log/${nextVersion} is missing after the retried append`).toBe(true);
-      expect(logRow.value.revision).toBe(nanos(revision));
+      // Above it: the events are skipped by the label; only the label advances.
+      await shard.project(replay, before.appliedRevision + 1n, before.gcFloor);
+      const after = await shard.readProjected();
+      expect(after.appliedRevision).toBe(before.appliedRevision + 1n);
+      expect(after.rows).toEqual(before.rows);
     } finally {
       await cluster.dispose();
     }

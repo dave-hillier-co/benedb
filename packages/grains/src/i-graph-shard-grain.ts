@@ -2,6 +2,8 @@ import { defineGrainInterface } from "@thresh/core/grain-interface";
 import type { GrainWithStringKey } from "@thresh/core/key-kinds";
 
 import type { FullRelationshipsFilterWire } from "./datastore-dtos";
+import type { GraphShardState } from "./graph-shard-state";
+import type { LogEvent } from "./log-event";
 import type { RelationshipWire } from "./relationships-dtos";
 
 /**
@@ -48,6 +50,22 @@ export interface IGraphShardGrain extends GrainWithStringKey {
     filter: FullRelationshipsFilterWire | undefined,
     signal?: AbortSignal | undefined,
   ): Promise<GraphShardRowsReply>;
+
+  /**
+   * The sequencer's projection write: folds `events` (each touching this shard's key, ascending by
+   * revision) over the shard's PERSISTED state, applies `gcFloor`, labels the result `through`,
+   * and persists it before returning. Idempotent: events at or below the persisted label were
+   * already projected and are skipped, so the sequencer may replay a projection it is unsure
+   * completed. Returns whether the key holds any rows afterwards.
+   */
+  project(events: readonly LogEvent[], through: bigint, gcFloor: bigint): Promise<boolean>;
+
+  /**
+   * The shard's PERSISTED projected state: its rows as of its label, complete for every event at
+   * or below the label and missing only the sequencer's pending events for this key.
+   * `alwaysInterleave`: a pure read of state loaded at activation.
+   */
+  readProjected(): Promise<GraphShardState>;
 }
 
 /**
@@ -58,5 +76,24 @@ export interface IGraphShardGrain extends GrainWithStringKey {
  * hot-shard readers would queue behind it. (The same lesson `IDatastoreLog.readFrom` records.)
  */
 export const IGraphShardGrain = defineGrainInterface<IGraphShardGrain>("IGraphShardGrain", {
-  options: { rowsAt: { alwaysInterleave: true } },
+  options: { rowsAt: { alwaysInterleave: true }, readProjected: { alwaysInterleave: true } },
+});
+
+/**
+ * One bucket of the shard index: the object ids of one direction and type, hashed into a fixed
+ * number of buckets, whose shard grains have ever been projected. Enumerating the bucket grains of
+ * a type lists every key of that type that may hold rows (a superset: a key whose rows were all
+ * deleted stays listed). It replaces enumerating a key index held by the sequencer, so no single
+ * grain's state grows with the graph.
+ */
+export interface IShardIndexGrain extends GrainWithStringKey {
+  /** Adds `ids` to the bucket and persists it before returning. Idempotent. */
+  add(ids: readonly string[]): Promise<void>;
+
+  /** The ids in the bucket. A pure read of state loaded at activation. */
+  readIds(): Promise<readonly string[]>;
+}
+
+export const IShardIndexGrain = defineGrainInterface<IShardIndexGrain>("IShardIndexGrain", {
+  options: { readIds: { alwaysInterleave: true } },
 });

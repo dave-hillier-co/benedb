@@ -1,6 +1,6 @@
 import type { CounterVersionWire, SchemaVersionWire } from "./datastore-dtos";
-import type { DatastoreMetaState } from "./datastore-meta-state";
-import { NO_ROW_VERSION } from "./datastore-meta-state";
+import type { DatastoreJournalEntry, DatastoreMetaState } from "./datastore-meta-state";
+import { datastoreMetaStateEmpty } from "./datastore-meta-state";
 import { graphShardGrainKeyBuild } from "./graph-shard-grain-key";
 import { graphShardKeyForResource, graphShardKeyForSubject } from "./graph-shard-key";
 import type { LogEvent } from "./log-event";
@@ -9,8 +9,9 @@ import type { RelationshipWire } from "./relationships-dtos";
 /**
  * The SMALL-STATE restriction of `log-fold.ts`: folds the same committed {@link LogEvent} sequence,
  * but keeps only what `DatastoreMetaState` carries - head, schema versions, counter versions, GC
- * floor, and the key index. Relationship row content is deliberately NOT folded here; it belongs to
- * the per-key `shard-fold.ts` (the dirty buffer / shard rows). Together,
+ * floor, the types seen, and the pending (not yet projected) tail. Relationship row content is
+ * deliberately NOT folded here; it belongs to the per-key `shard-fold.ts` (the shard grains'
+ * projections). Together,
  * `metaFold + shardFold-per-touched-key` is exactly `logFold` split along the sharding lemma:
  * `fold(log) == merge(fold(log | key) for all keys)` for the rows, plus this fold for everything
  * else.
@@ -25,16 +26,19 @@ import type { RelationshipWire } from "./relationships-dtos";
  * everything above), so the small state and the whole fold converge on identical histories.
  */
 export function metaFoldApplyEvent(state: DatastoreMetaState, ev: LogEvent): DatastoreMetaState {
+  const pending = [...state.pending, ev];
+
   // Never a truthiness test: 0n is a legal floor. Same guard as the other two folds.
   if (ev.gcFloor !== undefined) {
     const floor = ev.gcFloor;
-    if (floor <= state.gcFloor) return { ...state, headRevision: ev.revision };
+    if (floor <= state.gcFloor) return { ...state, headRevision: ev.revision, pending };
     return {
       ...state,
       headRevision: ev.revision,
       gcFloor: floor,
       schemas: compactSchemas(state.schemas, floor),
       counters: compactCounters(state.counters, floor),
+      pending,
     };
   }
 
@@ -45,22 +49,13 @@ export function metaFoldApplyEvent(state: DatastoreMetaState, ev: LogEvent): Dat
   for (const counter of ev.counterChanges)
     counters = [...counters, { revision: ev.revision, name: counter.name, filter: counter.filter }];
 
-  // Index every touched key. Add-only here, and VERSION-NEUTRAL: a key not yet indexed is added at
-  // `NO_ROW_VERSION` (it has no durable row - its state lives in the dirty buffer until a flush
-  // writes one), and an already-indexed key KEEPS its recorded row version. The fold must stay a
-  // pure function of the event sequence - it cannot know which storage version a row will land
-  // under - so the version bump happens exclusively at the flush, on the meta entry the flush
-  // persists; keys whose shard state becomes empty are pruned there too, never mid-fold.
-  //
-  // `ImmutableDictionary` becomes a `ReadonlyMap` COPIED ON WRITE, so the caller's state is never
-  // mutated. The copy is taken lazily, exactly where the C# would have rebound its local.
-  let forward = state.forwardKeys;
-  let reverse = state.reverseKeys;
+  // Record the types the event names: the shard index's enumeration roots. Add-only, and the
+  // arrays are COPIED ON WRITE, so the caller's state is never mutated.
+  let forwardTypes = state.forwardTypes;
+  let reverseTypes = state.reverseTypes;
   for (const change of ev.relationshipChanges) {
-    const forwardKey = metaFoldForwardKeyOf(change.relationship);
-    if (!forward.has(forwardKey)) forward = new Map(forward).set(forwardKey, NO_ROW_VERSION);
-    const reverseKey = metaFoldReverseKeyOf(change.relationship);
-    if (!reverse.has(reverseKey)) reverse = new Map(reverse).set(reverseKey, NO_ROW_VERSION);
+    forwardTypes = withType(forwardTypes, change.relationship.resourceType);
+    reverseTypes = withType(reverseTypes, change.relationship.subjectType);
   }
 
   return {
@@ -68,9 +63,52 @@ export function metaFoldApplyEvent(state: DatastoreMetaState, ev: LogEvent): Dat
     headRevision: ev.revision,
     schemas,
     counters,
-    forwardKeys: forward,
-    reverseKeys: reverse,
+    pending,
+    forwardTypes,
+    reverseTypes,
   };
+}
+
+/**
+ * Folds one journal entry into the small state. A committed event advances the head, the
+ * schema/counter histories and the GC floor exactly as the whole-state fold does, records the types
+ * it names, and joins the pending tail; a projection checkpoint drops the pending events it covers;
+ * the seed entry starts an empty store at its revision. Pure and deterministic, as the
+ * log-consistency adaptor requires.
+ */
+export function metaFoldApplyEntry(
+  state: DatastoreMetaState,
+  entry: DatastoreJournalEntry,
+): DatastoreMetaState {
+  switch (entry.kind) {
+    case "seeded":
+      return datastoreMetaStateEmpty(entry.revision);
+    case "committed":
+      return metaFoldApplyEvent(state, entry.event);
+    case "projected":
+      if (entry.through <= state.projectedThrough) return state;
+      return {
+        ...state,
+        pending: state.pending.filter((e) => e.revision > entry.through),
+        projectedThrough: entry.through,
+      };
+    default:
+      return assertNever(entry);
+  }
+}
+
+/** `ImmutableSortedSet.Add`: the sorted set with `type` in it (the same array when already there). */
+function withType(types: readonly string[], type: string): readonly string[] {
+  if (types.includes(type)) return types;
+  return [...types, type].sort(compareOrdinal);
+}
+
+function compareOrdinal(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`unknown datastore journal entry ${JSON.stringify(value)}`);
 }
 
 /**

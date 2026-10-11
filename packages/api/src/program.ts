@@ -36,12 +36,10 @@ import {
   readConfiguredPort,
   resolveClustering,
 } from "@benedb/silo/clustering-config";
-import type { Configuration } from "@benedb/silo/datastore-storage-config";
-import {
-  DATASTORE_PROVIDER_NAME,
-  addDatastoreGrainStorage,
-  configurationFromEnvironment,
-} from "@benedb/silo/datastore-storage-config";
+import type { Configuration } from "@benedb/silo/configuration";
+import { configurationFromEnvironment } from "@benedb/silo/configuration";
+import type { StorageBackend } from "@thresh/hosting/storage-backend";
+import { storageBackendFromEnvironment } from "@thresh/hosting/storage-backend";
 import { SiloAddress } from "@thresh/core/silo-address";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
@@ -448,6 +446,7 @@ export function configureApiSilo(
   builder: SiloBuilder,
   configuration: Configuration,
   clustering: ClusteringOptions = resolveClustering(configuration),
+  storage: StorageBackend = storageBackendFromEnvironment(),
 ): SpiceportGrainServices {
   if (builder === undefined || builder === null) {
     throw new InvalidArgumentError("builder is required");
@@ -465,22 +464,16 @@ export function configureApiSilo(
   // CheckGrain's per-activation reply memo (default ON) needs a matching idle-collection age so a
   // warm activation survives long enough between calls for the memo to pay off.
   addActivationMemoCollectionAge(builder);
-  // Durable Postgres when ConnectionStrings:OrleansStorage is configured; otherwise in-memory.
-  addDatastoreGrainStorage(builder, configuration);
-  // The event-sourced datastore grain's log-consistency backing.
-  builder.useMemoryJournaling();
-  // Backs the datastore grain's periodic MVCC-GC reminder ("mvcc-gc"). The default table is PER
-  // SILO and firing is gated on hash-ring ownership, so in a cluster the reminder can silently stop
-  // running - see the same note on the silo host, and `docs/packaging.md`.
+  // Where durable state lives is the storage backend's decision - see the silo host's port
+  // decision 3.
+  builder.useStorageBackend(storage);
+  // Backs the datastore grain's periodic MVCC-GC reminder ("mvcc-gc"), in the backend's table.
   builder.useReminders();
 
   // Schema + check-engine singletons (compiled once from the embedded seed schema).
   let datastore: IDatastore | undefined;
   const services: SpiceportGrainServices = addSpiceportGrainServices(builder, {
     schemaText: SEED_SCHEMA_TEXT,
-    ...(builder.storageProvider(DATASTORE_PROVIDER_NAME) !== undefined
-      ? { datastoreStorage: builder.storageProvider(DATASTORE_PROVIDER_NAME) }
-      : {}),
     ...(DATASTORE_GC_OPTIONS !== undefined ? { datastoreGcOptions: DATASTORE_GC_OPTIONS } : {}),
     datastore: () =>
       (datastore ??= new GrainBackedDatastore(

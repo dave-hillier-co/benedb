@@ -8,18 +8,19 @@ import type { DeleteRelationshipsResult, IDatastore } from "@benedb/datastore/i-
 import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
 import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 import type { GrainInterface } from "@thresh/core/grain-interface";
-import type { GrainStorage } from "@thresh/core/grain-storage";
 import type { KeyTypeOf } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
-import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
-import { constructGrain } from "@thresh/runtime/construct-grain";
 import { describe, expect, it } from "vitest";
 
-import { DatastoreGrain } from "./datastore-grain";
 import { GrainBackedDatastore } from "./grain-backed-datastore";
-import { IDatastoreGrain } from "./i-datastore-grain";
 import { createIsolatedWatchHub } from "./isolated-watch-hub";
+import {
+  configureSequencerSilo,
+  createSequencerStores,
+  SEQUENCER_GRAIN_REGISTRATIONS,
+  type SequencerStores,
+} from "./sequencer-test-silo";
 
 /**
  * Ported from Spiceport `tests/Spiceport.Grains.Tests/GrainBackedDatastoreFidelityTests.cs`.
@@ -58,16 +59,12 @@ function utcNanos(year: number, month: number, day: number): bigint {
   return BigInt(Date.UTC(year, month - 1, day)) * 1_000_000n;
 }
 
-async function newCluster(storage: GrainStorage): Promise<TestCluster> {
+async function newCluster(stores: SequencerStores): Promise<TestCluster> {
   return TestCluster.start({
     initialSilos: 1,
-    grains: [{ ctor: DatastoreGrain, interfaces: [IDatastoreGrain] }],
+    grains: SEQUENCER_GRAIN_REGISTRATIONS,
     configureSilo: (builder) => {
-      builder.addStorage("datastore", storage);
-      builder.useGrainActivator({
-        createInstance: (ctor) =>
-          ctor === DatastoreGrain ? new DatastoreGrain({ storage }) : constructGrain(ctor),
-      });
+      configureSequencerSilo(builder, stores);
     },
   });
 }
@@ -202,7 +199,7 @@ async function* toAsync(source: readonly Relationship[]): AsyncIterable<Relation
 describe("GrainBackedDatastoreFidelityTests", () => {
   it("GrainBackedDatastore_MatchesReferenceDatastore_AtLiveSetLevel", async () => {
     const inMem: IDatastore = new ReferenceDatastore();
-    const cluster = await newCluster(new MemoryGrainStorage());
+    const cluster = await newCluster(createSequencerStores());
     try {
       const hub = createIsolatedWatchHub(grainFactory(cluster));
       try {

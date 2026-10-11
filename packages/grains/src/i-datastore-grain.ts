@@ -4,6 +4,7 @@ import type { GrainWithIntegerKey } from "@thresh/core/key-kinds";
 import type { CommitReply, CommitRequest } from "./commit-contract";
 import type { DatastoreHeadWire } from "./datastore-dtos";
 import type { DatastoreGrainState } from "./datastore-grain-state";
+import type { ShardTailWire } from "./datastore-meta-state";
 import type { GraphShardKeyWire } from "./graph-shard-key";
 import type { GraphShardState } from "./graph-shard-state";
 import type { IDatastoreWatcher } from "./i-datastore-watcher";
@@ -31,13 +32,12 @@ export const DATASTORE_GRAIN_KEY = 0n;
 export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
   /**
    * Returns the full committed state, ASSEMBLED on demand for the admin plane (the scan seam, the
-   * compatibility ReadWriteTx write base, the equivalence gates): under the thin-sequencer layout
-   * the grain no longer materializes the whole fold, so this call rebuilds it from the small state
-   * plus every indexed forward key's current shard state (dirty overlay winning per key). Semantics
-   * are identical to the retired materialized fold; the cost is O(graph) storage reads and transfer
-   * PER CALL - never use it on the per-Check hot path (that reads through `readShard` / the shard
-   * mesh). `alwaysInterleave` - see the remark on `commit` - never `readOnly`, which would not
-   * interleave against the non-read-only `commit`.
+   * compatibility ReadWriteTx write base, the equivalence gates): the sequencer holds no
+   * relationship rows, so this call enumerates every forward key through the shard index (plus the
+   * pending tail's keys) and folds each key's pending events over its shard grain's projected
+   * state. The cost is O(graph) grain calls and transfer PER CALL - never use it on the per-Check
+   * hot path (that reads through the shard mesh). `alwaysInterleave` - see the remark on `commit` -
+   * never `readOnly`, which would not interleave against the non-read-only `commit`.
    */
   readState(): Promise<DatastoreGrainState>;
 
@@ -59,17 +59,30 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
   readSchemaAt(revision: bigint): Promise<Uint8Array | undefined>;
 
   /**
-   * The once-per-shard hydration read: the current per-key slice for `key`, served WITHOUT any
-   * whole-state scan - the sequencer's dirty-buffer entry when the key was touched since its last
-   * flush, otherwise the key's durable shard row relabeled to the current head (sound because any
-   * touching event would have dirtied the key - the sharding fact), otherwise empty-at-head. The
-   * reply's `appliedRevision` is the CURRENT head and its `gcFloor` the current floor (applied to
-   * the rows) - a shard hydrated from this snapshot is exactly the per-key fold at that head (the
-   * sharding lemma). `alwaysInterleave` - a pure read, interleaving exactly like `readState`; never
-   * `readOnly`, which would not interleave past the non-read-only `commit` (the lesson documented
-   * on `IDatastoreLog.readFrom`).
+   * The current per-key slice for `key` at the current head: the key's shard grain's projected
+   * state with the pending events that touch it folded over, relabeled to the head (sound because
+   * any event touching the key is either projected or pending), with the current GC floor applied.
+   * An admin-plane and test read; a shard grain hydrating itself uses `readShardTail` instead, so
+   * it never waits on a call back into itself.
    */
   readShard(key: GraphShardKeyWire): Promise<GraphShardState>;
+
+  /**
+   * The pending events touching `key`, with the head and GC floor: what a shard grain folds over
+   * its own projected state to hydrate. Read the tail BEFORE re-reading the projected state it is
+   * folded over: a projection that lands in between is then already in the projected state and
+   * skipped by its label, while one that has not landed is still in the tail. `alwaysInterleave` -
+   * a pure read of the journaled state.
+   */
+  readShardTail(key: GraphShardKeyWire): Promise<ShardTailWire>;
+
+  /**
+   * Projects every pending event into the shard grains it touches and the shard index, then
+   * journals that the projection has caught up. The sequencer does this itself every flush
+   * interval; calling it directly is a test and operations seam. A write: never interleaves
+   * another write.
+   */
+  flushProjection(): Promise<void>;
 
   /**
    * Executes a declarative `CommitRequest` INSIDE the sequencer
@@ -143,6 +156,7 @@ export const IDatastoreGrain = defineGrainInterface<IDatastoreGrain>("IDatastore
     getHead: { alwaysInterleave: true },
     readSchemaAt: { alwaysInterleave: true },
     readShard: { alwaysInterleave: true },
+    readShardTail: { alwaysInterleave: true },
     readFrom: { alwaysInterleave: true },
   },
 });

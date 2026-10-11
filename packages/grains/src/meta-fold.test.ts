@@ -9,7 +9,7 @@ import type {
 } from "./datastore-dtos";
 import { datastoreGrainStateEmpty } from "./datastore-grain-state";
 import type { DatastoreMetaState } from "./datastore-meta-state";
-import { datastoreMetaStateEmpty, NO_ROW_VERSION } from "./datastore-meta-state";
+import { datastoreMetaStateEmpty } from "./datastore-meta-state";
 import { graphShardGrainKeyBuild } from "./graph-shard-grain-key";
 import {
   graphShardKeyForResource,
@@ -20,6 +20,7 @@ import { GRAPH_SHARD_STATE_EMPTY } from "./graph-shard-state";
 import type { CounterDeltaWire, LogEvent } from "./log-event";
 import { eventFromProposal, logFoldApplyEvent } from "./log-fold";
 import {
+  metaFoldApplyEntry,
   metaFoldApplyEvent,
   metaFoldForwardKeyOf,
   metaFoldReverseKeyOf,
@@ -44,13 +45,11 @@ import { computeStoredSchemaHash } from "./stored-schema-hash";
  *   * Counter versions are appended DIRECTLY from the event's net deltas, never replayed through
  *     the guarded register/unregister ops, for the same reason `LogFold` does it: a same-commit
  *     register+unregister nets to a delta whose guard is false in the fold base.
- *   * The key index is ADD-ONLY and VERSION-NEUTRAL: a new key enters at `NO_ROW_VERSION` and an
- *     existing key KEEPS its recorded version. The fold is a pure function of the event sequence,
- *     so it must never bump a version or prune an emptied key - both happen at the flush, in the
- *     grain, a later slice.
+ *   * Every committed event joins the PENDING tail, and a projection checkpoint drops exactly the
+ *     events at or below it; the types an event names are recorded, add-only and sorted.
  *   * `touchedKeys` returns a `Set`, so its iteration order is insertion order where .NET's
- *     `HashSet` order is unspecified. That is benign here (the result seeds dirty-buffer entries),
- *     and no sort is added to paper over it - the tests compare as sets.
+ *     `HashSet` order is unspecified. That is benign here (the result groups a projection's events
+ *     by key), and no sort is added to paper over it - the tests compare as sets.
  */
 describe("meta fold", () => {
   const noCounterChanges: readonly CounterDeltaWire[] = [];
@@ -272,54 +271,73 @@ describe("meta fold", () => {
     });
   });
 
-  describe("the key index", () => {
-    it("indexes every touched key in both directions at the no-row-version sentinel", () => {
+  describe("the types seen and the pending tail", () => {
+    it("records every type an event names, per direction, sorted and add-only", () => {
       const small = foldSmall(log);
 
-      expect([...small.forwardKeys.keys()].sort()).toEqual(
-        [
-          graphShardGrainKeyBuild(graphShardKeyForResource("doc", "a")),
-          graphShardGrainKeyBuild(graphShardKeyForResource("doc", "b")),
-        ].sort(),
-      );
-      expect([...small.reverseKeys.keys()].sort()).toEqual(
-        [
-          graphShardGrainKeyBuild(graphShardKeyForSubject("user", "alice")),
-          graphShardGrainKeyBuild(graphShardKeyForSubject("user", "bob")),
-        ].sort(),
-      );
-      expect([...small.forwardKeys.values()]).toEqual([NO_ROW_VERSION, NO_ROW_VERSION]);
-      expect([...small.reverseKeys.values()]).toEqual([NO_ROW_VERSION, NO_ROW_VERSION]);
-    });
+      expect(small.forwardTypes).toEqual(["doc"]);
+      expect(small.reverseTypes).toEqual(["user"]);
 
-    it("KEEPS an already-recorded row version rather than resetting it", () => {
-      // The fold cannot know which storage version a row will land under, so the version only ever
-      // moves at the flush. Resetting it here would strand the durable row it names.
-      const forwardKey = graphShardGrainKeyBuild(graphShardKeyForResource("doc", "a"));
-      const seeded: DatastoreMetaState = {
-        ...datastoreMetaStateEmpty(0n),
-        forwardKeys: new Map([[forwardKey, 7]]),
+      const group: RelationshipWire = {
+        ...rel("a", "eng"),
+        resourceType: "acl",
+        subjectType: "group",
       };
-
-      const folded = metaFoldApplyEvent(seeded, log[0] as LogEvent);
-
-      expect(folded.forwardKeys.get(forwardKey)).toBe(7);
+      const more = metaFoldApplyEvent(small, eventFromProposal(proposal([touch(group)]), 200n));
+      expect(more.forwardTypes).toEqual(["acl", "doc"]);
+      expect(more.reverseTypes).toEqual(["group", "user"]);
     });
 
-    it("is ADD-ONLY: a key whose rows are all deleted stays indexed", () => {
+    it("keeps a type after its rows are deleted", () => {
       const small = foldSmall(log.slice(0, 3)); // touch a, ..., delete a
 
-      expect(
-        small.forwardKeys.has(graphShardGrainKeyBuild(graphShardKeyForResource("doc", "a"))),
-      ).toBe(true);
+      expect(small.forwardTypes).toEqual(["doc"]);
     });
 
-    it("never prunes the index at a gc event", () => {
-      const before = foldSmall(log.slice(0, 5));
-      const after = metaFoldApplyEvent(before, gc(60n, 35n));
+    it("puts every committed event, gc events included, on the pending tail in order", () => {
+      const small = foldSmall(log);
 
-      expect([...after.forwardKeys.entries()]).toEqual([...before.forwardKeys.entries()]);
-      expect([...after.reverseKeys.entries()]).toEqual([...before.reverseKeys.entries()]);
+      expect(small.pending.map((e) => e.revision)).toEqual(log.map((e) => e.revision));
+    });
+
+    it("drops exactly the pending events a projection checkpoint covers", () => {
+      const small = foldSmall(log);
+      const through = (log[2] as LogEvent).revision;
+
+      const projected = metaFoldApplyEntry(small, { kind: "projected", through });
+
+      expect(projected.projectedThrough).toBe(through);
+      expect(projected.pending.map((e) => e.revision)).toEqual(log.slice(3).map((e) => e.revision));
+      // Everything else is untouched.
+      expect(projected.headRevision).toBe(small.headRevision);
+      expect(projected.schemas).toBe(small.schemas);
+    });
+
+    it("ignores a projection checkpoint at or below the one already recorded", () => {
+      const small = metaFoldApplyEntry(foldSmall(log), {
+        kind: "projected",
+        through: (log[2] as LogEvent).revision,
+      });
+
+      expect(metaFoldApplyEntry(small, { kind: "projected", through: 1n })).toBe(small);
+    });
+
+    it("starts an empty store at the seeded revision", () => {
+      const seeded = metaFoldApplyEntry(datastoreMetaStateEmpty(0n), {
+        kind: "seeded",
+        revision: 42n,
+      });
+
+      expect(seeded).toEqual(datastoreMetaStateEmpty(42n));
+      expect(seeded.projectedThrough).toBe(42n);
+    });
+
+    it("folds a committed entry exactly as the event", () => {
+      const ev = log[0] as LogEvent;
+
+      expect(
+        metaFoldApplyEntry(datastoreMetaStateEmpty(0n), { kind: "committed", event: ev }),
+      ).toEqual(metaFoldApplyEvent(datastoreMetaStateEmpty(0n), ev));
     });
 
     it("does not mutate the state it folded from", () => {
@@ -327,8 +345,8 @@ describe("meta fold", () => {
 
       metaFoldApplyEvent(before, log[0] as LogEvent);
 
-      expect(before.forwardKeys.size).toBe(0);
-      expect(before.reverseKeys.size).toBe(0);
+      expect(before.pending).toEqual([]);
+      expect(before.forwardTypes).toEqual([]);
       expect(before.headRevision).toBe(0n);
     });
   });

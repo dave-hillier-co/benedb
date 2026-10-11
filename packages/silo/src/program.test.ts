@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { CLUSTERING_SILOS_KEY, resolveClustering } from "./clustering-config";
-import { DATASTORE_PROVIDER_NAME, createConfiguration } from "./datastore-storage-config";
+import { createConfiguration } from "./configuration";
 import { configureSiloHost, main, shutdownSiloHost, type SiloHostWiring } from "./program";
 import { SILO_SCHEMA_TEXT } from "./silo-schema";
 
@@ -58,9 +58,9 @@ interface Call {
 }
 
 /**
- * A real `SiloBuilder` wrapped in a recording proxy. The two storage registrations are RECORDED
- * AND SUPPRESSED rather than delegated: `addPostgresStorage` constructs a live `pg.Pool`, and this
- * test must not reach for a database that is not there.
+ * A real `SiloBuilder` wrapped in a recording proxy. The storage-backend registration is RECORDED
+ * AND SUPPRESSED rather than delegated: a Postgres backend constructs a live pool, and this test
+ * must not reach for a database that is not there.
  */
 function recordingBuilder(
   local: SiloAddress = new SiloAddress("silo-test", "uid-silo-test", "silo-test:11111"),
@@ -70,7 +70,7 @@ function recordingBuilder(
     local,
   });
   const calls: Call[] = [];
-  const suppressed = new Set(["addStorage", "addPostgresStorage", "addRedisStorage"]);
+  const suppressed = new Set(["useStorageBackend"]);
 
   const proxy: SiloBuilder = new Proxy(target, {
     get(receiver, property, _receiverProxy) {
@@ -102,52 +102,37 @@ describe("configureSiloHost", () => {
     expect(services.schemaProvider.current.sourceText).toBe(SILO_SCHEMA_TEXT);
   });
 
-  it("registers the datastore grain-storage provider under its literal name", () => {
+  it("hands every durable provider to the storage backend it is given", () => {
+    const { builder, calls } = recordingBuilder();
+    const backend = { kind: "postgres", connectionString: "postgres://localhost/benedb" } as const;
+
+    configureSiloHost(builder, createConfiguration({}), undefined, backend);
+
+    const registrations = named(calls, "useStorageBackend");
+    expect(registrations).toHaveLength(1);
+    expect(registrations[0]?.args[0]).toEqual(backend);
+    // The host registers no provider of its own: where state lives is the backend's decision.
+    expect(calls.filter((call) => /Storage|Journaling/.test(call.name))).toEqual(registrations);
+  });
+
+  it("takes the backend from Thresh's environment by default", () => {
     const { builder, calls } = recordingBuilder();
 
     configureSiloHost(builder, createConfiguration({}));
 
-    const registrations = named(calls, "addStorage").filter(
-      (call) => call.args[0] === DATASTORE_PROVIDER_NAME,
-    );
-    expect(registrations).toHaveLength(1);
+    // THRESH_STORAGE_URL is unset under test, which Thresh reads as in-memory.
+    expect(named(calls, "useStorageBackend")[0]?.args[0]).toEqual({ kind: "memory" });
   });
 
-  it("routes a configured connection string into the durable storage branch", () => {
-    const { builder, calls } = recordingBuilder();
-
-    configureSiloHost(
-      builder,
-      createConfiguration({ "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb" }),
-    );
-
-    const durable = named(calls, "addPostgresStorage");
-    expect(durable).toHaveLength(1);
-    expect(durable[0]?.args[0]).toBe(DATASTORE_PROVIDER_NAME);
-    expect(durable[0]?.args[1]).toMatchObject({
-      connectionString: "postgres://localhost/benedb",
-    });
-    expect(named(calls, "addStorage")).toHaveLength(0);
-  });
-
-  it("enables reminders with the in-memory table (the mvcc-gc reminder's backing)", () => {
+  it("enables reminders on the backend's table (the mvcc-gc reminder's backing)", () => {
     const { builder, calls } = recordingBuilder();
 
     configureSiloHost(builder, createConfiguration({}));
 
     const reminders = named(calls, "useReminders");
     expect(reminders).toHaveLength(1);
-    // `UseInMemoryReminderService()`: no persistent table is configured.
+    // No table of the host's own: `useReminders()` takes the storage backend's.
     expect(reminders[0]?.args[0]).toBeUndefined();
-  });
-
-  it("registers the log-consistency backing for the event-sourced datastore grain", () => {
-    const { builder, calls } = recordingBuilder();
-
-    configureSiloHost(builder, createConfiguration({}));
-
-    const journaling = calls.filter((call) => /journal/i.test(call.name));
-    expect(journaling.length).toBeGreaterThan(0);
   });
 
   it("arms the activation-memo collection age", () => {
@@ -174,7 +159,6 @@ describe("configureSiloHost", () => {
 
   it("wires the WebSocket transport and the whole configured view when clustered", () => {
     const configuration = createConfiguration({
-      "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb",
       [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111,127.0.0.1:11112",
     });
     const clustering = resolveClustering(configuration);
@@ -196,7 +180,6 @@ describe("configureSiloHost", () => {
     expect(named(plain.calls, "requireObserverHosting")).toHaveLength(1);
 
     const configuration = createConfiguration({
-      "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb",
       [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111",
     });
     const clustering = resolveClustering(configuration);

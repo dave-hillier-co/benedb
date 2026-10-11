@@ -50,35 +50,32 @@ Thresh's in-process transport, needing no external dependency and no configurati
 `UseLocalhostClustering()`'s no-argument form is for, and it is what both `pnpm --filter ... start`
 commands above give you.
 
-Several silos in one cluster is opt-in, through the same `Configuration` object the datastore
-storage config reads — .NET's rules, so every key has an `A:B` form and an `A__B` environment form,
-and both are case-insensitive.
+Several silos in one cluster is opt-in, through the hosts' `Configuration` object — .NET's rules,
+so every key has an `A:B` form and an `A__B` environment form, and both are case-insensitive.
 
-| Key                               | Default     | Meaning                                                                                                          |
-| --------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| `Clustering:Silos`                | _unset_     | Comma-separated `host:port` list covering the **whole** cluster, this silo included. Its presence is the switch. |
-| `Clustering:SiloPort`             | `11111`     | This silo's listen and advertise port.                                                                           |
-| `Clustering:AdvertisedHost`       | `127.0.0.1` | This silo's bind host **and** the host peers dial back.                                                          |
-| `Clustering:AllowInMemoryStorage` | `false`     | Accept a clustered silo whose datastore state is per-silo and disposable.                                        |
-| `Api:GrpcPort`                    | `50051`     | API host only: the port of the gRPC surface.                                                                     |
-| `Api:HttpPort`                    | `8080`      | API host only: the port of the plain `GET /` listener.                                                           |
+| Key                         | Default     | Meaning                                                                                                          |
+| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| `Clustering:Silos`          | _unset_     | Comma-separated `host:port` list covering the **whole** cluster, this silo included. Its presence is the switch. |
+| `Clustering:SiloPort`       | `11111`     | This silo's listen and advertise port.                                                                           |
+| `Clustering:AdvertisedHost` | `127.0.0.1` | This silo's bind host **and** the host peers dial back.                                                          |
+| `Api:GrpcPort`              | `50051`     | API host only: the port of the gRPC surface.                                                                     |
+| `Api:HttpPort`              | `8080`      | API host only: the port of the plain `GET /` listener.                                                           |
 
 Two silos on one machine — an API host and a silo-only host, in two terminals:
 
 ```sh
 Clustering__Silos=127.0.0.1:11111,127.0.0.1:11112 \
-Clustering__AllowInMemoryStorage=true \
+THRESH_STORAGE_URL=postgres://localhost/benedb \
   pnpm --filter @benedb/api start
 
 Clustering__Silos=127.0.0.1:11111,127.0.0.1:11112 \
 Clustering__SiloPort=11112 \
-Clustering__AllowInMemoryStorage=true \
+THRESH_STORAGE_URL=postgres://localhost/benedb \
   pnpm --filter @benedb/silo start
 ```
 
-Every clustered silo needs the storage opt-in or a connection string, this one included:
-`resolveClustering` throws before the silo is built otherwise. A cluster that is to keep its data
-sets `ConnectionStrings__OrleansStorage` on **both** and drops the opt-in. Start the silo-only host
+Every clustered silo needs durable storage, this one included — see "Storage" below. Start the
+silo-only host
 **first** — static membership reports every configured peer `active` immediately, so the API host's
 startup seed can be placed on a peer that is not listening yet.
 
@@ -102,28 +99,31 @@ until it does — start order matters — and a stopped silo is never removed fr
 inherent to static membership and is why `useKubernetesMembership` is the production path; under
 Kubernetes the pod IP satisfies both halves of `AdvertisedHost` at once.
 
-**MVCC garbage collection does not survive clustering.** The datastore grain registers the
-`mvcc-gc` reminder through the default per-silo reminder table, while `LocalReminderService` fires
-only reminders whose grain hashes into the ranges that silo owns on the ring. The registering silo
-and the owning silo coincide only by chance, so in a cluster the reminder can stop firing and MVCC
-history is never collected. Re-registering on activation does not help — registering and firing are
-keyed on different silos. Closing it means a shared table (`usePostgresReminders`), which is not
-wired yet.
-
 **A dead silo wedges the cluster.** `useStaticMembership` has no failure detection, so calls keep
 routing to a silo that has exited and the caller hangs rather than failing — `zed` sees no error to
 retry. Observed directly: killing one silo left a check that had just answered `true` hanging
 indefinitely.
 
-**A real multi-silo deployment needs durable grain storage.** The datastore grain is a _cluster
-singleton_ over the `datastore` grain-storage provider, and that provider's fallback branch
-constructs a `MemoryGrainStorage` **per silo**. The grain declares no placement, so after an idle
-deactivation it reactivates on an arbitrary silo and reads an empty store: not merely non-durable
-across restarts, but silent data loss during normal operation. So a clustered silo with no
-`ConnectionStrings:OrleansStorage` refuses to configure, naming the key, unless
-`Clustering__AllowInMemoryStorage=true` says out loud that the state is disposable. Pointing that
-connection string at Postgres is sufficient — the grain's confirmed log rides the custom-storage
-seam over the same named provider, so `useMemoryJournaling()` carries no state of its own.
+### Storage
+
+Where BeneDB keeps its state is Thresh's decision, not BeneDB's: both hosts hand Thresh's storage
+backend every durable provider — the datastore grain's journal, the `datastore` grain storage the
+shard and index grains persist their projections through, and the reminder table — and the backend
+comes from `THRESH_STORAGE_URL` (`postgres://…` or `redis://…`; unset means in-memory). BeneDB holds
+no connection string and no database client.
+
+| Variable                                 | Default | Meaning                                                                           |
+| ---------------------------------------- | ------- | --------------------------------------------------------------------------------- |
+| `THRESH_STORAGE_URL`                     | _unset_ | The durable backend. A set-but-blank value is refused rather than read as memory. |
+| `THRESH_STORAGE_ALLOW_IN_MEMORY_CLUSTER` | `false` | Accept in-memory storage on a multi-silo view: per-silo and disposable state.     |
+
+**A multi-silo deployment needs durable storage.** In-memory storage is per silo, so a grain that
+reactivates on another silo — the datastore singleton after an idle deactivation, say — would read an
+empty store: silent data loss during normal operation, not merely non-durability across restarts.
+Thresh refuses that at build, naming `THRESH_STORAGE_URL`, unless
+`THRESH_STORAGE_ALLOW_IN_MEMORY_CLUSTER=true` says out loud that the state is disposable. A durable
+backend also shares the reminder table across silos, so the datastore grain's `mvcc-gc` reminder
+fires on whichever silo owns it.
 
 A clustered host binds a real WebSocket listener, so `ws` must be present at the deployment target
 (see the packaging note below about real npm packages being left external to the bundle).

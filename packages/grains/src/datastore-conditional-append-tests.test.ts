@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { ELLIPSIS } from "@benedb/core/core-constants";
 import type { GrainId } from "@thresh/core/grain-id";
-import type { GrainStorage, StateHolder } from "@thresh/core/grain-storage";
+import type { JournalEntry, JournalSegment, JournalStorage } from "@thresh/core/journal-storage";
+import { MemoryJournalStorage } from "@thresh/journaling/memory-journal-storage";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
 
@@ -32,9 +33,9 @@ import {
  * `custom-storage-log-view-adaptor-impl.test.ts`, and this suite pins the grain-level consequence
  * through a real `TestCluster`.
  *
- * The CAS failure is injected at the true boundary (the storage fake): the commit's log rows are
- * allowed through but every `head` write - the commit point - throws, which the adaptor treats
- * exactly like a lost CAS (re-read, retry, bounded budget). No grain internals are reached into.
+ * The failure is injected at the true boundary (the journal fake): every append - the commit
+ * point - throws, which the adaptor treats as a failed write (re-read, retry, bounded budget, then
+ * drop and report `false`). No grain internals are reached into.
  */
 
 const SCHEMA = `definition user {}
@@ -44,51 +45,45 @@ definition document {
     permission view = viewer
 }`;
 
-const HEAD_STATE_NAME = "head";
-
 /**
- * A `GrainStorage` decorator over the real in-memory provider that can be armed to throw on
- * writes of the datastore grain's `head` row - the commit point - while letting every other row
- * (log entries, meta, shards) through untouched.
+ * A `JournalStorage` decorator over the real in-memory journal that can be armed to throw on
+ * appends - the datastore grain's commit point - while reads and snapshots go through untouched.
  */
-class FlakyHeadStorage implements GrainStorage {
-  failHeadWrites = 0;
-  headWriteAttempts = 0;
+class FlakyJournal implements JournalStorage {
+  failAppends = 0;
 
-  constructor(private readonly inner: GrainStorage) {}
+  constructor(private readonly inner: JournalStorage) {}
 
-  read<T>(
-    stateName: string,
-    grainId: GrainId,
-    state: StateHolder<T>,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    return this.inner.read(stateName, grainId, state, signal);
+  read(logName: string, grainId: GrainId, signal?: AbortSignal): Promise<JournalSegment> {
+    return this.inner.read(logName, grainId, signal);
   }
 
-  write<T>(
-    stateName: string,
+  append(
+    logName: string,
     grainId: GrainId,
-    state: StateHolder<T>,
+    entries: readonly JournalEntry[],
+    expectedVersion: number | undefined,
     signal?: AbortSignal,
-  ): Promise<void> {
-    if (stateName === HEAD_STATE_NAME) {
-      this.headWriteAttempts++;
-      if (this.failHeadWrites > 0) {
-        this.failHeadWrites--;
-        return Promise.reject(new Error("injected head-write failure"));
-      }
+  ): Promise<number> {
+    if (this.failAppends > 0) {
+      this.failAppends--;
+      return Promise.reject(new Error("injected append failure"));
     }
-    return this.inner.write(stateName, grainId, state, signal);
+    return this.inner.append(logName, grainId, entries, expectedVersion, signal);
   }
 
-  clear<T>(
-    stateName: string,
+  replace(
+    logName: string,
     grainId: GrainId,
-    state: StateHolder<T>,
+    entries: readonly JournalEntry[],
+    expectedVersion: number | undefined,
     signal?: AbortSignal,
-  ): Promise<void> {
-    return this.inner.clear(stateName, grainId, state, signal);
+  ): Promise<number> {
+    return this.inner.replace(logName, grainId, entries, expectedVersion, signal);
+  }
+
+  clear(logName: string, grainId: GrainId, signal?: AbortSignal): Promise<void> {
+    return this.inner.clear(logName, grainId, signal);
   }
 }
 
@@ -123,17 +118,17 @@ function directCommit(updates: readonly RelationshipUpdateWire[]): CommitRequest
 }
 
 async function buildCluster(
-  storage: GrainStorage,
+  journal: JournalStorage,
 ): Promise<{ cluster: TestCluster; grain: IDatastoreGrainType }> {
   const cluster = await TestCluster.start({
     initialSilos: 1,
     grains: SPICEPORT_GRAIN_REGISTRATIONS,
     configureSilo: (builder) => {
-      builder.addStorage("datastore", storage);
+      builder.addStorage("datastore", new MemoryGrainStorage());
+      builder.useMemoryJournaling(journal);
       let datastore: IDatastore | undefined;
       const services = addSpiceportGrainServices(builder, {
         schemaText: SCHEMA,
-        datastoreStorage: storage,
         // The host-owned `IDatastore`, resolved lazily over the DI-singleton watch hub - the
         // same wiring `datastore-grain-durability-tests` uses.
         datastore: () =>
@@ -147,23 +142,23 @@ async function buildCluster(
 
 describe("DatastoreConditionalAppendTests", () => {
   it("Commit_ToldFailed_IsNeverAppliedByALaterCommit", async () => {
-    const storage = new FlakyHeadStorage(new MemoryGrainStorage());
-    const { cluster, grain } = await buildCluster(storage);
+    const journal = new FlakyJournal(new MemoryJournalStorage());
+    const { cluster, grain } = await buildCluster(journal);
     try {
       // A first successful commit pins the baseline (and activates the grain).
       const first = await grain.commit(directCommit([touch("doc1", "alice")]));
       expect(first.failure).toBeUndefined();
 
-      // Every head write - the commit point - now fails: the conditional append exhausts its
-      // bounded CAS budget and the commit is REJECTED to the caller.
-      storage.failHeadWrites = Number.MAX_SAFE_INTEGER;
+      // Every append - the commit point - now fails: the conditional append exhausts its bounded
+      // retry budget and the commit is REJECTED to the caller.
+      journal.failAppends = Number.MAX_SAFE_INTEGER;
       const rejectedReply = await grain.commit(directCommit([touch("doc2", "bob")]));
       expect(rejectedReply.failure?.kind).toBe("headMoved");
       expect(rejectedReply.revision).toBeUndefined();
 
       // Storage heals. The next, unrelated commit must apply ONLY its own write: the doc2 event
       // the caller was told failed must never ride along.
-      storage.failHeadWrites = 0;
+      journal.failAppends = 0;
       const second = await grain.commit(directCommit([touch("doc3", "carol")]));
       expect(second.failure).toBeUndefined();
       expect(second.revision).toBeDefined();

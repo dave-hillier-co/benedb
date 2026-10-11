@@ -73,11 +73,13 @@ Two gaps in Thresh block the port, both surfaced by the event-sourced datastore 
 fixed in Thresh, test-first, before S4 — they are the point of BeneDB being Thresh's first
 production use case, not an obstacle to it.
 
-- **`ICustomStorageInterface`.** Spiceport's `DatastoreGrain` is a `JournaledGrain` that owns
-  its own persistence — per-version log rows, periodic snapshots, compaction — through a keyed
-  grain-storage provider. Thresh's `LogViewAdaptorImpl` persists only through the
-  `StateMachineManager` journal substrate, with no seam for a grain to supply its own
-  read/append. Needs a custom-storage log-view adaptor.
+- **Durable journaled grains, and storage the host does not choose.** Spiceport's
+  `DatastoreGrain` is a `JournaledGrain` over Orleans' state-storage log-consistency provider, and
+  its shard and index grains persist their projections through a named grain-storage provider.
+  Thresh persists a journaled grain through its `StateMachineManager` journal substrate, so it
+  needs durable journal providers (Postgres, Redis), a conditional append that never applies an
+  event its caller was told failed, and a storage backend that serves every provider name a silo
+  uses — so BeneDB names its providers and never picks a database.
 - **Custom placement strategies.** `GraphLocalityPlacementDirector` places graph-shard grains
   for locality. Thresh's `placementStrategyFor` is a closed switch over five built-ins; the
   named-director registry exists for placement _filters_ but not for strategies.

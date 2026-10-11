@@ -10,6 +10,7 @@ import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { KeyTypeOf } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
+import type { ShardTailWire } from "./datastore-meta-state";
 import type { CommitReply, CommitRequest } from "./commit-contract";
 import type { DatastoreHeadWire } from "./datastore-dtos";
 import {
@@ -158,6 +159,12 @@ class CountingFakeGrain implements IDatastoreGrain {
   /** The write path under test never hydrates shards; a call here would be a routing bug. */
   readShard(_key: GraphShardKeyWire): Promise<GraphShardState> {
     throw new Error("not supported");
+  }
+  readShardTail(_key: GraphShardKeyWire): Promise<ShardTailWire> {
+    throw new Error("not supported");
+  }
+  flushProjection(): Promise<void> {
+    return Promise.resolve();
   }
 
   readSchemaAt(revision: bigint): Promise<Uint8Array | undefined> {

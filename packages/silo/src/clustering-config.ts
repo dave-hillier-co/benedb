@@ -3,11 +3,7 @@ import { SiloAddress } from "@thresh/core/silo-address";
 import type { SiloBuilder } from "@thresh/hosting/silo-builder";
 import { InProcessNetwork } from "@thresh/messaging/in-process-transport";
 
-import type { Configuration } from "./datastore-storage-config";
-import {
-  DATASTORE_CONNECTION_STRING_KEY,
-  resolveDatastoreConnectionString,
-} from "./datastore-storage-config";
+import type { Configuration } from "./configuration";
 
 /**
  * NO SPICEPORT SOURCE. Spiceport's two hosts call `silo.UseLocalhostClustering();` and nothing
@@ -17,8 +13,8 @@ import {
  * Orleans runs several silos on one machine. The port ledger carries a row for it under "Files
  * with no Spiceport source", so its absence from the C# reads as a decision rather than a gap.
  *
- * It is the direct SIBLING of `datastore-storage-config.ts` and is shared by both hosts the same
- * way that file already is. That is not the shared host helper `CLAUDE.md` forbids: what must stay
+ * It reads the host's `Configuration` and is shared by both hosts. That is not the shared host
+ * helper `CLAUDE.md` forbids: what must stay
  * duplicated is `configureApiSilo` / `configureSiloHost` themselves, which are independently
  * maintained in the C#. A configuration READER shared by both is the precedent this repo already
  * set, and each host keeps its own call site.
@@ -58,9 +54,7 @@ import {
  *     / `DevelopmentServiceId`; and Orleans' second port has no counterpart, because a Thresh silo
  *     has ONE endpoint and the embedded client leg takes an ephemeral port off the same host.
  *  6. PARSING FOLLOWS THE C# IT STANDS IN FOR. `IsNullOrWhiteSpace` decides "absent"; a port must
- *     parse as an integer in 1-65535; the boolean takes `bool.TryParse`'s case-insensitive
- *     `true`/`false` and is made LOUD rather than silently false, because a typo in the one key
- *     that says "this cluster's state is disposable" must not read as "no".
+ *     parse as an integer in 1-65535.
  */
 
 /**
@@ -75,9 +69,6 @@ export const CLUSTERING_SILO_PORT_KEY = "Clustering:SiloPort";
 
 /** This silo's bind AND advertised host - Orleans' `AdvertisedIPAddress = IPAddress.Loopback`. */
 export const CLUSTERING_ADVERTISED_HOST_KEY = "Clustering:AdvertisedHost";
-
-/** Opt-in to a clustered silo over per-silo in-memory grain storage - see {@link resolveClustering}. */
-export const CLUSTERING_ALLOW_IN_MEMORY_STORAGE_KEY = "Clustering:AllowInMemoryStorage";
 
 /** `EndpointOptions.DEFAULT_SILO_PORT`. */
 export const DEFAULT_SILO_PORT = 11111;
@@ -135,21 +126,6 @@ export function readConfiguredPort(
   return port;
 }
 
-/** `bool.TryParse`, made loud: absent takes `fallback`, anything unrecognised throws. */
-function readConfiguredBoolean(
-  configuration: Configuration,
-  key: string,
-  fallback: boolean,
-): boolean {
-  const raw = configuration.get(key);
-  if (isNullOrWhiteSpace(raw)) return fallback;
-
-  const text = (raw as string).trim().toLowerCase();
-  if (text === "true") return true;
-  if (text === "false") return false;
-  throw new InvalidArgumentError(`${key} must be "true" or "false", but was "${raw as string}"`);
-}
-
 /** The one identity rule, applied to this silo and to every peer alike (design decision 2). */
 function addressForEndpoint(endpoint: string): SiloAddress {
   return new SiloAddress(endpoint, `uid-${endpoint}`, endpoint);
@@ -180,8 +156,7 @@ function parseEndpoint(entry: string, key: string): string {
  * must, because `SiloConfig.local` is constructor input.
  *
  * @throws InvalidArgumentError on a clustered configuration that cannot work: a silo missing from
- * its own view, an unparseable port or entry, a wildcard advertised host, an unrecognised boolean,
- * or per-silo in-memory grain storage with no explicit opt-in.
+ * its own view, an unparseable port or entry, or a wildcard advertised host.
  */
 export function resolveClustering(configuration: Configuration): ClusteringOptions {
   if (configuration === undefined || configuration === null) {
@@ -220,31 +195,9 @@ export function resolveClustering(configuration: Configuration): ClusteringOptio
     );
   }
 
-  const allowInMemoryStorage = readConfiguredBoolean(
-    configuration,
-    CLUSTERING_ALLOW_IN_MEMORY_STORAGE_KEY,
-    false,
-  );
-  if (
-    !allowInMemoryStorage &&
-    isNullOrWhiteSpace(resolveDatastoreConnectionString(configuration))
-  ) {
-    // THE DATASTORE GRAIN IS A CLUSTER SINGLETON over a grain-storage provider, and
-    // `addDatastoreGrainStorage`'s fallback branch constructs a MemoryGrainStorage PER SILO. The
-    // grain declares no placement, so after an idle deactivation it reactivates on an arbitrary
-    // silo and reads an EMPTY store: not merely non-durable across restarts, but silent data loss
-    // during normal operation. (`MeshTestCluster` shares ONE storage instance across its silos for
-    // exactly this reason; the production wiring never had to.) Refusing at configure time is the
-    // house idiom - `requireObserverHosting`, `validateClassSpecificCollectionAges` and "no
-    // membership configured" all fail at build rather than in production - and a warning has
-    // nowhere to go, because neither host configures a logger.
-    throw new InvalidArgumentError(
-      `a clustered silo needs durable grain storage: set ${DATASTORE_CONNECTION_STRING_KEY} (env ` +
-        `ConnectionStrings__OrleansStorage), or set ${CLUSTERING_ALLOW_IN_MEMORY_STORAGE_KEY}=true ` +
-        `to accept that the singleton datastore grain's state is per-silo and disposable`,
-    );
-  }
-
+  // Whether a clustered silo's storage is durable is no longer this file's question: Thresh's
+  // `useStorageBackend` refuses in-memory storage on a multi-silo view at build, naming
+  // THRESH_STORAGE_URL and its opt-out.
   return { kind: "clustered", local, silos };
 }
 

@@ -6,6 +6,7 @@ import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { KeyTypeOf } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
+import type { ShardTailWire } from "./datastore-meta-state";
 import type { CommitReply, CommitRequest } from "./commit-contract";
 import type { DatastoreHeadWire } from "./datastore-dtos";
 import type { DatastoreGrainState } from "./datastore-grain-state";
@@ -106,6 +107,12 @@ class WatchFakeGrain implements IDatastoreGrain {
     throw new Error("not supported");
   }
   readShard(_key: GraphShardKeyWire): Promise<GraphShardState> {
+    throw new Error("not supported");
+  }
+  readShardTail(_key: GraphShardKeyWire): Promise<ShardTailWire> {
+    throw new Error("not supported");
+  }
+  flushProjection(): Promise<void> {
     throw new Error("not supported");
   }
   commit(_request: CommitRequest): Promise<CommitReply> {
