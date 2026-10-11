@@ -3,18 +3,19 @@ import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
 import { createRelationship, type Relationship } from "@benedb/core/relationship";
 import type { GrainId } from "@thresh/core/grain-id";
 import type { GrainStorage, StateHolder } from "@thresh/core/grain-storage";
-import { grainReferenceIdentity } from "@thresh/core/grain-reference";
+import type { JournalEntry, JournalSegment, JournalStorage } from "@thresh/core/journal-storage";
 import { IManagementGrain } from "@thresh/core/management-grain";
+import { MemoryJournalStorage } from "@thresh/journaling/memory-journal-storage";
 import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
-import { constructGrain } from "@thresh/runtime/construct-grain";
 import { describe, expect, it } from "vitest";
 
 import type { CommitRequest } from "./commit-contract";
-import type { LogHeadEntry } from "./datastore-dtos";
-import { DatastoreGrain } from "./datastore-grain";
+import { graphShardGrainKeyBuild } from "./graph-shard-grain-key";
 import { graphShardKeyForResource } from "./graph-shard-key";
 import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "./i-datastore-grain";
+import { IGraphShardGrain } from "./i-graph-shard-grain";
+import { configureSequencerSilo, SEQUENCER_GRAIN_REGISTRATIONS } from "./sequencer-test-silo";
 import { toWire } from "./wire-convert";
 
 /**
@@ -22,22 +23,23 @@ import { toWire } from "./wire-convert";
  *
  * Grain-level gates for interleaving pure reads (`getHead`, `readState`, `readFrom`) past an
  * in-flight `commit` on the cluster-singleton `DatastoreGrain`. Drives the REAL grain through a
- * Thresh {@link TestCluster}, with the `datastore` storage provider wrapped by
- * {@link PausableGrainStorage} so a write can be parked mid-flight (at the `head` write, or at a
- * `log/{n}` write) while a read is issued concurrently.
+ * Thresh {@link TestCluster}, with the datastore grain's journal wrapped by {@link PausableJournal}
+ * so the journal append - the commit point - can be parked mid-flight while a read is issued
+ * concurrently, or made to fail once; and the `datastore` grain storage wrapped by
+ * {@link FaultyShardStorage} so a shard projection write can be made to fail once.
  *
  * Port decisions:
  *
- *  1. `IGrainStorage.ReadStateAsync/WriteStateAsync/ClearStateAsync` -> Thresh's
- *     `GrainStorage.read/write/clear`, same `(stateName, grainId, state)` shape plus an optional
- *     ambient `AbortSignal` which the decorator forwards untouched. READS stay ungated, exactly as
- *     in the C#: only the write path is under test.
+ *  1. THE COMMIT POINT IS A JOURNAL APPEND. The C# parks the sequencer's grain-storage write,
+ *     because Orleans' state-storage log-consistency provider writes the journaled view there; a
+ *     Thresh `JournaledGrain` appends to the silo's journal instead, so the gate wraps a
+ *     `JournalStorage`. Reads stay ungated, exactly as in the C#: only the write path is under test.
  *  2. The C#'s keyed-DI swap (`AddMemoryGrainStorage("datastore-inner")` + a keyed
  *     `IGrainStorage` override for `"datastore"`) collapses: Thresh has no keyed DI, so the test
- *     constructs the decorator over a `MemoryGrainStorage` directly and hands it to the grain
- *     through a `GrainActivator`. The "force the binary serializer" half of that registration has
- *     no counterpart either - `MemoryGrainStorage` round-trips through `structuredClone`, which
- *     preserves `Uint8Array`, `Map` and `bigint` exactly.
+ *     constructs the decorators directly and binds them through `configureSequencerSilo`. The
+ *     "force the binary serializer" half of that registration has no counterpart - the memory
+ *     providers round-trip through `structuredClone`, which preserves `Uint8Array`, `Map` and
+ *     `bigint` exactly.
  *  3. The static `Gate` stays a MODULE-LEVEL handle rather than becoming per-instance state. In
  *     xunit it was safe only because `MeshClusterCollection` serialized every cluster-using class;
  *     under vitest each test FILE gets its own module registry, so this is already file-local state
@@ -124,38 +126,76 @@ async function raceTimeout(work: Promise<unknown>): Promise<"work" | "timeout"> 
 }
 
 /**
- * File-scoped gate state consulted by {@link PausableGrainStorage}. See port decision 3 above for
- * why a module-level handle is safe here.
+ * File-scoped gate state consulted by {@link PausableJournal} and {@link FaultyShardStorage}. See
+ * port decision 3 above for why a module-level handle is safe here.
  */
 const gate: {
   headWriteBlock: Deferred | undefined;
   headWriteParked: Deferred | undefined;
-  logWriteBlock: Deferred | undefined;
-  logWriteParked: Deferred | undefined;
   throwOnceOnHeadWrite: boolean;
+  throwOnceOnShardWrite: boolean;
 } = {
   headWriteBlock: undefined,
   headWriteParked: undefined,
-  logWriteBlock: undefined,
-  logWriteParked: undefined,
   throwOnceOnHeadWrite: false,
+  throwOnceOnShardWrite: false,
 };
 
 function resetGate(): void {
   gate.headWriteBlock = undefined;
   gate.headWriteParked = undefined;
-  gate.logWriteBlock = undefined;
-  gate.logWriteParked = undefined;
   gate.throwOnceOnHeadWrite = false;
+  gate.throwOnceOnShardWrite = false;
 }
 
 /**
- * Wraps the in-memory grain-storage provider so a test can park a `head` or `log/{n}` write
- * mid-flight (an await that only resumes once the test releases the corresponding gate deferred),
- * or make the next `head` write throw once. Reads are never gated - only the write path is under
- * test here.
+ * Wraps the in-memory journal so a test can park an append - the datastore grain's commit point -
+ * mid-flight (an await that only resumes once the test releases the gate deferred), or make the
+ * next append throw once. Reads and snapshot replaces are never gated.
  */
-class PausableGrainStorage implements GrainStorage {
+class PausableJournal implements JournalStorage {
+  constructor(private readonly inner: JournalStorage) {}
+
+  read(logName: string, grainId: GrainId, signal?: AbortSignal): Promise<JournalSegment> {
+    return this.inner.read(logName, grainId, signal);
+  }
+
+  async append(
+    logName: string,
+    grainId: GrainId,
+    entries: readonly JournalEntry[],
+    expectedVersion: number | undefined,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    if (gate.throwOnceOnHeadWrite) {
+      gate.throwOnceOnHeadWrite = false;
+      throw new Error("injected append failure (test seam)");
+    }
+    const headGate = gate.headWriteBlock;
+    if (headGate !== undefined) {
+      gate.headWriteParked?.resolve();
+      await headGate.promise;
+    }
+    return this.inner.append(logName, grainId, entries, expectedVersion, signal);
+  }
+
+  replace(
+    logName: string,
+    grainId: GrainId,
+    entries: readonly JournalEntry[],
+    expectedVersion: number | undefined,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    return this.inner.replace(logName, grainId, entries, expectedVersion, signal);
+  }
+
+  clear(logName: string, grainId: GrainId, signal?: AbortSignal): Promise<void> {
+    return this.inner.clear(logName, grainId, signal);
+  }
+}
+
+/** Wraps the in-memory grain storage so the next shard-projection write can be made to throw. */
+class FaultyShardStorage implements GrainStorage {
   constructor(private readonly inner: GrainStorage) {}
 
   read<T>(
@@ -167,30 +207,17 @@ class PausableGrainStorage implements GrainStorage {
     return this.inner.read(stateName, grainId, state, signal);
   }
 
-  async write<T>(
+  write<T>(
     stateName: string,
     grainId: GrainId,
     state: StateHolder<T>,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (stateName === "head") {
-      if (gate.throwOnceOnHeadWrite) {
-        gate.throwOnceOnHeadWrite = false;
-        throw new Error("injected head-write failure (test seam)");
-      }
-
-      const headGate = gate.headWriteBlock;
-      if (headGate !== undefined) {
-        gate.headWriteParked?.resolve();
-        await headGate.promise;
-      }
-    } else if (stateName.startsWith("log/") && gate.logWriteBlock !== undefined) {
-      const logGate = gate.logWriteBlock;
-      gate.logWriteParked?.resolve();
-      await logGate.promise;
+    if (gate.throwOnceOnShardWrite && String(grainId.type).toLowerCase().includes("graphshard")) {
+      gate.throwOnceOnShardWrite = false;
+      return Promise.reject(new Error("injected shard-projection write failure (test seam)"));
     }
-
-    await this.inner.write(stateName, grainId, state, signal);
+    return this.inner.write(stateName, grainId, state, signal);
   }
 
   clear<T>(
@@ -205,24 +232,22 @@ class PausableGrainStorage implements GrainStorage {
 
 interface Fixture {
   readonly cluster: TestCluster;
-  readonly storage: PausableGrainStorage;
 }
 
 async function newCluster(): Promise<Fixture> {
   resetGate();
-  const storage = new PausableGrainStorage(new MemoryGrainStorage());
+  const stores = {
+    storage: new FaultyShardStorage(new MemoryGrainStorage()),
+    journal: new PausableJournal(new MemoryJournalStorage()),
+  };
   const cluster = await TestCluster.start({
     initialSilos: 1,
-    grains: [{ ctor: DatastoreGrain, interfaces: [IDatastoreGrain] }],
+    grains: SEQUENCER_GRAIN_REGISTRATIONS,
     configureSilo: (builder) => {
-      builder.addStorage("datastore", storage);
-      builder.useGrainActivator({
-        createInstance: (ctor) =>
-          ctor === DatastoreGrain ? new DatastoreGrain({ storage }) : constructGrain(ctor),
-      });
+      configureSequencerSilo(builder, stores);
     },
   });
-  return { cluster, storage };
+  return { cluster };
 }
 
 function grain(cluster: TestCluster): IDatastoreGrain {
@@ -240,7 +265,7 @@ async function withCluster(body: (fixture: Fixture) => Promise<void>): Promise<v
 
 describe("DatastoreInterleavedReadTests", () => {
   /**
-   * Gate 1: with a write parked at the `head` storage write (the commit point), `getHead` and
+   * Gate 1: with a write parked at the journal append (the commit point), `getHead` and
    * `readFrom` must still complete promptly - proving the pure reads interleave past the blocking
    * write turn rather than queuing behind it on the non-reentrant activation. MUST FAIL on a grain
    * whose interface options drop `alwaysInterleave` (reads queue behind the parked write and the
@@ -257,7 +282,7 @@ describe("DatastoreInterleavedReadTests", () => {
 
       const appendTask = target.commit(touchCommit("a", "alice", oldHead));
       try {
-        await waitAsync(gate.headWriteParked.promise, "the head write to park");
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
 
         const headTask = target.getHead();
         const readTask = target.readFrom(oldHead, -1);
@@ -272,23 +297,22 @@ describe("DatastoreInterleavedReadTests", () => {
   });
 
   /**
-   * Gate 2: a write parked mid-flight must never be observable by an interleaved reader - neither
-   * at the `head` write (log entries already durable) nor at a `log/{n}` write (nothing durable yet
-   * for this commit). Once the write completes, the event and the advanced head become visible
-   * together (one consistent publication).
+   * Gate 2: a write parked mid-flight must never be observable by an interleaved reader. Once the
+   * write completes, the event and the advanced head become visible together (one consistent
+   * publication: both come from the one confirmed state).
    */
   it("Parked_write_is_invisible_until_the_head_commit", async () => {
     await withCluster(async ({ cluster }) => {
       const target = grain(cluster);
       const oldHead = (await target.getHead()).head;
 
-      // Phase 1: park at the head write itself.
+      // Park at the journal append itself.
       gate.headWriteBlock = deferred();
       gate.headWriteParked = deferred();
       const append1 = target.commit(touchCommit("a", "alice", oldHead));
       let newHead1: bigint | undefined;
       try {
-        await waitAsync(gate.headWriteParked.promise, "the head write to park");
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
 
         const segmentDuringPark = await waitAsync(
           target.readFrom(oldHead, -1),
@@ -309,47 +333,14 @@ describe("DatastoreInterleavedReadTests", () => {
       expect(segmentAfterCommit.events).toHaveLength(1);
       expect(segmentAfterCommit.events[0]!.revision).toBe(newHead1);
       expect(segmentAfterCommit.headRevision).toBe(newHead1);
-
-      // Phase 2: repeat, this time parking at the log-entry write (nothing durable for this commit
-      // yet).
-      gate.headWriteBlock = undefined;
-      gate.headWriteParked = undefined;
-      gate.logWriteBlock = deferred();
-      gate.logWriteParked = deferred();
-      const append2 = target.commit(touchCommit("b", "bob", newHead1!));
-      let newHead2: bigint | undefined;
-      try {
-        await waitAsync(gate.logWriteParked.promise, "the log write to park");
-
-        const segmentDuringLogPark = await waitAsync(
-          target.readFrom(newHead1!, -1),
-          "readFrom during the log park",
-        );
-        expect(segmentDuringLogPark.events).toHaveLength(0);
-
-        const headDuringLogPark = await waitAsync(target.getHead(), "getHead during the log park");
-        expect(headDuringLogPark.head).toBe(newHead1);
-      } finally {
-        gate.logWriteBlock.resolve();
-        newHead2 = (await append2).revision;
-      }
-
-      expect(newHead2).toBeDefined();
-      const segmentFinal = await target.readFrom(newHead1!, -1);
-      expect(segmentFinal.events).toHaveLength(1);
-      expect(segmentFinal.events[0]!.revision).toBe(newHead2);
-      expect(segmentFinal.headRevision).toBe(newHead2);
     });
   });
 
   /**
-   * Gate 3: a commit whose `head` write fails transiently must never leak a spurious event - and,
-   * because the log-row writes tolerate overwriting their own orphan (the write-first,
-   * ETag-tolerant-fallback discipline), the storage adaptor's internal retry RECOVERS the commit:
-   * it re-writes the same log entry over the orphan, retries the head write, and the caller's
-   * `commit` completes with the minted revision. This pins three things at once: the commit
-   * succeeds despite the one-shot fault, exactly ONE event surfaces (the orphan overwrite
-   * duplicated nothing), and the datastore is writable afterwards.
+   * Gate 3: a commit whose journal append fails transiently must never leak a spurious event, and
+   * the log-view adaptor's re-read-and-retry RECOVERS the commit: the caller's `commit` completes
+   * with the minted revision. This pins three things at once: the commit succeeds despite the
+   * one-shot fault, exactly ONE event surfaces, and the datastore is writable afterwards.
    */
   it("Failed_head_write_recovers_without_leaking_or_duplicating_events", async () => {
     await withCluster(async ({ cluster }) => {
@@ -383,55 +374,58 @@ describe("DatastoreInterleavedReadTests", () => {
   });
 
   /**
-   * Gate 3b: the same one-shot head-write fault as gate 3, landed exactly ON a FLUSH BOUNDARY (the
-   * 64th commit). The failed attempt has already written its shard rows, the rotated index-bucket
-   * pair, the delta row and the meta row - all orphans at versioned names - and the adaptor's retry
-   * re-runs the SAME boundary: same log slot, same flush version, same rotated bucket, overwriting
-   * its own orphans via the read-then-write discipline. Pins that the boundary commit succeeds and
-   * that the index the retried flush committed is CORRECT: after a forced deactivation, recovery
-   * reconstructs the store THROUGH that index, and every pre-boundary key must still be served (a
-   * referenced-but-wrong bucket/delta/shard row would lose keys or fail the recovery loudly).
+   * Gate 3b: a shard-projection write that fails at the FLUSH BOUNDARY (the 64th commit) must not
+   * fail the commit that triggered the flush - that commit is already journaled - and must lose
+   * nothing: the events stay pending (reads fold them over the partial projection), and the next
+   * flush replays them, idempotently for the shards that did persist. After a forced deactivation
+   * every key is still served from the projection.
    */
-  it("Failed_head_write_at_a_flush_boundary_retries_the_same_bucket_and_commits_a_correct_index", async () => {
-    await withCluster(async ({ cluster, storage }) => {
+  it("Failed_projection_write_at_a_flush_boundary_keeps_events_pending_until_a_later_flush", async () => {
+    await withCluster(async ({ cluster }) => {
       const target = grain(cluster);
       let head = (await target.getHead()).head;
 
-      // 63 commits bring the contiguous log to version 63 - the next commit is the flush boundary.
+      // 63 commits - the next commit fills the pending tail to the flush interval.
       for (let i = 0; i < 63; i += 1) {
         const reply = await target.commit(touchCommit(`k${i}`, `u${i}`, head));
         expect(reply.failure).toBeUndefined();
         head = reply.revision!;
       }
 
-      gate.throwOnceOnHeadWrite = true;
+      gate.throwOnceOnShardWrite = true;
       const boundary = await waitAsync(
         target.commit(touchCommit("k63", "u63", head)),
         "the boundary commit",
       );
       expect(boundary.failure).toBeUndefined();
       expect(boundary.revision).toBeDefined();
+      expect(gate.throwOnceOnShardWrite).toBe(false); // the fault really fired
 
-      // The flush really committed on the retry: the durable head names the boundary as its flush.
-      const grainId = grainReferenceIdentity(target)!.grainId;
-      const headRow: StateHolder<LogHeadEntry> = {
-        value: undefined as unknown as LogHeadEntry,
-        exists: false,
-      };
-      await storage.read("head", grainId, headRow);
-      expect(headRow.exists).toBe(true);
-      expect(headRow.value.logVersion).toBe(64);
-      expect(headRow.value.snapshotVersion).toBe(64);
+      // Nothing projected yet: the tail is still served from the pending state.
+      const tail = await target.readFrom(head - 1n, -1);
+      expect(tail.events.some((e) => e.revision === boundary.revision)).toBe(true);
+      for (let i = 0; i < 64; i += 1) {
+        const shard = await target.readShard(graphShardKeyForResource("doc", `k${i}`));
+        const live = shard.rows.filter((r) => r.deletedRevision === undefined);
+        expect(live).toHaveLength(1);
+        expect(live[0]!.relationship.subjectId).toBe(`u${i}`);
+      }
 
-      // Recovery THROUGH the retried flush's index: drop the activation and re-read every key.
+      // A later flush replays the whole tail; then recovery reads every key back from projections.
+      await target.flushProjection();
       const management = cluster.primary.host.getGrain(IManagementGrain, 0n);
       await management.forceActivationCollection({ ms: 0 });
 
       const headAfter = await target.getHead();
       expect(headAfter.head).toBe(boundary.revision);
       for (let i = 0; i < 64; i += 1) {
-        const shard = await target.readShard(graphShardKeyForResource("doc", `k${i}`));
-        const live = shard.rows.filter((r) => r.deletedRevision === undefined);
+        const projected = await cluster.primary.host
+          .getGrain(
+            IGraphShardGrain,
+            graphShardGrainKeyBuild(graphShardKeyForResource("doc", `k${i}`)),
+          )
+          .readProjected();
+        const live = projected.rows.filter((r) => r.deletedRevision === undefined);
         expect(live).toHaveLength(1);
         expect(live[0]!.relationship.subjectId).toBe(`u${i}`);
       }

@@ -7,16 +7,14 @@ import type { IDatastore } from "@benedb/datastore/i-datastore";
 import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import { SiloAddress } from "@thresh/core/silo-address";
 import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
+import type { StorageBackend } from "@thresh/hosting/storage-backend";
+import { storageBackendFromEnvironment } from "@thresh/hosting/storage-backend";
 import type { SiloHost } from "@thresh/hosting/silo-host";
 
 import type { ClusteringOptions } from "./clustering-config";
 import { applyClustering, resolveClustering } from "./clustering-config";
-import type { Configuration } from "./datastore-storage-config";
-import {
-  DATASTORE_PROVIDER_NAME,
-  addDatastoreGrainStorage,
-  configurationFromEnvironment,
-} from "./datastore-storage-config";
+import type { Configuration } from "./configuration";
+import { configurationFromEnvironment } from "./configuration";
 import { SILO_SCHEMA_TEXT } from "./silo-schema";
 
 /**
@@ -50,14 +48,16 @@ import { SILO_SCHEMA_TEXT } from "./silo-schema";
  *     unconditionally on BOTH paths, and is load-bearing rather than aspirational now that two
  *     transports can back the seam and others cannot: it is what makes a future third choice fail
  *     at BUILD time rather than on the first Watch call.
- *  3. `AddCustomStorageBasedLogConsistencyProvider("CustomStorage")` has no counterpart: Thresh's
- *     journaling binder DETECTS a custom-storage host and installs the adaptor, so what the C#
- *     named a provider is `useMemoryJournaling()` here - the call that makes the binder run. The
- *     datastore grain's own durability still goes through the `datastore` GRAIN-STORAGE provider,
- *     exactly as in the C#, so this registration carries no state of its own.
- *  4. `UseInMemoryReminderService()` becomes `useReminders()` with its default in-memory table.
- *     In-memory is deliberate even for a durable deployment: the singleton grain re-registers
- *     `mvcc-gc` on every activation, so losing a registration is safe.
+ *  3. `AddDatastoreGrainStorage(configuration)` and
+ *     `AddStateStorageBasedLogConsistencyProvider("StateStorage")` become ONE call,
+ *     `useStorageBackend(storage)`. Where durable state lives is Thresh's decision, not this
+ *     host's: the backend (from `THRESH_STORAGE_URL` by default) serves the `datastore`
+ *     grain-storage provider the shard and index grains persist through, the journal the datastore
+ *     grain is journaled in, and the reminder table. The C#'s connection-string reader and its
+ *     "clustered silo needs durable storage" guard live in Thresh with it.
+ *  4. `UseInMemoryReminderService()` becomes `useReminders()`, whose table is the storage
+ *     backend's: shared across silos on a durable backend, so the `mvcc-gc` reminder fires on the
+ *     ring owner wherever the singleton registered it.
  *  5. `AddSingleton<IDatastore>(...)` has no container to live in: `addSpiceportGrainServices`
  *     takes the host-owned datastore as a thunk and exposes it back on the returned record, which
  *     IS the container (see that file's port decisions).
@@ -72,10 +72,9 @@ import { SILO_SCHEMA_TEXT } from "./silo-schema";
  *     switch, so the DEFAULT is byte-identically today's host. A clustered silo's IDENTITY is
  *     derived from its endpoint (`SiloAddress.ringKey` is `podName`, so two silos sharing this
  *     host's constant name would be one ring position), which is why {@link SILO_NAME} names only
- *     the single-process silo. And a clustered silo needs DURABLE grain storage - the datastore
- *     grain is a cluster singleton whose default in-memory provider is constructed per silo, so its
- *     state would not survive the activation moving - which `resolveClustering` refuses at
- *     configure time unless the operator opts in.
+ *     the single-process silo. And a clustered silo needs DURABLE storage - per-silo in-memory state
+ *     would not survive an activation moving - which Thresh's `useStorageBackend` refuses at build
+ *     unless the operator opts in.
  */
 
 /**
@@ -95,6 +94,7 @@ export function configureSiloHost(
   builder: SiloBuilder,
   configuration: Configuration,
   clustering: ClusteringOptions = resolveClustering(configuration),
+  storage: StorageBackend = storageBackendFromEnvironment(),
 ): SpiceportGrainServices {
   if (builder === undefined || builder === null) {
     throw new InvalidArgumentError("builder is required");
@@ -111,31 +111,16 @@ export function configureSiloHost(
   // CheckGrain's per-activation reply memo (default ON) needs a matching idle-collection age so a
   // warm activation survives long enough between calls for the memo to pay off.
   addActivationMemoCollectionAge(builder);
-  // Storage for the singleton datastore grain (the single source of truth). Durable Postgres when
-  // ConnectionStrings:OrleansStorage is configured; otherwise in-memory (default localhost dev = no
-  // Postgres).
-  addDatastoreGrainStorage(builder, configuration);
-  // The event-sourced datastore grain owns its persistence via the custom-storage seam over the
-  // "datastore" grain-storage provider above - see port decision 3.
-  builder.useMemoryJournaling();
+  // Where durable state lives - the datastore grain's journal, the shard and index grains'
+  // `datastore` provider, the reminder table - is the storage backend's decision (port decision 3).
+  builder.useStorageBackend(storage);
   // Backs the datastore grain's periodic MVCC-GC reminder ("mvcc-gc") - see port decision 4.
-  //
-  // KNOWN LIMITATION IN A CLUSTER. The default table is PER SILO, and `LocalReminderService` fires
-  // only the reminders whose grain hashes into the ranges THIS silo owns on the ring. Registration
-  // lands on the silo the singleton activated on; firing is decided by the ring owner. Those are
-  // the same silo only by coincidence, so with N silos `mvcc-gc` can silently stop running and MVCC
-  // history is never collected. Re-registering on every activation does NOT close the gap, because
-  // registering and firing are keyed on different silos. The fix is a SHARED table
-  // (`usePostgresReminders`), which is not wired yet - single-process hosts are unaffected.
   builder.useReminders();
 
   // Schema + dispatch mesh (Caching over the grain mesh) + check-engine singletons.
   let datastore: IDatastore | undefined;
   const services: SpiceportGrainServices = addSpiceportGrainServices(builder, {
     schemaText: SILO_SCHEMA_TEXT,
-    ...(builder.storageProvider(DATASTORE_PROVIDER_NAME) !== undefined
-      ? { datastoreStorage: builder.storageProvider(DATASTORE_PROVIDER_NAME) }
-      : {}),
     ...(DATASTORE_GC_OPTIONS !== undefined ? { datastoreGcOptions: DATASTORE_GC_OPTIONS } : {}),
     // The datastore facade delegates to the cluster-singleton datastore grain (engine graph reads
     // go through the graph-shard mesh, not this facade). The watch hub is the one the grain

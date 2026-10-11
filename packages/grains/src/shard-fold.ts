@@ -182,8 +182,8 @@ export function shardFoldIsReadableAt(state: GraphShardState, revision: bigint):
 
 /**
  * Collects the shard's rows below `floor` and stamps the watermark to `revision` - the GC branch of
- * the fold, exposed for the thin sequencer's lazy row GC: stored rows are only compacted when next
- * dirtied and flushed, so every serve path re-applies the current floor through this function (a
+ * the fold, exposed for lazy row GC: a shard's projected rows are only compacted when its key is
+ * next projected, so every serve path re-applies the current floor through this function (a
  * floor at or below the shard's own is a pure relabel). Applying the LATEST floor once is
  * equivalent to applying every intermediate GC event's floor in sequence: a row is dropped iff it
  * is fully dead or expired at/below the final floor, which subsumes every lower floor's collection
@@ -195,6 +195,41 @@ export function shardFoldCollectBelow(
   floor: bigint,
 ): GraphShardState {
   return applyGc(state, revision, floor);
+}
+
+/**
+ * The current per-key state from a shard's PROJECTED state and the sequencer's pending tail: folds
+ * the pending relationship events that touch `key` and lie above the projected label (those at or
+ * below it are already projected), then relabels to `head` and applies `floor`. Exact because
+ * every event touching the key is either projected (at or below the label) or pending; GC events
+ * need no replay, since applying the latest floor once subsumes every earlier one (see
+ * {@link shardFoldCollectBelow}).
+ */
+export function shardFoldOverlay(
+  projected: GraphShardState,
+  pending: Iterable<LogEvent>,
+  key: GraphShardKeyWire,
+  head: bigint,
+  floor: bigint,
+): GraphShardState {
+  let state = projected;
+  for (const ev of pending) {
+    if (ev.revision > projected.appliedRevision && shardFoldTouches(ev, key))
+      state = shardFoldApplyEvent(state, ev, key);
+  }
+  return applyGc(
+    state,
+    state.appliedRevision > head ? state.appliedRevision : head,
+    floor > state.gcFloor ? floor : state.gcFloor,
+  );
+}
+
+/** True when `ev` changes a relationship in `key`'s slice. */
+export function shardFoldTouches(ev: LogEvent, key: GraphShardKeyWire): boolean {
+  return (
+    ev.gcFloor === undefined &&
+    ev.relationshipChanges.some((change) => graphShardKeyMatches(key, change.relationship))
+  );
 }
 
 // Mirrors `collectBelow`'s relationship rules exactly: drop a row when it is fully dead below the

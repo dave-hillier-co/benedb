@@ -1,6 +1,7 @@
 import type { GrainKeyFor } from "@thresh/core/key-kinds";
 import { describe, expect, it } from "vitest";
 
+import type { ShardTailWire } from "./datastore-meta-state";
 import type { CommitReply, CommitRequest } from "./commit-contract";
 import type { DatastoreHeadWire } from "./datastore-dtos";
 import type { DatastoreGrainState } from "./datastore-grain-state";
@@ -37,6 +38,7 @@ describe("IDatastoreGrain", () => {
       getHead: { alwaysInterleave: true },
       readSchemaAt: { alwaysInterleave: true },
       readShard: { alwaysInterleave: true },
+      readShardTail: { alwaysInterleave: true },
       readFrom: { alwaysInterleave: true },
     });
   });
@@ -46,7 +48,13 @@ describe("IDatastoreGrain", () => {
     // to every other write precisely because Commit carries no interleave attribute. Adding one
     // would let the head move under a declarative commit and make the ExpectedHead compare
     // inexact. Nor do SubscribeWatch, UnsubscribeWatch or RunGc carry anything.
-    for (const method of ["commit", "subscribeWatch", "unsubscribeWatch", "runGc"]) {
+    for (const method of [
+      "commit",
+      "subscribeWatch",
+      "unsubscribeWatch",
+      "runGc",
+      "flushProjection",
+    ]) {
       expect(IDatastoreGrain.options[method]).toBeUndefined();
     }
   });
@@ -104,6 +112,8 @@ describe("IDatastoreGrain", () => {
       getHead: (): Promise<DatastoreHeadWire> => unimplemented(),
       readSchemaAt: (_revision: bigint): Promise<Uint8Array | undefined> => unimplemented(),
       readShard: (_key: GraphShardKeyWire): Promise<GraphShardState> => unimplemented(),
+      readShardTail: (_key: GraphShardKeyWire): Promise<ShardTailWire> => unimplemented(),
+      flushProjection: (): Promise<void> => unimplemented(),
       commit: (_request: CommitRequest): Promise<CommitReply> => unimplemented(),
       subscribeWatch: (_watcher: IDatastoreWatcher): Promise<DatastoreHeadWire> => unimplemented(),
       unsubscribeWatch: (_watcher: IDatastoreWatcher): Promise<void> => unimplemented(),
@@ -116,6 +126,8 @@ describe("IDatastoreGrain", () => {
       "getHead",
       "readSchemaAt",
       "readShard",
+      "readShardTail",
+      "flushProjection",
       "commit",
       "subscribeWatch",
       "unsubscribeWatch",

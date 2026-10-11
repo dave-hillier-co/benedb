@@ -5,7 +5,6 @@ import type { ISchemaHashSource } from "@benedb/engine/i-schema-hash-source";
 import type { Duration } from "@thresh/core/duration";
 import type { Grain } from "@thresh/core/grain";
 import type { GrainRegistrationSpec } from "@thresh/core/grain-registration-spec";
-import type { GrainStorage } from "@thresh/core/grain-storage";
 import type { Logger } from "@thresh/core/logger";
 import { constructGrain } from "@thresh/runtime/construct-grain";
 import type { GrainFactoryAccess, SiloBuilder } from "@thresh/hosting/silo-builder";
@@ -22,13 +21,14 @@ import { GRAPH_LOCALITY_PLACEMENT_STRATEGY } from "./graph-locality-placement";
 import { GraphLocalityPlacementDirector } from "./graph-locality-placement-director";
 import type { GraphPlacementOptions } from "./graph-placement-options";
 import { GraphShardGrain } from "./graph-shard-grain";
+import { ShardIndexGrain } from "./shard-index-grain";
 import { ICheckGrain } from "./i-check-grain";
 import { IDatastoreGrain, DATASTORE_GRAIN_KEY } from "./i-datastore-grain";
 import type { IDispatchMetrics } from "./i-dispatch-metrics";
 import { DispatchMetrics } from "./i-dispatch-metrics";
 import type { IGraphReaderSource } from "./i-graph-reader-source";
 import { ShardedGraphReaderSource } from "./i-graph-reader-source";
-import { IGraphShardGrain } from "./i-graph-shard-grain";
+import { IGraphShardGrain, IShardIndexGrain } from "./i-graph-shard-grain";
 import { IMembershipWalkGrain } from "./i-membership-walk-grain";
 import type { IPermissionChecker } from "./i-permission-checker";
 import { PermissionChecker } from "./i-permission-checker";
@@ -110,8 +110,6 @@ export interface SpiceportGrainServicesOptions {
    * invoked during registration - see port decision 2.
    */
   readonly datastore: () => IDatastore;
-  /** The grain-storage provider the singleton `DatastoreGrain` persists its log through. */
-  readonly datastoreStorage?: GrainStorage | undefined;
   /** The datastore grain's MVCC-GC options (window, reminder enablement). */
   readonly datastoreGcOptions?: DatastoreGcOptions | undefined;
   /** The graph co-placement toggle. TRY-added: an earlier explicit opt-in wins. */
@@ -189,6 +187,7 @@ export const SPICEPORT_GRAIN_REGISTRATIONS: readonly GrainRegistrationSpec[] = [
   { ctor: RelationshipsGrain, interfaces: [IRelationshipsGrain] },
   { ctor: CheckGrain, interfaces: [ICheckGrain] },
   { ctor: GraphShardGrain, interfaces: [IGraphShardGrain] },
+  { ctor: ShardIndexGrain, interfaces: [IShardIndexGrain] },
   { ctor: MembershipWalkGrain, interfaces: [IMembershipWalkGrain] },
   { ctor: SubjectFrontierGrain, interfaces: [ISubjectFrontierGrain] },
 ];
@@ -352,9 +351,6 @@ export function addSpiceportGrainServices(
       switch (ctor) {
         case DatastoreGrain:
           return new DatastoreGrain({
-            ...(options.datastoreStorage !== undefined
-              ? { storage: options.datastoreStorage }
-              : {}),
             ...(options.datastoreGcOptions !== undefined
               ? { gcOptions: options.datastoreGcOptions }
               : {}),

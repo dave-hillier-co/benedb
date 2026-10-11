@@ -7,17 +7,13 @@ import { RevisionNotFoundException } from "@benedb/datastore/datastore-exception
 import type { IDatastore } from "@benedb/datastore/i-datastore";
 import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
 import type { GrainInterface } from "@thresh/core/grain-interface";
-import type { GrainStorage } from "@thresh/core/grain-storage";
 import type { KeyTypeOf } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
-import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
-import { constructGrain } from "@thresh/runtime/construct-grain";
 import { describe, expect, it } from "vitest";
 
 import type { FullRelationshipsFilterWire } from "./datastore-dtos";
 import { datastoreGrainStateEmpty, type DatastoreGrainState } from "./datastore-grain-state";
-import { DatastoreGrain } from "./datastore-grain";
 import { GrainBackedDatastore } from "./grain-backed-datastore";
 import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "./i-datastore-grain";
 import { createIsolatedWatchHub } from "./isolated-watch-hub";
@@ -28,6 +24,12 @@ import type { RelationshipWire } from "./relationships-dtos";
 // is the only gate in this file that lets a domain exception cross the grain boundary, and it
 // asserts the CLASS, not the message - so the import is load-bearing, not decorative.
 import "./revision-not-found-surrogate";
+import {
+  configureSequencerSilo,
+  createSequencerStores,
+  SEQUENCER_GRAIN_REGISTRATIONS,
+  type SequencerStores,
+} from "./sequencer-test-silo";
 
 /**
  * Ported from Spiceport `tests/Spiceport.Grains.Tests/Stage1JournaledWritePathTests.cs`.
@@ -88,16 +90,12 @@ function update(
  * `datastore` provider name for parity with the C# even though the grain reaches it through the
  * activator rather than a keyed lookup.
  */
-async function newCluster(storage: GrainStorage): Promise<TestCluster> {
+async function newCluster(stores: SequencerStores): Promise<TestCluster> {
   return TestCluster.start({
     initialSilos: 1,
-    grains: [{ ctor: DatastoreGrain, interfaces: [IDatastoreGrain] }],
+    grains: SEQUENCER_GRAIN_REGISTRATIONS,
     configureSilo: (builder) => {
-      builder.addStorage("datastore", storage);
-      builder.useGrainActivator({
-        createInstance: (ctor) =>
-          ctor === DatastoreGrain ? new DatastoreGrain({ storage }) : constructGrain(ctor),
-      });
+      configureSequencerSilo(builder, stores);
     },
   });
 }
@@ -283,7 +281,7 @@ function compareRevisions(a: bigint, b: bigint): number {
 }
 
 async function withCluster(body: (cluster: TestCluster) => Promise<void>): Promise<void> {
-  const cluster = await newCluster(new MemoryGrainStorage());
+  const cluster = await newCluster(createSequencerStores());
   try {
     await body(cluster);
   } finally {

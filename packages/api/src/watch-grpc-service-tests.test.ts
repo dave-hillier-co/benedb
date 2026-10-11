@@ -197,7 +197,6 @@ describe("WatchGrpcServiceTests", () => {
         let hosted: IDatastore | undefined;
         services = addSpiceportGrainServices(builder, {
           schemaText: SchemaText,
-          datastoreStorage: storage,
           datastoreGcOptions: gcOptions,
           datastore: () =>
             (hosted ??= new GrainBackedDatastore(

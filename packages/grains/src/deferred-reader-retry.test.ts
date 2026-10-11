@@ -6,6 +6,7 @@ import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { KeyTypeOf } from "@thresh/core/key-kinds";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
+import type { ShardTailWire } from "./datastore-meta-state";
 import type { CommitReply } from "./commit-contract";
 import type { DatastoreHeadWire } from "./datastore-dtos";
 import { datastoreGrainStateEmpty, type DatastoreGrainState } from "./datastore-grain-state";
@@ -49,6 +50,12 @@ class FlakyGrain implements IDatastoreGrain {
     throw new Error("not used by this test");
   }
   readShard(): Promise<GraphShardState> {
+    throw new Error("not used by this test");
+  }
+  readShardTail(): Promise<ShardTailWire> {
+    throw new Error("not used by this test");
+  }
+  flushProjection(): Promise<void> {
     throw new Error("not used by this test");
   }
   commit(): Promise<CommitReply> {

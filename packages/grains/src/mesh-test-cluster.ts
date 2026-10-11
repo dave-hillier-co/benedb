@@ -68,8 +68,8 @@ import {
  *     for it, and removes the reason `MeshClusterCollection` existed (see that file for the vitest
  *     isolation decision this leans on).
  *  2. THE SILO CONFIGURATION ORDER IS PRESERVED EXACTLY, because the order is a contract:
- *     `addActivationMemoCollectionAge` -> the `datastore` storage registration -> the
- *     custom-storage/journaling binding -> `addGraphLocalityPlacement(options)` ->
+ *     `addActivationMemoCollectionAge` -> the `datastore` storage registration (and the journal
+ *     `TestCluster` binds) -> `addGraphLocalityPlacement(options)` ->
  *     `addSpiceportGrainServices` with the datastore/options overrides. The placement opt-in runs
  *     BEFORE the grain services precisely to pin the TryAdd contract that keeps an early explicit
  *     opt-in from being silently reverted. Deviating from production wiring here would mean the
@@ -78,14 +78,15 @@ import {
  *     registration taking its in-memory branch with the BINARY grain-storage serializer forced
  *     (the provider's JSON default silently corrupts boxed-JsonElement caveat context). S5 is not
  *     pulled forward: a Thresh {@link MemoryGrainStorage} is registered under the provider name
- *     `datastore` here. The serializer-forcing has no direct TypeScript analogue beyond "the
- *     persisted-state codec must round-trip `Uint8Array` and JSON caveat context" - the value-codec
- *     bug this port already found and fixed in Thresh. ONE storage instance is shared by every
- *     silo, because the singleton datastore grain's state must survive its activation moving.
- *  4. `AddCustomStorageBasedLogConsistencyProvider("CustomStorage")` has no counterpart: Thresh's
- *     journaling binder DETECTS a custom-storage host and installs the adaptor, so what the C#
- *     named a provider is the grain's own shape here. `TestCluster` already calls
- *     `useMemoryJournaling`, which is what makes the binder run.
+ *     `datastore` here, which the shard and index grains persist their projections through. The
+ *     serializer-forcing has no direct TypeScript analogue beyond "the persisted-state codec must
+ *     round-trip `Uint8Array` and JSON caveat context" - the value-codec bug this port already
+ *     found and fixed in Thresh. ONE storage instance is shared by every silo, because a grain's
+ *     state must survive its activation moving.
+ *  4. `AddStateStorageBasedLogConsistencyProvider("StateStorage")` has no counterpart: a Thresh
+ *     `JournaledGrain` persists through the silo's journal provider, and `TestCluster` binds ONE
+ *     `MemoryJournalStorage` shared by every silo - so the datastore grain's journal survives its
+ *     activation moving, exactly as its grain storage does in the C#.
  *  5. `((InProcessSiloHandle)_cluster.Primary!).SiloHost.Services` becomes {@link servicesForSilo}
  *     over the per-silo records this harness keeps. A primary-only accessor is NOT sufficient -
  *     several suites (ColdStartTests' cold-path gate among them) resolve services from a
@@ -170,11 +171,8 @@ export class MeshTestCluster {
    * `cluster.Services.GetRequiredKeyedService<IGrainStorage>("datastore")`.
    *
    * PORT DECISION 10. Thresh has no keyed DI, so there is nothing to resolve the provider back out
-   * of: the harness constructs the ONE `MemoryGrainStorage` (port decision 3) and hands it to the
-   * silos through `SpiceportGrainServicesOptions.datastoreStorage`. `ThinSequencerTests` reads the
-   * sequencer's RAW storage rows (`head`, `meta/{version}`, `log/{version}`,
-   * `shard/{flushVersion}/{dir}/{type}/{id}`, `indexb/...`, `indexd/...`) to prove the flush
-   * protocol ran, and plants an orphan log row through it, so the handle has to be reachable. It is
+   * of: the harness constructs the ONE `MemoryGrainStorage` (port decision 3), registers it under
+   * `datastore`, and exposes the handle so a test can inspect what the projection persisted. It is
    * exposed rather than faked: a test-owned duplicate store would grade rows nothing wrote.
    */
   get datastoreStorage(): GrainStorage {
@@ -356,7 +354,6 @@ export class MeshTestCluster {
           ...(options.batchConcurrency !== undefined
             ? { batchConcurrency: options.batchConcurrency }
             : {}),
-          datastoreStorage: storage,
           // The `IDatastore` the host owns, resolved lazily (and once) after wiring completes -
           // exactly the C#'s `services.AddSingleton<IDatastore>(sp => new GrainBackedDatastore(...))`
           // over the DI-singleton watch hub the grain services registered.

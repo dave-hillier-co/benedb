@@ -16,7 +16,7 @@ import {
   WatchServiceService,
 } from "@benedb/protos/permissions";
 import { CLUSTERING_SILOS_KEY, resolveClustering } from "@benedb/silo/clustering-config";
-import { createConfiguration } from "@benedb/silo/datastore-storage-config";
+import { createConfiguration } from "@benedb/silo/configuration";
 import { getGrainMetadata } from "@thresh/core/grain-metadata";
 import { SiloAddress } from "@thresh/core/silo-address";
 import { createSilo, type SiloBuilder } from "@thresh/hosting/silo-builder";
@@ -463,7 +463,7 @@ describe("configureApiSilo", () => {
       local: local ?? new SiloAddress("api-test", "uid-api-test", "api-test:11111"),
     });
     const calls: { name: string; args: readonly unknown[] }[] = [];
-    const suppressed = new Set(["addStorage", "addPostgresStorage", "addRedisStorage"]);
+    const suppressed = new Set(["useStorageBackend"]);
     const proxy: SiloBuilder = new Proxy(target, {
       get(receiver, property) {
         const value = Reflect.get(receiver, property);
@@ -489,7 +489,6 @@ describe("configureApiSilo", () => {
   /** A clustered configuration and the options both the host and this suite resolve from it. */
   function clusteredConfiguration(silos: string) {
     const configuration = createConfiguration({
-      "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb",
       [CLUSTERING_SILOS_KEY]: silos,
     });
     const clustering = resolveClustering(configuration);

@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   CLUSTERING_ADVERTISED_HOST_KEY,
-  CLUSTERING_ALLOW_IN_MEMORY_STORAGE_KEY,
   CLUSTERING_SILOS_KEY,
   CLUSTERING_SILO_PORT_KEY,
   DEFAULT_ADVERTISED_HOST,
@@ -14,7 +13,7 @@ import {
   readConfiguredPort,
   resolveClustering,
 } from "./clustering-config";
-import { createConfiguration } from "./datastore-storage-config";
+import { createConfiguration } from "./configuration";
 
 /**
  * PORT-LOCAL suite: `clustering-config.ts` has no Spiceport source (Spiceport calls only
@@ -53,9 +52,6 @@ function addressFor(endpoint: string): SiloAddress {
   return new SiloAddress(endpoint, `uid-${endpoint}`, endpoint);
 }
 
-/** Everything a clustered configuration needs beyond the silo list. */
-const DURABLE = { "ConnectionStrings:OrleansStorage": "postgres://localhost/benedb" };
-
 describe("resolveClustering", () => {
   it("resolves to the single-process default when Clustering:Silos is absent", () => {
     expect(resolveClustering(createConfiguration({}))).toEqual({ kind: "singleProcess" });
@@ -70,7 +66,6 @@ describe("resolveClustering", () => {
   it("switches to clustered on the mere presence of a silo list", () => {
     const options = resolveClustering(
       createConfiguration({
-        ...DURABLE,
         [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111,127.0.0.1:11112",
       }),
     );
@@ -81,7 +76,6 @@ describe("resolveClustering", () => {
   it("derives this silo's identity from its own endpoint, defaults included", () => {
     const options = resolveClustering(
       createConfiguration({
-        ...DURABLE,
         [CLUSTERING_SILOS_KEY]: `${DEFAULT_ADVERTISED_HOST}:${DEFAULT_SILO_PORT}`,
       }),
     );
@@ -94,7 +88,6 @@ describe("resolveClustering", () => {
   it("moves the whole identity when only the silo port changes", () => {
     const options = resolveClustering(
       createConfiguration({
-        ...DURABLE,
         [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111,127.0.0.1:11112",
         [CLUSTERING_SILO_PORT_KEY]: "11112",
       }),
@@ -106,7 +99,6 @@ describe("resolveClustering", () => {
   it("honours a configured advertised host for both this silo and its endpoint", () => {
     const options = resolveClustering(
       createConfiguration({
-        ...DURABLE,
         [CLUSTERING_ADVERTISED_HOST_KEY]: "10.1.2.3",
         [CLUSTERING_SILOS_KEY]: "10.1.2.3:11111",
       }),
@@ -118,7 +110,6 @@ describe("resolveClustering", () => {
   it("hands back the WHOLE view, self included, in configured order", () => {
     const options = resolveClustering(
       createConfiguration({
-        ...DURABLE,
         [CLUSTERING_SILOS_KEY]: " 127.0.0.1:11111 , 127.0.0.1:11112 ,127.0.0.1:11113",
       }),
     );
@@ -133,13 +124,11 @@ describe("resolveClustering", () => {
   it("derives a peer's address by the SAME rule that peer derives for itself", () => {
     const first = resolveClustering(
       createConfiguration({
-        ...DURABLE,
         [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111,127.0.0.1:11112",
       }),
     );
     const second = resolveClustering(
       createConfiguration({
-        ...DURABLE,
         [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111,127.0.0.1:11112",
         [CLUSTERING_SILO_PORT_KEY]: "11112",
       }),
@@ -155,7 +144,6 @@ describe("resolveClustering", () => {
   it("reads the `__` environment spelling of every key, case-insensitively", () => {
     const options = resolveClustering(
       createConfiguration({
-        ConnectionStrings__OrleansStorage: "postgres://localhost/benedb",
         clustering__silos: "127.0.0.1:11111,127.0.0.1:11112",
         CLUSTERING__SILOPORT: "11112",
         Clustering__AdvertisedHost: "127.0.0.1",
@@ -167,9 +155,7 @@ describe("resolveClustering", () => {
 
   it("rejects a silo absent from its own configured view", () => {
     expect(() =>
-      resolveClustering(
-        createConfiguration({ ...DURABLE, [CLUSTERING_SILOS_KEY]: "127.0.0.1:11112" }),
-      ),
+      resolveClustering(createConfiguration({ [CLUSTERING_SILOS_KEY]: "127.0.0.1:11112" })),
     ).toThrow(/127\.0\.0\.1:11111/);
   });
 
@@ -177,7 +163,6 @@ describe("resolveClustering", () => {
     expect(() =>
       resolveClustering(
         createConfiguration({
-          ...DURABLE,
           [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111",
           [CLUSTERING_SILO_PORT_KEY]: "eleven",
         }),
@@ -189,7 +174,6 @@ describe("resolveClustering", () => {
     expect(() =>
       resolveClustering(
         createConfiguration({
-          ...DURABLE,
           [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111",
           [CLUSTERING_SILO_PORT_KEY]: "70000",
         }),
@@ -201,7 +185,6 @@ describe("resolveClustering", () => {
     expect(() =>
       resolveClustering(
         createConfiguration({
-          ...DURABLE,
           [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111,127.0.0.1",
         }),
       ),
@@ -213,7 +196,6 @@ describe("resolveClustering", () => {
       expect(() =>
         resolveClustering(
           createConfiguration({
-            ...DURABLE,
             [CLUSTERING_ADVERTISED_HOST_KEY]: wildcard,
             [CLUSTERING_SILOS_KEY]: `${wildcard}:11111`,
           }),
@@ -222,32 +204,10 @@ describe("resolveClustering", () => {
     }
   });
 
-  it("rejects a non-boolean AllowInMemoryStorage rather than reading it as false", () => {
-    expect(() =>
-      resolveClustering(
-        createConfiguration({
-          ...DURABLE,
-          [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111",
-          [CLUSTERING_ALLOW_IN_MEMORY_STORAGE_KEY]: "yes",
-        }),
-      ),
-    ).toThrow(/Clustering:AllowInMemoryStorage/);
-  });
-
-  it("refuses to cluster over per-silo in-memory grain storage", () => {
-    // The datastore grain is a cluster singleton and its default MemoryGrainStorage is constructed
-    // PER SILO, so its state lives only on the silo the activation happens to be on.
-    expect(() =>
-      resolveClustering(createConfiguration({ [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111" })),
-    ).toThrow(/ConnectionStrings:OrleansStorage/);
-  });
-
-  it("allows a disposable dev cluster when the operator opts in explicitly", () => {
+  it("does not judge storage: durability is the storage backend's decision, not this file's", () => {
+    // Thresh's `useStorageBackend` refuses in-memory storage on a multi-silo view at build.
     const options = resolveClustering(
-      createConfiguration({
-        [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111",
-        [CLUSTERING_ALLOW_IN_MEMORY_STORAGE_KEY]: "TRUE",
-      }),
+      createConfiguration({ [CLUSTERING_SILOS_KEY]: "127.0.0.1:11111" }),
     );
 
     expect(options.kind).toBe("clustered");

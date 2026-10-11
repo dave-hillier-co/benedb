@@ -1,6 +1,7 @@
 import type { GrainKeyFor } from "@thresh/core/key-kinds";
 import { describe, expect, it } from "vitest";
 
+import { GRAPH_SHARD_STATE_EMPTY } from "./graph-shard-state";
 import type { FullRelationshipsFilterWire } from "./datastore-dtos";
 import { IGraphShardGrain, type GraphShardRowsReply } from "./i-graph-shard-grain";
 import type { RelationshipWire } from "./relationships-dtos";
@@ -18,7 +19,10 @@ describe("IGraphShardGrain", () => {
     // The C# carries [AlwaysInterleave] and the remark says why in as many words: `readOnly`
     // interleaves a blocking request only when BOTH turns are read-only, so against a
     // non-read-only fold or commit it does nothing, and hot-shard readers would queue behind it.
-    expect(IGraphShardGrain.options).toEqual({ rowsAt: { alwaysInterleave: true } });
+    expect(IGraphShardGrain.options).toEqual({
+      rowsAt: { alwaysInterleave: true },
+      readProjected: { alwaysInterleave: true },
+    });
   });
 
   it("is string-keyed by the shard key's string form (see graph-shard-grain-key.ts)", () => {
@@ -42,9 +46,11 @@ describe("IGraphShardGrain", () => {
         calls.push({ revision, filter });
         return Promise.resolve(reply);
       },
+      project: () => Promise.resolve(false),
+      readProjected: () => Promise.resolve(GRAPH_SHARD_STATE_EMPTY),
     };
 
-    expect(Object.keys(fake)).toEqual(["rowsAt"]);
+    expect(Object.keys(fake)).toEqual(["rowsAt", "project", "readProjected"]);
 
     const filter: FullRelationshipsFilterWire = {
       optionalResourceType: "document",

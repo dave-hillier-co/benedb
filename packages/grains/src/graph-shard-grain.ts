@@ -4,8 +4,9 @@ import { RevisionNotFoundException } from "@benedb/datastore/datastore-exception
 import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
 import { relationshipsFilterMatches } from "@benedb/datastore/relationships-filter";
 import { raceSignal } from "@thresh/core/abort";
-import { grain } from "@thresh/core/decorators";
+import { grain, persistentState } from "@thresh/core/decorators";
 import { Grain } from "@thresh/core/grain";
+import type { PersistentState } from "@thresh/core/persistent-state";
 
 import type { FullRelationshipsFilterWire, StoredRelationshipWire } from "./datastore-dtos";
 import { GRAPH_LOCALITY_PLACEMENT_STRATEGY } from "./graph-locality-placement";
@@ -15,9 +16,13 @@ import type { GraphShardState } from "./graph-shard-state";
 import { GRAPH_SHARD_STATE_EMPTY } from "./graph-shard-state";
 import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "./i-datastore-grain";
 import type { GraphShardRowsReply, IGraphShardGrain } from "./i-graph-shard-grain";
+import type { LogEvent } from "./log-event";
 import type { RelationshipWire } from "./relationships-dtos";
 import {
   shardFoldApplyEvent,
+  shardFoldCollectBelow,
+  shardFoldOverlay,
+  shardFoldTouches,
   shardFoldIsReadableAt,
   shardFoldIsVisibleAt,
   shardFoldVisibleAt,
@@ -31,12 +36,14 @@ import "./revision-not-found-surrogate";
 /**
  * Ported from Spiceport `src/Spiceport.Server/Grains/GraphShardGrain.cs`.
  *
- * One graph shard as a grain: the activation state IS the shard cache. The state is the per-key
+ * One graph shard as a grain, with two states. Its PROJECTED state is durable: the per-key
  * restriction of the datastore fold (`shard-fold.ts`) for the `GraphShardKeyWire` named by this
- * grain's string key - hydrated once from `IDatastoreGrain.readShard` and thereafter advanced by
- * tailing the same `LogEvent` feed the sequencer persists. Cold keys never activate; idle
- * collection is the eviction policy - silo memory is O(hot working set), not O(graph)
- * (`docs/graph-sharded-datastore.md` section 2).
+ * grain's string key, persisted by the sequencer's `project` calls and labelled with the revision
+ * the projection reached. Its SERVED state is the activation's cache: the projected state with the
+ * sequencer's pending events for this key folded over (`IDatastoreGrain.readShardTail`),
+ * thereafter advanced by tailing the same `LogEvent` feed. Cold keys never activate except to be
+ * projected; idle collection is the eviction policy - silo memory is O(hot working set), not
+ * O(graph) (`docs/graph-sharded-datastore.md` section 2).
  *
  * The incremental bootstrap-then-tail-fold shape: a single-flight gate, a fast path (serve when the
  * watermark already covers the pinned revision), and a catch-up-on-demand pull loop with
@@ -45,9 +52,9 @@ import "./revision-not-found-surrogate";
  * shard folds EVERY log event (the watermark advances even when nothing matches the key) - so
  * "watermark >= rev" proves all commits <= rev are present in this slice.
  *
- * A cold shard ALWAYS hydrates via `IDatastoreGrain.readShard` first, never by replaying
- * `readFrom(0n)` - the log's retained tail starts at the compaction floor, so a from-zero replay
- * would silently miss compacted history.
+ * A cold shard ALWAYS hydrates from its projected state plus the sequencer's pending tail first,
+ * never by replaying `readFrom(0n)` - the log's retained tail starts at the projection floor, so a
+ * from-zero replay would silently miss projected history.
  *
  * GC-floor stance: a shard enforces the floor IT has folded/hydrated - never a per-read probe of
  * the singleton - so at the floor boundary a cold shard (hydrated after a GC run) may reject a
@@ -60,6 +67,8 @@ import "./revision-not-found-surrogate";
  * rows the state already holds, lives only on hot activations, and is dropped with the activation.
  *
  * PORT NOTES.
+ *  - `[PersistentState("projection", "datastore")]` constructor injection -> the `@persistentState`
+ *    field decorator under the same state and provider names.
  *  - `[GraphLocalityPlacement]` -> `{ placement: "custom", strategy }` plus the silo-side
  *    `addPlacementStrategy(GRAPH_LOCALITY_PLACEMENT_STRATEGY, ...)` registration. Thresh has no
  *    attribute mechanism and no strategy-vs-director split; what survives the pair is the name.
@@ -75,6 +84,12 @@ import "./revision-not-found-surrogate";
  */
 @grain({ placement: "custom", strategy: GRAPH_LOCALITY_PLACEMENT_STRATEGY })
 export class GraphShardGrain extends Grain implements IGraphShardGrain {
+  @persistentState("projection", {
+    provider: "datastore",
+    defaultValue: (): GraphShardState => GRAPH_SHARD_STATE_EMPTY,
+  })
+  private projection!: PersistentState<GraphShardState>;
+
   /** Log-tail page size for catch-up pulls (matches the Watch feed's page size). */
   static readonly #batchSize = 256;
 
@@ -128,9 +143,9 @@ export class GraphShardGrain extends Grain implements IGraphShardGrain {
     await this.#gate.wait(signal);
     try {
       if (!this.#hydrated) {
-        // ALWAYS hydrate via the per-key snapshot read first - never rely on `readFrom(0n)`
-        // semantics for a cold shard (see the class remarks).
-        this.#state = await this.#datastore.readShard(this.#key);
+        // ALWAYS hydrate from the projection plus the pending tail first - never rely on
+        // `readFrom(0n)` semantics for a cold shard (see the class remarks).
+        this.#state = await this.#hydrate();
         this.#hydrated = true;
       }
 
@@ -156,7 +171,7 @@ export class GraphShardGrain extends Grain implements IGraphShardGrain {
           // are inside the compaction window described above - back off briefly instead of
           // hot-spinning against the singleton until its compaction settles.
           if (lastRehydrateWatermark === this.#state.appliedRevision) await delay(10, signal);
-          this.#state = await this.#datastore.readShard(this.#key);
+          this.#state = await this.#hydrate();
           lastRehydrateWatermark = this.#state.appliedRevision;
           continue;
         }
@@ -182,6 +197,52 @@ export class GraphShardGrain extends Grain implements IGraphShardGrain {
     } finally {
       this.#gate.release();
     }
+  }
+
+  /** @inheritdoc */
+  async project(events: readonly LogEvent[], through: bigint, gcFloor: bigint): Promise<boolean> {
+    const current = this.projection.value;
+    // Already projected: a replay after an unconfirmed flush.
+    if (through <= current.appliedRevision) return current.rows.length > 0;
+
+    let next = current;
+    for (const ev of events) {
+      if (ev.revision > current.appliedRevision && shardFoldTouches(ev, this.#key))
+        next = shardFoldApplyEvent(next, ev, this.#key);
+    }
+    next = shardFoldCollectBelow(next, through, gcFloor > next.gcFloor ? gcFloor : next.gcFloor);
+
+    // Restore the previous state if the write fails: a label the store does not hold would make the
+    // sequencer's replay of these events look already projected, and they would be lost.
+    this.projection.value = next;
+    try {
+      await this.projection.write();
+    } catch (error) {
+      this.projection.value = current;
+      throw error;
+    }
+    return next.rows.length > 0;
+  }
+
+  /** @inheritdoc */
+  readProjected(): Promise<GraphShardState> {
+    return Promise.resolve(this.projection.value);
+  }
+
+  /**
+   * The served state from scratch: the pending tail is read FIRST and the projected state AFTER
+   * the await, so a projection landing in between is already in the projected state (and its
+   * events skipped by the label), while one that has not landed is still in the tail.
+   */
+  async #hydrate(): Promise<GraphShardState> {
+    const tail = await this.#datastore.readShardTail(this.#key);
+    return shardFoldOverlay(
+      this.projection.value,
+      tail.events,
+      this.#key,
+      tail.headRevision,
+      tail.gcFloor,
+    );
   }
 
   #serve(revision: bigint, filter: FullRelationshipsFilterWire | undefined): GraphShardRowsReply {

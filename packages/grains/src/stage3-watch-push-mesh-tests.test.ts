@@ -7,14 +7,17 @@ import { WatchContent, type RevisionChange } from "@benedb/datastore/watch";
 import { createClient, type ClientNode } from "@thresh/client/client-node";
 import { IManagementGrain } from "@thresh/core/management-grain";
 import { InProcessTransport } from "@thresh/messaging/in-process-transport";
-import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
-import { constructGrain } from "@thresh/runtime/construct-grain";
 
 import { DatastoreGrain } from "./datastore-grain";
 import { GrainBackedDatastore } from "./grain-backed-datastore";
 import { IDatastoreGrain } from "./i-datastore-grain";
 import { createIsolatedWatchHub } from "./isolated-watch-hub";
+import {
+  configureSequencerSilo,
+  createSequencerStores,
+  SEQUENCER_GRAIN_REGISTRATIONS,
+} from "./sequencer-test-silo";
 
 /**
  * Ported from Spiceport `tests/Spiceport.Grains.Tests/Stage3WatchPushMeshTests.cs`.
@@ -69,16 +72,12 @@ function create(rid: string, sid: string): RelationshipUpdate {
  * the real `DatastoreGrain` over an in-memory grain-storage provider named `datastore`.
  */
 async function newDatastoreCluster(): Promise<TestCluster> {
-  const storage = new MemoryGrainStorage();
+  const stores = createSequencerStores();
   return TestCluster.start({
     initialSilos: 1,
-    grains: [{ ctor: DatastoreGrain, interfaces: [IDatastoreGrain] }],
+    grains: SEQUENCER_GRAIN_REGISTRATIONS,
     configureSilo: (builder) => {
-      builder.addStorage("datastore", storage);
-      builder.useGrainActivator({
-        createInstance: (ctor) =>
-          ctor === DatastoreGrain ? new DatastoreGrain({ storage }) : constructGrain(ctor),
-      });
+      configureSequencerSilo(builder, stores);
     },
   });
 }
