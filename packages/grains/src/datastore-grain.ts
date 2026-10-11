@@ -989,10 +989,9 @@ const CLOCK_ORIGIN_NANOS = BigInt(Math.round(performance.timeOrigin)) * 1_000_00
  * THAT IS NOT COSMETIC, and the claim this comment used to make ("nothing depends on the
  * resolution") is false. {@link runGc} computes its floor as `min(head, now - window)` from the SAME
  * clock, so with a zero window the floor lands at `now` while the revisions just committed sit at
- * `now + k` - and the collection silently skips rows it was asked to collect. `thin-sequencer-tests`
- * catches it directly: a key whose only rows are deleted below a zero-window GC floor must EMPTY at
- * its next flush (dropping it from the key index with a tombstone), and under the millisecond clock
- * it intermittently did not.
+ * `now + k` - and the collection silently skips rows it was asked to collect. The GC
+ * suites catch it directly: rows deleted below a zero-window GC floor must be collected, and under
+ * the millisecond clock they intermittently were not.
  *
  * `performance.timeOrigin + performance.now()` is the same wall clock with sub-microsecond
  * resolution. The two halves are combined in `bigint` AFTER the small one is scaled, never as one
