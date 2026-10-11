@@ -26,7 +26,7 @@ describe("IDatastoreGrain", () => {
     expect(IDatastoreGrain.name).toBe("IDatastoreGrain");
   });
 
-  it("marks EXACTLY the five pure reads alwaysInterleave - including the INHERITED readFrom", () => {
+  it("marks EXACTLY the pure reads and commit alwaysInterleave - including the INHERITED readFrom", () => {
     // Five methods carry [AlwaysInterleave] in the C#: ReadState, GetHead, ReadSchemaAt, ReadShard,
     // and ReadFrom, the last declared on IDatastoreLog and inherited. Thresh's per-method options
     // live on the CONCRETE GrainInterface value and are NOT inherited from an extended interface,
@@ -40,21 +40,16 @@ describe("IDatastoreGrain", () => {
       readShard: { alwaysInterleave: true },
       readShardTail: { alwaysInterleave: true },
       readFrom: { alwaysInterleave: true },
+      commit: { alwaysInterleave: true },
     });
   });
 
-  it("gives commit NO options at all - its non-interleaving is what makes the CAS exact", () => {
-    // The head read at the top of a commit and the append at the bottom stay atomic with respect
-    // to every other write precisely because Commit carries no interleave attribute. Adding one
-    // would let the head move under a declarative commit and make the ExpectedHead compare
-    // inexact. Nor do SubscribeWatch, UnsubscribeWatch or RunGc carry anything.
-    for (const method of [
-      "commit",
-      "subscribeWatch",
-      "unsubscribeWatch",
-      "runGc",
-      "flushProjection",
-    ]) {
+  it("interleaves commit for group commit, and gives the other writes NO options", () => {
+    // Commit carries [AlwaysInterleave] in the C# so a commit arriving mid-batch reaches the queue;
+    // its atomicity comes from the grain's write lock, pinned by the interleaved-read suite's CAS
+    // gate. SubscribeWatch, UnsubscribeWatch, RunGc and FlushProjection carry nothing.
+    expect(IDatastoreGrain.options.commit).toEqual({ alwaysInterleave: true });
+    for (const method of ["subscribeWatch", "unsubscribeWatch", "runGc", "flushProjection"]) {
       expect(IDatastoreGrain.options[method]).toBeUndefined();
     }
   });

@@ -445,7 +445,7 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
    * Submits a declarative commit (absent `expectedHead`) with a bounded retry on `headMoved` ONLY;
    * every other outcome (success or failure) returns to the caller for its own mapping. HeadMoved
    * is near-impossible here - a declarative commit carries no head CAS and the sequencer's
-   * single-writer, non-reentrant activation cannot lose its own conditional append - and exists
+   * single-writer activation cannot lose its own conditional append - and exists
    * only for duplicate-activation churn during cluster membership changes. That is a transient
    * condition the pre-declarative write path retried, so the declarative path stays retryable too:
    * bounded by {@link MAX_COMMIT_ATTEMPTS}, and on exhaustion it throws the same retryable

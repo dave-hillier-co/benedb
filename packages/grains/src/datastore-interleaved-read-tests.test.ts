@@ -10,7 +10,7 @@ import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
 import { describe, expect, it } from "vitest";
 
-import type { CommitRequest } from "./commit-contract";
+import type { CommitReply, CommitRequest } from "./commit-contract";
 import { graphShardGrainKeyBuild } from "./graph-shard-grain-key";
 import { graphShardKeyForResource } from "./graph-shard-key";
 import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "./i-datastore-grain";
@@ -80,6 +80,19 @@ function touchCommit(rid: string, sid: string, expectedHead: bigint): CommitRequ
   };
 }
 
+/** A declarative commit (no expectedHead) of one relationship update. */
+function updateCommit(operation: "touch" | "create", rid: string, sid: string): CommitRequest {
+  return {
+    preconditions: [],
+    updates: [{ operation, relationship: toWire(rel(rid, sid)) }],
+    deleteByFilter: undefined,
+    schemaBytes: undefined,
+    expectedSchemaHash: undefined,
+    counterChanges: [],
+    expectedHead: undefined,
+  };
+}
+
 interface Deferred {
   readonly promise: Promise<void>;
   resolve(): void;
@@ -134,7 +147,9 @@ const gate: {
   headWriteParked: Deferred | undefined;
   throwOnceOnHeadWrite: boolean;
   throwOnceOnShardWrite: boolean;
+  journalAppends: number;
 } = {
+  journalAppends: 0,
   headWriteBlock: undefined,
   headWriteParked: undefined,
   throwOnceOnHeadWrite: false,
@@ -142,6 +157,7 @@ const gate: {
 };
 
 function resetGate(): void {
+  gate.journalAppends = 0;
   gate.headWriteBlock = undefined;
   gate.headWriteParked = undefined;
   gate.throwOnceOnHeadWrite = false;
@@ -167,6 +183,7 @@ class PausableJournal implements JournalStorage {
     expectedVersion: number | undefined,
     signal?: AbortSignal,
   ): Promise<number> {
+    gate.journalAppends += 1;
     if (gate.throwOnceOnHeadWrite) {
       gate.throwOnceOnHeadWrite = false;
       throw new Error("injected append failure (test seam)");
@@ -457,6 +474,85 @@ describe("DatastoreInterleavedReadTests", () => {
       // the same CAS invariant the retired two-step append surfaced as an absent revision.
       expect(results.filter((r) => r.revision !== undefined)).toHaveLength(1);
       expect(results.filter((r) => r.failure?.kind === "headMoved")).toHaveLength(1);
+    });
+  });
+
+  /**
+   * Group commit: commits that arrive while a write is parked are not queued behind it one write
+   * each. They are evaluated in order and appended together, so the sequencer's journal append
+   * count is two (the parked write, then one for the whole batch) rather than one per commit, and
+   * every commit still gets its own revision.
+   */
+  it("Commits_arriving_during_a_write_share_one_write", async () => {
+    await withCluster(async ({ cluster }) => {
+      const target = grain(cluster);
+      const oldHead = (await target.getHead()).head;
+      const appendsBefore = gate.journalAppends;
+
+      gate.headWriteBlock = deferred();
+      gate.headWriteParked = deferred();
+      const first = target.commit(updateCommit("touch", "first", "alice"));
+      let batched: Promise<CommitReply>[];
+      try {
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
+        gate.headWriteParked = undefined;
+        batched = Array.from({ length: 5 }, (_, i) =>
+          target.commit(updateCommit("touch", `b${i}`, "bob")),
+        );
+        // Let every batched call reach the activation before the parked write resumes.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } finally {
+        const block = gate.headWriteBlock;
+        gate.headWriteBlock = undefined;
+        block?.resolve();
+      }
+
+      const firstReply = await waitAsync(first, "the parked commit");
+      const replies = await waitAsync(Promise.all(batched), "the batched commits");
+
+      expect(firstReply.failure).toBeUndefined();
+      for (const reply of replies) expect(reply.failure).toBeUndefined();
+      const revisions = replies.map((r) => r.revision!);
+      expect(new Set(revisions).size).toBe(revisions.length);
+      for (const revision of revisions) expect(revision > firstReply.revision!).toBe(true);
+      expect(gate.journalAppends).toBe(appendsBefore + 2);
+
+      const segment = await target.readFrom(oldHead, -1);
+      expect(segment.events).toHaveLength(6);
+      expect(segment.headRevision).toBe(revisions.reduce((a, b) => (a > b ? a : b)));
+    });
+  });
+
+  /**
+   * A commit evaluated later in a batch sees the commits before it in the same batch: two creates of
+   * one relationship batched together still conflict, exactly one winning.
+   */
+  it("A_batched_commit_sees_the_commits_before_it_in_its_batch", async () => {
+    await withCluster(async ({ cluster }) => {
+      const target = grain(cluster);
+
+      gate.headWriteBlock = deferred();
+      gate.headWriteParked = deferred();
+      const first = target.commit(updateCommit("touch", "first", "alice"));
+      let creates: Promise<CommitReply>[];
+      try {
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
+        gate.headWriteParked = undefined;
+        creates = [
+          target.commit(updateCommit("create", "x", "carol")),
+          target.commit(updateCommit("create", "x", "carol")),
+        ];
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } finally {
+        const block = gate.headWriteBlock;
+        gate.headWriteBlock = undefined;
+        block?.resolve();
+      }
+
+      await waitAsync(first, "the parked commit");
+      const replies = await waitAsync(Promise.all(creates), "the batched creates");
+      expect(replies.filter((r) => r.revision !== undefined)).toHaveLength(1);
+      expect(replies.filter((r) => r.failure?.kind === "createAlreadyExists")).toHaveLength(1);
     });
   });
 });

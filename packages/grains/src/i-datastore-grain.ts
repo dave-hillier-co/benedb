@@ -86,21 +86,22 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
 
   /**
    * Executes a declarative `CommitRequest` INSIDE the sequencer
-   * (`docs/graph-sharded-datastore.md` section 3): the single-threaded, non-reentrant activation
-   * evaluates preconditions, applies the mutations through the MVCC transaction over its own fold
-   * at head, mints the authoritative (timestamp) revision and appends the resulting canonical
-   * `LogEvent` (an append to durable grain storage, confirmed before the reply) - so a declarative
-   * commit (absent `CommitRequest.expectedHead`) needs no caller retry loop. WRITES carry no
-   * interleave option, so they never interleave EACH OTHER: the head read at the top of the call
-   * and the append at the bottom stay atomic with respect to all other writes, which is both why
-   * the head cannot move under a declarative commit and why the caller-evaluated CAS of the lambda
-   * compatibility path (the optional `expectedHead` compare) is exact. Rejections are returned as
+   * (`docs/graph-sharded-datastore.md` section 3): the single-writer activation evaluates
+   * preconditions, applies the mutations through the MVCC transaction over its own fold at head,
+   * mints the authoritative (timestamp) revision and appends the resulting canonical `LogEvent` (an
+   * append to durable grain storage, confirmed before the reply) - so a declarative commit (absent
+   * `CommitRequest.expectedHead`) needs no caller retry loop. Commits are GROUP-COMMITTED: the call
+   * is `alwaysInterleave` so a commit arriving while a batch is being written can queue for the next
+   * one, and each batch is evaluated in arrival order and appended in one write. Batches, GC rounds
+   * and projection flushes share one write lock, so writes never interleave EACH OTHER: each request
+   * is evaluated against the head left by every write before it, and its append lands before any
+   * later write evaluates, which is both why the head cannot move under a declarative commit and why
+   * the caller-evaluated CAS of the lambda compatibility path (the optional `expectedHead` compare)
+   * is exact. The reply is sent only once the batch is durable. Rejections are returned as
    * STRUCTURED REPLY DATA (`CommitReply.failure`), never as serialized exceptions, so the client
-   * rethrows its existing typed exceptions unchanged. Only the explicitly `alwaysInterleave`-marked
-   * pure reads (this interface's `readState`/`getHead`/`readSchemaAt`/`readShard`, and
-   * `IDatastoreLog.readFrom`) may run DURING an await inside this call - the activation's scheduler
-   * is still single-threaded, so an interleaved read only ever runs while this call itself is
-   * parked at an await, never concurrently with its own execution.
+   * rethrows its existing typed exceptions unchanged. The pure reads (this interface's
+   * `readState`/`getHead`/`readSchemaAt`/`readShard`, and `IDatastoreLog.readFrom`) read the
+   * confirmed state, so they never observe a batch before it is durable.
    */
   commit(request: CommitRequest): Promise<CommitReply>;
 
@@ -137,16 +138,16 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
 /**
  * The runtime value for `IDatastoreGrain`.
  *
- * THE OPTIONS MAP IS THE MOST FRAGILE THING IN THIS FILE. Five methods carry `[AlwaysInterleave]`
+ * THE OPTIONS MAP IS THE MOST FRAGILE THING IN THIS FILE. The pure reads carry `[AlwaysInterleave]`
  * in the C#: `readState`, `getHead`, `readSchemaAt`, `readShard` and `readFrom` - the last declared
  * on `IDatastoreLog` and INHERITED. Thresh's per-method options live on the CONCRETE
  * `GrainInterface` value and are NOT inherited from an extended interface, so `readFrom` must be
  * REPEATED here. A dropped flag on any of the five parks a Watch stream or a shard hydration behind
  * an in-flight commit - a deadlock or a timeout storm that no unit test would show.
  *
- * Equally: never add an option to `commit`, whose non-interleaving is what makes the
- * head-read-and-append atomic and the `expectedHead` CAS exact. `subscribeWatch`,
- * `unsubscribeWatch` and `runGc` likewise carry nothing. And never `readOnly` anywhere: it
+ * `commit` is `alwaysInterleave` too, for group commit: a commit arriving mid-batch must reach the
+ * queue rather than wait behind the batch. Its atomicity comes from the grain's write lock, not from
+ * the turn scheduler. `subscribeWatch`, `unsubscribeWatch` and `runGc` carry nothing. And never `readOnly` anywhere: it
  * interleaves only when BOTH the blocking and the incoming turn are read-only, so it would not get
  * past the non-read-only `commit`.
  */
@@ -158,5 +159,6 @@ export const IDatastoreGrain = defineGrainInterface<IDatastoreGrain>("IDatastore
     readShard: { alwaysInterleave: true },
     readShardTail: { alwaysInterleave: true },
     readFrom: { alwaysInterleave: true },
+    commit: { alwaysInterleave: true },
   },
 });

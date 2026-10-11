@@ -6,6 +6,7 @@ import {
   RevisionNotFoundException,
 } from "@benedb/datastore/datastore-exceptions";
 import { MvccReadWriteTransaction } from "@benedb/datastore/mvcc-read-write-transaction";
+import { AsyncSerialExecutor } from "@thresh/core/async-serial-executor";
 import { grain } from "@thresh/core/decorators";
 import type { Duration } from "@thresh/core/duration";
 import { durationToMs } from "@thresh/core/duration";
@@ -68,13 +69,23 @@ import "./revision-not-found-surrogate";
  * per-key `GraphShardGrain` projections, which persist their own state, and listed by the
  * `ShardIndexGrain` buckets.
  *
- * INTERLEAVING IS THE CENTRAL CONTRACT. It is a single non-reentrant activation; WRITES (`commit`,
- * `runGc`, `flushProjection` - no interleave option on the interface) never interleave EACH OTHER,
- * so a write's turn runs to completion before the next write's, keeping the
- * head-compare-and-append atomic. The PURE reads (`readState`, `getHead`, `readSchemaAt`,
+ * INTERLEAVING IS THE CENTRAL CONTRACT. It is a single activation whose WRITES (commit batches,
+ * `runGc`, `flushProjection`) never interleave EACH OTHER: each runs under the one write lock, so a
+ * write runs to completion before the next, keeping every head-compare-and-append atomic. The PURE
+ * reads (`readState`, `getHead`, `readSchemaAt`,
  * `readShard`, `readShardTail`, `readFrom`) carry `alwaysInterleave` in `IDatastoreGrain`'s options
  * map and may run DURING a write's await - never concurrently with it, and never observing a
  * write's intermediate state, because they read the confirmed view.
+ *
+ * GROUP COMMIT. `commit` interleaves: it queues its request and awaits its reply. One batch loop
+ * drains the queue under the write lock, evaluating each queued request in arrival order against
+ * the confirmed state with the events of the requests before it in the batch folded on
+ * ({@link metaFoldApplyEntry}), so each sees exactly the state a serial run would have shown it.
+ * The accepted events are then appended with ONE conditional raise (Thresh's
+ * `raiseConditionalEvents`, one journal append), so a batch costs one storage write however many
+ * commits it carries. Every commit still mints its own revision and gets its own reply, sent only
+ * once the batch is durable; rejected requests append nothing. Commits that arrive while a batch is
+ * being written form the next batch.
  *
  * THE PROJECTION. Every {@link FLUSH_INTERVAL} pending events, the sequencer projects them: each
  * shard grain an event touches folds its events over its persisted state and persists the result
@@ -120,6 +131,9 @@ import "./revision-not-found-surrogate";
  *     accumulate a duplicate registration per heartbeat instead of refreshing one.
  *  6. `Task.WhenAll` over shard and index calls becomes `Promise.all`, in batches of
  *     {@link MAX_CONCURRENT_SHARD_CALLS} through {@link inBatches}, as the C#'s `InBatches`.
+ *  7. The write lock (`SemaphoreSlim(1, 1)`) is an `AsyncSerialExecutor`: each section it guards
+ *     (a commit batch, a GC round, a flush) is one callable unit. The queued commits'
+ *     `TaskCompletionSource`s are `{ promise, resolve, reject }` triples.
  */
 @grain()
 export class DatastoreGrain
@@ -150,6 +164,18 @@ export class DatastoreGrain
     WATCHER_EXPIRY,
     systemTimeProvider,
   );
+
+  /**
+   * Serializes every write: a commit batch, a GC round and a projection flush each run as one unit
+   * on it, so no two writes interleave even though `commit` does.
+   */
+  readonly #writeLock = new AsyncSerialExecutor<unknown>();
+
+  /** Commits waiting for the next batch, in arrival order. */
+  #queued: QueuedCommit[] = [];
+
+  /** Whether the batch loop is running; it drains {@link #queued} until it is empty. */
+  #batching = false;
 
   constructor(options: DatastoreGrainOptions = {}) {
     super();
@@ -339,38 +365,151 @@ export class DatastoreGrain
 
   /**
    * The RELOCATION of the client-side write execution into the sequencer: because writes never
-   * interleave writes, the head read at the top of this method cannot move before the append at the
-   * bottom - the transaction executor IS the serialization point, so a declarative commit (absent
-   * `expectedHead`) needs no retry. All rejections return as reply data with NOTHING applied.
+   * interleave writes, the head a request is evaluated against cannot move before its append - the
+   * transaction executor IS the serialization point, so a declarative commit (absent `expectedHead`)
+   * needs no retry. All rejections return as reply data with NOTHING applied.
    */
   async commit(request: CommitRequest): Promise<CommitReply> {
     if (request === undefined || request === null) throw new Error("request must not be null");
 
-    // Duration measured around the WHOLE serialized write turn and recorded in a `finally` so every
-    // inbound call - accepted, rejected, or thrown - counts exactly once. `Stopwatch.GetTimestamp`
-    // -> `performance.now()`, whose unit is FRACTIONAL MILLISECONDS, so microseconds is `* 1000`.
+    // Duration measured from arrival to reply - queueing, evaluation, the batch's append - and
+    // recorded in a `finally` so every inbound call, accepted, rejected, or thrown, counts exactly
+    // once. `Stopwatch.GetTimestamp` -> `performance.now()`, whose unit is FRACTIONAL MILLISECONDS,
+    // so microseconds is `* 1000`.
     const startTimestamp = performance.now();
     try {
-      return await this.#commitCore(request);
+      const reply = new Promise<CommitReply>((resolve, reject) => {
+        this.#queued.push({ request, resolve, reject });
+      });
+      if (!this.#batching) {
+        this.#batching = true;
+        void this.#runBatches();
+      }
+      return await reply;
     } finally {
       this.#metrics?.recordCommit(Math.trunc((performance.now() - startTimestamp) * 1000));
     }
   }
 
   /**
-   * The whole `commit` body; split out only so the public entry can bracket it with the duration
-   * measurement.
+   * Drains the queue one batch at a time until it is empty. Runs on the activation's turn, so the
+   * emptiness check and the flag reset cannot race a `commit` enqueueing.
    */
-  async #commitCore(request: CommitRequest): Promise<CommitReply> {
-    // The confirmed small state: in a write turn all prior confirms have fully completed, and it is
-    // the view the adaptor's own version check pairs with.
-    const meta = this.state;
+  async #runBatches(): Promise<void> {
+    try {
+      while (this.#queued.length > 0) {
+        const batch = this.#queued;
+        this.#queued = [];
+        await this.#writeLock.addNext(() => this.#commitBatch(batch));
+      }
+    } finally {
+      this.#batching = false;
+    }
+  }
+
+  /**
+   * Evaluates a batch in order under the write lock, appends its accepted events in one write, and
+   * only then replies to every member. Never throws: every outcome, including a failed append, goes
+   * to the members' replies.
+   */
+  async #commitBatch(batch: readonly QueuedCommit[]): Promise<void> {
+    // The confirmed small state, with each accepted request's event folded on in turn, so a later
+    // request sees the earlier ones exactly as a serial run would have shown them.
+    let meta = this.state;
+    const evaluated: { queued: QueuedCommit; reply: CommitReply; event: LogEvent | undefined }[] =
+      [];
+    for (const queued of batch) {
+      try {
+        const { reply, event } = await this.#evaluateCommit(queued.request, meta);
+        if (event !== undefined) meta = metaFoldApplyEntry(meta, { kind: "committed", event });
+        evaluated.push({ queued, reply, event });
+      } catch (error) {
+        // An evaluation fault (an invariant violation) fails only its own request, which appended
+        // nothing, so it cannot have influenced the requests after it.
+        queued.reject(error);
+      }
+    }
+
+    const events = evaluated.flatMap((e) => (e.event === undefined ? [] : [e.event]));
+    if (events.length > 0) {
+      // Append: the batch's events join the pending tail in one write, from which the shard grains
+      // and Watch read them until a projection flush persists them into the shard grains they touch.
+      // The conditional raise is a secondary guard behind the per-request CAS: this activation is
+      // the only writer and the write lock admits one write at a time, so it cannot lose here, but a
+      // loss is still reported as a moved head rather than assumed away.
+      //
+      // EVERY member's reply waits for this write, rejections included: a rejection may rest on an
+      // earlier member's event (two creates of one relationship), so it is only true once that event
+      // is durable. A failed write fails the whole batch.
+      let raised: boolean;
+      try {
+        raised = await this.#raiseConditionalEvents(
+          events.map((event) => ({ kind: "committed", event }) satisfies DatastoreJournalEntry),
+        );
+      } catch (error) {
+        for (const e of evaluated) e.queued.reject(error);
+        return;
+      }
+
+      if (!raised) {
+        for (const e of evaluated)
+          e.queued.resolve(
+            rejected("headMoved", "conditional append reported a concurrent head advance"),
+          );
+        return;
+      }
+
+      await this.#notifyCommitted(events);
+    }
+
+    for (const e of evaluated) e.queued.resolve(e.reply);
+
+    if (this.state.pending.length >= FLUSH_INTERVAL) await this.#tryFlushProjection();
+  }
+
+  /**
+   * Pushes a confirmed batch to the per-silo watch hubs: the new head once, and every schema change
+   * in revision order. Best-effort and isolated: the notifications are one-way and any failure is
+   * swallowed - the commit result must never depend on the notify; a missed push is recovered by
+   * the hubs' heartbeat.
+   */
+  async #notifyCommitted(committed: readonly LogEvent[]): Promise<void> {
+    const head = committed.at(-1)!.revision;
+    try {
+      await this.#watchers.notify((w) => w.headAdvanced(head));
+    } catch {
+      // Defunct observers are pruned by ObserverManager; nothing else to do.
+    }
+
+    // A schema change committed: push the bytes to every silo's watch hub alongside the head
+    // advance. Without this, a schema write landing on THIS silo only swaps the schema provider
+    // locally - a live divergence, not just a cache-miss latency cost.
+    for (const ev of committed) {
+      const schemaChange = ev.schemaChange;
+      if (schemaChange === undefined) continue;
+      try {
+        await this.#watchers.notify((w) => w.schemaAdvanced(schemaChange.bytes, schemaChange.hash));
+      } catch {
+        // Defunct observers are pruned by ObserverManager; nothing else to do.
+      }
+    }
+  }
+
+  /**
+   * Evaluates one commit against `meta` - the confirmed state with the earlier members of its batch
+   * folded on - and returns its reply and the event to append, or a rejection and no event. Appends
+   * nothing itself.
+   */
+  async #evaluateCommit(
+    request: CommitRequest,
+    meta: DatastoreMetaState,
+  ): Promise<{ reply: CommitReply; event: LogEvent | undefined }> {
     const head = meta.headRevision;
 
     // 1. Compatibility CAS: reject if the head moved - the load-bearing compare, atomic with the
     //    append because writes never interleave writes.
     if (request.expectedHead !== undefined && head !== request.expectedHead)
-      return rejected("headMoved", `expected head ${request.expectedHead} but head is ${head}`);
+      return refused("headMoved", `expected head ${request.expectedHead} but head is ${head}`);
 
     // 2. Schema-write serializability: the caller validated its schema change against the schema it
     //    saw; reject if another schema landed since. An ABSENT current hash is the pre-first-schema
@@ -384,7 +523,7 @@ export class DatastoreGrain
           ? expectedSchemaHash.length === 0
           : currentHash === expectedSchemaHash;
       if (!unchanged) {
-        return rejected(
+        return refused(
           "schemaHashMoved",
           `expected schema hash '${expectedSchemaHash}' but schema hash at head is '${currentHash ?? ""}'`,
         );
@@ -472,9 +611,9 @@ export class DatastoreGrain
       }
 
       if (precondition.mustMatch && !matched)
-        return rejected("preconditionFailed", mustMatchFailedMessage(i, filter));
+        return refused("preconditionFailed", mustMatchFailedMessage(i, filter));
       if (!precondition.mustMatch && matched)
-        return rejected("preconditionFailed", mustNotMatchFailedMessage(i, filter));
+        return refused("preconditionFailed", mustNotMatchFailedMessage(i, filter));
     }
 
     // 7. Relationship updates, PRESERVING Create so the create-conflict check fires here.
@@ -484,7 +623,7 @@ export class DatastoreGrain
         await tx.writeRelationships(updates);
       } catch (error) {
         if (error instanceof CreateRelationshipExistsException)
-          return rejected("createAlreadyExists", error.relationship);
+          return refused("createAlreadyExists", error.relationship);
         throw error;
       }
     }
@@ -507,7 +646,7 @@ export class DatastoreGrain
         let probed = 0n;
         for await (const _ of tx.queryRelationships(deleteFilter)) {
           if (++probed > deleteLimit) {
-            return rejected("deleteLimitExceeded", deleteLimit.toString());
+            return refused("deleteLimitExceeded", deleteLimit.toString());
           }
         }
       }
@@ -538,9 +677,9 @@ export class DatastoreGrain
           else await tx.deleteCounter(counter.name);
         } catch (error) {
           if (error instanceof CounterAlreadyRegisteredException)
-            return rejected("counterAlreadyRegistered", error.counterName);
+            return refused("counterAlreadyRegistered", error.counterName);
           if (error instanceof CounterNotRegisteredException)
-            return rejected("counterNotRegistered", error.counterName);
+            return refused("counterNotRegistered", error.counterName);
           throw error;
         }
       }
@@ -561,39 +700,10 @@ export class DatastoreGrain
     if (request.transactionMetadata !== undefined)
       ev = { ...ev, transactionMetadata: request.transactionMetadata };
 
-    // 12. Append: the event joins the pending tail, from which the shard grains and Watch read it
-    //     until a projection flush persists it into the shard grains it touches.
-    // The adaptor's own version check is a secondary guard behind the CAS above. It cannot lose
-    // here - this activation is the only writer and no write interleaves a write - but keep the
-    // identical false-branch handling (reported as a moved head) rather than assume.
-    const raised = await this.#raiseConditionalEvent({ kind: "committed", event: ev });
-    if (!raised)
-      return rejected("headMoved", "conditional append reported a concurrent head advance");
-
-    // Push the new head to the per-silo watch hubs. Best-effort and isolated: `headAdvanced` is
-    // one-way and any failure is swallowed - the commit result must never depend on the notify; a
-    // missed push is recovered by the hubs' heartbeat.
-    try {
-      await this.#watchers.notify((w) => w.headAdvanced(newRevision));
-    } catch {
-      // Defunct observers are pruned by ObserverManager; nothing else to do.
-    }
-
-    // A schema change committed this revision: push the bytes to every silo's watch hub alongside
-    // the head advance. Without this, a schema write landing on THIS silo only swaps the schema
-    // provider locally - a live divergence, not just a cache-miss latency cost.
-    if (ev.schemaChange !== undefined) {
-      const schemaChange = ev.schemaChange;
-      try {
-        await this.#watchers.notify((w) => w.schemaAdvanced(schemaChange.bytes, schemaChange.hash));
-      } catch {
-        // Defunct observers are pruned by ObserverManager; nothing else to do.
-      }
-    }
-
-    if (this.state.pending.length >= FLUSH_INTERVAL) await this.#tryFlushProjection();
-
-    return { revision: newRevision, failure: undefined, deletedCount, reachedLimit };
+    return {
+      reply: { revision: newRevision, failure: undefined, deletedCount, reachedLimit },
+      event: ev,
+    };
   }
 
   /**
@@ -713,7 +823,12 @@ export class DatastoreGrain
   }
 
   /** @inheritdoc */
-  async runGc(): Promise<bigint | undefined> {
+  runGc(): Promise<bigint | undefined> {
+    return this.#writeLock.addNext(() => this.#runGcCore()) as Promise<bigint | undefined>;
+  }
+
+  /** The GC round {@link runGc} runs under the write lock. */
+  async #runGcCore(): Promise<bigint | undefined> {
     const head = this.state.headRevision;
     const currentFloor = this.state.gcFloor;
     const now = nowNanos();
@@ -763,6 +878,11 @@ export class DatastoreGrain
     return this.raiseConditionalEvent(entry);
   }
 
+  /** `RaiseConditionalEvents(entries)`: {@link #raiseConditionalEvent} over a range, in one write. */
+  async #raiseConditionalEvents(entries: readonly DatastoreJournalEntry[]): Promise<boolean> {
+    return this.raiseConditionalEvents(entries);
+  }
+
   /** @inheritdoc */
   subscribeWatch(watcher: IDatastoreWatcher): Promise<DatastoreHeadWire> {
     if (watcher === undefined || watcher === null) throw new Error("watcher must not be null");
@@ -809,11 +929,11 @@ export class DatastoreGrain
 
   /** @inheritdoc */
   flushProjection(): Promise<void> {
-    return this.#flushProjectionCore();
+    return this.#writeLock.addNext(() => this.#flushProjectionCore()) as Promise<void>;
   }
 
   /**
-   * The flush a write turn runs when the pending tail reaches {@link FLUSH_INTERVAL}. A failure is
+   * The flush a write (under the write lock) runs when the pending tail reaches {@link FLUSH_INTERVAL}. A failure is
    * logged and left for the next flush to retry - the events stay pending, which is always correct
    * - because the write that triggered it has already committed and must not be reported as failed.
    */
@@ -831,7 +951,7 @@ export class DatastoreGrain
   /**
    * Projects the whole pending tail (see the class remarks): every touched shard grain persists its
    * events, the populated keys are added to the shard index, and only then is the projection
-   * journaled. Runs in a write turn, so no commit interleaves it.
+   * journaled. Runs under the write lock, so no commit batch interleaves it.
    */
   async #flushProjectionCore(): Promise<void> {
     const meta = this.state;
@@ -947,6 +1067,21 @@ function pendingKeys(
 /** `static CommitReply Rejected(kind, detail)`. */
 function rejected(kind: CommitFailureKind, detail: string | undefined): CommitReply {
   return { revision: undefined, failure: { kind, detail }, deletedCount: 0n, reachedLimit: false };
+}
+
+/** A rejection from {@link DatastoreGrain.#evaluateCommit}: the reply, and no event to append. */
+function refused(
+  kind: CommitFailureKind,
+  detail: string | undefined,
+): { reply: CommitReply; event: undefined } {
+  return { reply: rejected(kind, detail), event: undefined };
+}
+
+/** A commit waiting for its batch, and where its reply goes. */
+interface QueuedCommit {
+  readonly request: CommitRequest;
+  readonly resolve: (reply: CommitReply) => void;
+  readonly reject: (error: unknown) => void;
 }
 
 /**
