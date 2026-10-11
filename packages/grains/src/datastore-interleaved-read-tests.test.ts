@@ -14,6 +14,8 @@ import type { CommitReply, CommitRequest } from "./commit-contract";
 import { graphShardGrainKeyBuild } from "./graph-shard-grain-key";
 import { graphShardKeyForResource } from "./graph-shard-key";
 import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "./i-datastore-grain";
+import type { IDatastoreWatcher as IDatastoreWatcherType } from "./i-datastore-watcher";
+import { IDatastoreWatcher } from "./i-datastore-watcher";
 import { IGraphShardGrain } from "./i-graph-shard-grain";
 import { configureSequencerSilo, SEQUENCER_GRAIN_REGISTRATIONS } from "./sequencer-test-silo";
 import { toWire } from "./wire-convert";
@@ -555,4 +557,92 @@ describe("DatastoreInterleavedReadTests", () => {
       expect(replies.filter((r) => r.failure?.kind === "createAlreadyExists")).toHaveLength(1);
     });
   });
+  /**
+   * Writes run in arrival order through one queue: a GC round issued while a write is parked, and a
+   * commit issued after it, append in that order. The GC neither waits for every commit in flight to
+   * finish nor lets a later commit overtake it.
+   */
+  it("A_gc_round_queues_with_commits_in_arrival_order", async () => {
+    await withCluster(async ({ cluster }) => {
+      const target = grain(cluster);
+      const oldHead = (await target.getHead()).head;
+
+      gate.headWriteBlock = deferred();
+      gate.headWriteParked = deferred();
+      const first = target.commit(updateCommit("touch", "first", "alice"));
+      let gc: Promise<bigint | undefined>;
+      let after: Promise<CommitReply>;
+      try {
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
+        gate.headWriteParked = undefined;
+        gc = target.runGc();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        after = target.commit(updateCommit("touch", "after", "bob"));
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } finally {
+        const block = gate.headWriteBlock;
+        gate.headWriteBlock = undefined;
+        block?.resolve();
+      }
+
+      await waitAsync(first, "the parked commit");
+      expect(await waitAsync(gc, "the gc round")).toBeDefined();
+      expect((await waitAsync(after, "the later commit")).failure).toBeUndefined();
+
+      const segment = await target.readFrom(oldHead, -1);
+      expect(segment.events).toHaveLength(3);
+      const [e0, e1, e2] = segment.events;
+      expect(e0!.relationshipChanges.map((u) => u.relationship.resourceId)).toEqual(["first"]);
+      expect(e1!.gcFloor).toBeDefined();
+      expect(e2!.relationshipChanges.map((u) => u.relationship.resourceId)).toEqual(["after"]);
+    });
+  });
+
+  /**
+   * A write waiting its turn does not hold the activation: with a commit's write parked and a GC
+   * round issued behind it, a non-interleaving call (`subscribeWatch`, the watch hubs' heartbeat)
+   * still completes. Writes wait in the sequencer's own queue; a GC round waiting in the activation
+   * as its blocking request would hold every non-interleaving call behind the write.
+   */
+  it("A_queued_gc_round_does_not_block_the_watch_heartbeat", async () => {
+    await withCluster(async ({ cluster }) => {
+      const target = grain(cluster);
+      await target.getHead(); // activate first, so the parked write below is the commit's
+      const client = await cluster.client;
+      const watcher = client.createObjectReference<IDatastoreWatcherType>(
+        IDatastoreWatcher,
+        new NullWatcher(),
+      );
+
+      gate.headWriteBlock = deferred();
+      gate.headWriteParked = deferred();
+      const first = target.commit(updateCommit("touch", "first", "alice"));
+      let gc: Promise<bigint | undefined>;
+      try {
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
+        gate.headWriteParked = undefined;
+        gc = target.runGc();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        expect(await raceTimeout(target.subscribeWatch(watcher))).toBe("work");
+      } finally {
+        const block = gate.headWriteBlock;
+        gate.headWriteBlock = undefined;
+        block?.resolve();
+      }
+
+      await waitAsync(first, "the parked commit");
+      await waitAsync(gc, "the gc round");
+    });
+  }, 20_000);
 });
+
+class NullWatcher implements IDatastoreWatcherType {
+  headAdvanced(_head: bigint): Promise<void> {
+    return Promise.resolve();
+  }
+
+  schemaAdvanced(_schemaBytes: Uint8Array, _storedHash: string): Promise<void> {
+    return Promise.resolve();
+  }
+}

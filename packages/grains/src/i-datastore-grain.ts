@@ -79,8 +79,9 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
   /**
    * Projects every pending event into the shard grains it touches and the shard index, then
    * journals that the projection has caught up. The sequencer does this itself every flush
-   * interval; calling it directly is a test and operations seam. A write: never interleaves
-   * another write.
+   * interval; calling it directly is a test and operations seam. A write: it queues behind the
+   * writes before it and never interleaves another, so the call itself is `alwaysInterleave` and
+   * waits in the sequencer's write queue rather than the activation's.
    */
   flushProjection(): Promise<void>;
 
@@ -93,7 +94,8 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
    * `CommitRequest.expectedHead`) needs no caller retry loop. Commits are GROUP-COMMITTED: the call
    * is `alwaysInterleave` so a commit arriving while a batch is being written can queue for the next
    * one, and each batch is evaluated in arrival order and appended in one write. Batches, GC rounds
-   * and projection flushes share one write lock, so writes never interleave EACH OTHER: each request
+   * and projection flushes are work items in one write queue, drained in arrival order by a single
+   * writer, so writes never interleave EACH OTHER: each request
    * is evaluated against the head left by every write before it, and its append lands before any
    * later write evaluates, which is both why the head cannot move under a declarative commit and why
    * the caller-evaluated CAS of the lambda compatibility path (the optional `expectedHead` compare)
@@ -131,6 +133,7 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
    * body and a directly callable test seam. Returns the new floor, or `undefined` if no collection
    * was needed (the computed floor did not advance the current one). `0n` is a LEGAL floor, so a
    * falsy check on the result would report a genuine collection to revision 0 as no collection.
+   * Like `flushProjection`, it queues as one write and is `alwaysInterleave`.
    */
   runGc(): Promise<bigint | undefined>;
 }
@@ -145,9 +148,10 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
  * REPEATED here. A dropped flag on any of the five parks a Watch stream or a shard hydration behind
  * an in-flight commit - a deadlock or a timeout storm that no unit test would show.
  *
- * `commit` is `alwaysInterleave` too, for group commit: a commit arriving mid-batch must reach the
- * queue rather than wait behind the batch. Its atomicity comes from the grain's write lock, not from
- * the turn scheduler. `subscribeWatch`, `unsubscribeWatch` and `runGc` carry nothing. And never `readOnly` anywhere: it
+ * The writes - `commit`, `runGc` and `flushProjection` - are `alwaysInterleave` too: each only
+ * enqueues into the grain's write queue, whose single writer gives them their atomicity, so none
+ * waits in the activation as a blocking turn that would hold the calls behind it. `subscribeWatch`
+ * and `unsubscribeWatch` carry nothing. And never `readOnly` anywhere: it
  * interleaves only when BOTH the blocking and the incoming turn are read-only, so it would not get
  * past the non-read-only `commit`.
  */
@@ -160,5 +164,7 @@ export const IDatastoreGrain = defineGrainInterface<IDatastoreGrain>("IDatastore
     readShardTail: { alwaysInterleave: true },
     readFrom: { alwaysInterleave: true },
     commit: { alwaysInterleave: true },
+    runGc: { alwaysInterleave: true },
+    flushProjection: { alwaysInterleave: true },
   },
 });

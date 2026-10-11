@@ -6,7 +6,7 @@ import {
   RevisionNotFoundException,
 } from "@benedb/datastore/datastore-exceptions";
 import { MvccReadWriteTransaction } from "@benedb/datastore/mvcc-read-write-transaction";
-import { AsyncSerialExecutor } from "@thresh/core/async-serial-executor";
+import { BatchWorkerFromDelegate } from "@thresh/core/batch-worker";
 import { grain } from "@thresh/core/decorators";
 import type { Duration } from "@thresh/core/duration";
 import { durationToMs } from "@thresh/core/duration";
@@ -70,15 +70,16 @@ import "./revision-not-found-surrogate";
  * `ShardIndexGrain` buckets.
  *
  * INTERLEAVING IS THE CENTRAL CONTRACT. It is a single activation whose WRITES (commit batches,
- * `runGc`, `flushProjection`) never interleave EACH OTHER: each runs under the one write lock, so a
- * write runs to completion before the next, keeping every head-compare-and-append atomic. The PURE
+ * `runGc`, `flushProjection`) never interleave EACH OTHER: each is a work item in the one write
+ * queue, which a single `BatchWorker` drains in arrival order, so a write runs to completion before
+ * the next, keeping every head-compare-and-append atomic. The PURE
  * reads (`readState`, `getHead`, `readSchemaAt`,
  * `readShard`, `readShardTail`, `readFrom`) carry `alwaysInterleave` in `IDatastoreGrain`'s options
  * map and may run DURING a write's await - never concurrently with it, and never observing a
  * write's intermediate state, because they read the confirmed view.
  *
- * GROUP COMMIT. `commit` interleaves: it queues its request and awaits its reply. One batch loop
- * drains the queue under the write lock, evaluating each queued request in arrival order against
+ * GROUP COMMIT. `commit` interleaves: it queues its request and awaits its reply. The writer takes
+ * each run of adjacent queued commits as one batch, evaluating each request in arrival order against
  * the confirmed state with the events of the requests before it in the batch folded on
  * ({@link metaFoldApplyEntry}), so each sees exactly the state a serial run would have shown it.
  * The accepted events are then appended with ONE conditional raise (Thresh's
@@ -131,9 +132,9 @@ import "./revision-not-found-surrogate";
  *     accumulate a duplicate registration per heartbeat instead of refreshing one.
  *  6. `Task.WhenAll` over shard and index calls becomes `Promise.all`, in batches of
  *     {@link MAX_CONCURRENT_SHARD_CALLS} through {@link inBatches}, as the C#'s `InBatches`.
- *  7. The write lock (`SemaphoreSlim(1, 1)`) is an `AsyncSerialExecutor`: each section it guards
- *     (a commit batch, a GC round, a flush) is one callable unit. The queued commits'
- *     `TaskCompletionSource`s are `{ promise, resolve, reject }` triples.
+ *  7. The writer is Thresh's port of Orleans' `BatchWorkerFromDelegate`. The queued writes'
+ *     `TaskCompletionSource`s are `{ resolve, reject }` pairs captured from a `Promise`
+ *     constructor, and the C#'s sealed `QueuedWrite` records are a `kind` union.
  */
 @grain()
 export class DatastoreGrain
@@ -166,16 +167,14 @@ export class DatastoreGrain
   );
 
   /**
-   * Serializes every write: a commit batch, a GC round and a projection flush each run as one unit
-   * on it, so no two writes interleave even though `commit` does.
+   * Writes waiting their turn, in arrival order: commits, GC rounds and projection flushes. Every
+   * write call interleaves and only enqueues; {@link #writer} is the one thing that executes writes,
+   * so no two writes interleave and none waits in the activation's own request queue.
    */
-  readonly #writeLock = new AsyncSerialExecutor<unknown>();
+  readonly #writes: QueuedWrite[] = [];
 
-  /** Commits waiting for the next batch, in arrival order. */
-  #queued: QueuedCommit[] = [];
-
-  /** Whether the batch loop is running; it drains {@link #queued} until it is empty. */
-  #batching = false;
+  /** The single writer: one work cycle at a time, on the activation's turn. */
+  readonly #writer = new BatchWorkerFromDelegate(() => this.#drainWrites());
 
   constructor(options: DatastoreGrainOptions = {}) {
     super();
@@ -379,36 +378,64 @@ export class DatastoreGrain
     const startTimestamp = performance.now();
     try {
       const reply = new Promise<CommitReply>((resolve, reject) => {
-        this.#queued.push({ request, resolve, reject });
+        this.#enqueue({ kind: "commit", request, resolve, reject });
       });
-      if (!this.#batching) {
-        this.#batching = true;
-        void this.#runBatches();
-      }
       return await reply;
     } finally {
       this.#metrics?.recordCommit(Math.trunc((performance.now() - startTimestamp) * 1000));
     }
   }
 
+  /** Queues a write and wakes the writer. */
+  #enqueue(write: QueuedWrite): void {
+    this.#writes.push(write);
+    this.#writer.notify();
+  }
+
+  /** Queues a GC round or a projection flush and waits for its outcome. */
+  #enqueueRun<T>(run: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.#enqueue({
+        kind: "run",
+        run: async () => {
+          try {
+            resolve(await run());
+          } catch (error) {
+            reject(error);
+          }
+        },
+      });
+    });
+  }
+
   /**
-   * Drains the queue one batch at a time until it is empty. Runs on the activation's turn, so the
-   * emptiness check and the flag reset cannot race a `commit` enqueueing.
+   * The writer's work cycle: drains {@link #writes} in arrival order. Each run of adjacent commits
+   * is one batch; a GC round or a flush runs alone. Runs on the activation's turn, so taking from
+   * the queue cannot race an enqueue, and the worker never runs two cycles at once.
    */
-  async #runBatches(): Promise<void> {
-    try {
-      while (this.#queued.length > 0) {
-        const batch = this.#queued;
-        this.#queued = [];
-        await this.#writeLock.addNext(() => this.#commitBatch(batch));
+  async #drainWrites(): Promise<void> {
+    while (this.#writes.length > 0) {
+      const head = this.#writes[0]!;
+      switch (head.kind) {
+        case "commit": {
+          let count = 0;
+          while (count < this.#writes.length && this.#writes[count]!.kind === "commit") count++;
+          const batch = this.#writes.splice(0, count) as QueuedCommit[];
+          await this.#commitBatch(batch);
+          break;
+        }
+        case "run":
+          this.#writes.shift();
+          await head.run();
+          break;
+        default:
+          assertNever(head);
       }
-    } finally {
-      this.#batching = false;
     }
   }
 
   /**
-   * Evaluates a batch in order under the write lock, appends its accepted events in one write, and
+   * Evaluates a batch in order, appends its accepted events in one write, and
    * only then replies to every member. Never throws: every outcome, including a failed append, goes
    * to the members' replies.
    */
@@ -435,7 +462,7 @@ export class DatastoreGrain
       // Append: the batch's events join the pending tail in one write, from which the shard grains
       // and Watch read them until a projection flush persists them into the shard grains they touch.
       // The conditional raise is a secondary guard behind the per-request CAS: this activation is
-      // the only writer and the write lock admits one write at a time, so it cannot lose here, but a
+      // the only writer and the write queue runs one write at a time, so it cannot lose here, but a
       // loss is still reported as a moved head rather than assumed away.
       //
       // EVERY member's reply waits for this write, rejections included: a rejection may rest on an
@@ -824,10 +851,10 @@ export class DatastoreGrain
 
   /** @inheritdoc */
   runGc(): Promise<bigint | undefined> {
-    return this.#writeLock.addNext(() => this.#runGcCore()) as Promise<bigint | undefined>;
+    return this.#enqueueRun(() => this.#runGcCore());
   }
 
-  /** The GC round {@link runGc} runs under the write lock. */
+  /** The GC round {@link runGc} queues as one write. */
   async #runGcCore(): Promise<bigint | undefined> {
     const head = this.state.headRevision;
     const currentFloor = this.state.gcFloor;
@@ -929,11 +956,11 @@ export class DatastoreGrain
 
   /** @inheritdoc */
   flushProjection(): Promise<void> {
-    return this.#writeLock.addNext(() => this.#flushProjectionCore()) as Promise<void>;
+    return this.#enqueueRun(() => this.#flushProjectionCore());
   }
 
   /**
-   * The flush a write (under the write lock) runs when the pending tail reaches {@link FLUSH_INTERVAL}. A failure is
+   * The flush a write runs when the pending tail reaches {@link FLUSH_INTERVAL}. A failure is
    * logged and left for the next flush to retry - the events stay pending, which is always correct
    * - because the write that triggered it has already committed and must not be reported as failed.
    */
@@ -951,7 +978,7 @@ export class DatastoreGrain
   /**
    * Projects the whole pending tail (see the class remarks): every touched shard grain persists its
    * events, the populated keys are added to the shard index, and only then is the projection
-   * journaled. Runs under the write lock, so no commit batch interleaves it.
+   * journaled. Runs as or inside a queued write, so no commit batch interleaves it.
    */
   async #flushProjectionCore(): Promise<void> {
     const meta = this.state;
@@ -1077,11 +1104,21 @@ function refused(
   return { reply: rejected(kind, detail), event: undefined };
 }
 
+/** A write waiting in the sequencer's queue. */
+type QueuedWrite = QueuedCommit | QueuedRun;
+
 /** A commit waiting for its batch, and where its reply goes. */
 interface QueuedCommit {
+  readonly kind: "commit";
   readonly request: CommitRequest;
   readonly resolve: (reply: CommitReply) => void;
   readonly reject: (error: unknown) => void;
+}
+
+/** A GC round or a projection flush, run alone between batches; it completes its own caller. */
+interface QueuedRun {
+  readonly kind: "run";
+  readonly run: () => Promise<void>;
 }
 
 /**
@@ -1179,4 +1216,8 @@ function watcherKey(watcher: IDatastoreWatcher): string {
   if (identity === undefined)
     throw new Error("subscribeWatch/unsubscribeWatch require a grain-reference observer");
   return identity.grainId.toString();
+}
+
+function assertNever(value: never): never {
+  throw new Error(`unknown queued write ${JSON.stringify(value)}`);
 }

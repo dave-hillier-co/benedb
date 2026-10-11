@@ -26,7 +26,7 @@ describe("IDatastoreGrain", () => {
     expect(IDatastoreGrain.name).toBe("IDatastoreGrain");
   });
 
-  it("marks EXACTLY the pure reads and commit alwaysInterleave - including the INHERITED readFrom", () => {
+  it("marks EXACTLY the pure reads and the writes alwaysInterleave - including the INHERITED readFrom", () => {
     // Five methods carry [AlwaysInterleave] in the C#: ReadState, GetHead, ReadSchemaAt, ReadShard,
     // and ReadFrom, the last declared on IDatastoreLog and inherited. Thresh's per-method options
     // live on the CONCRETE GrainInterface value and are NOT inherited from an extended interface,
@@ -41,15 +41,19 @@ describe("IDatastoreGrain", () => {
       readShardTail: { alwaysInterleave: true },
       readFrom: { alwaysInterleave: true },
       commit: { alwaysInterleave: true },
+      runGc: { alwaysInterleave: true },
+      flushProjection: { alwaysInterleave: true },
     });
   });
 
-  it("interleaves commit for group commit, and gives the other writes NO options", () => {
-    // Commit carries [AlwaysInterleave] in the C# so a commit arriving mid-batch reaches the queue;
-    // its atomicity comes from the grain's write lock, pinned by the interleaved-read suite's CAS
-    // gate. SubscribeWatch, UnsubscribeWatch, RunGc and FlushProjection carry nothing.
-    expect(IDatastoreGrain.options.commit).toEqual({ alwaysInterleave: true });
-    for (const method of ["subscribeWatch", "unsubscribeWatch", "runGc", "flushProjection"]) {
+  it("interleaves the writes, which only enqueue, and gives the watch pair NO options", () => {
+    // Commit, RunGc and FlushProjection carry [AlwaysInterleave] in the C#: each enqueues into the
+    // grain's write queue, whose single writer gives the atomicity the interleaved-read suite's CAS
+    // gate pins. SubscribeWatch and UnsubscribeWatch carry nothing.
+    for (const method of ["commit", "runGc", "flushProjection"]) {
+      expect(IDatastoreGrain.options[method]).toEqual({ alwaysInterleave: true });
+    }
+    for (const method of ["subscribeWatch", "unsubscribeWatch"]) {
       expect(IDatastoreGrain.options[method]).toBeUndefined();
     }
   });

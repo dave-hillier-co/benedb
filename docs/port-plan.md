@@ -87,7 +87,8 @@ production use case, not an obstacle to it.
 The sequencer's write scaling follows Spiceport's staged plan
 ([`../spiceport/docs/transaction-system.md`](../../spiceport/docs/transaction-system.md)), one
 stage at a time and only once Spiceport has built it. Group commit needs Thresh to write a
-confirm's pending events in one journal append (`raiseConditionalEvents`). From the version-only
+confirm's pending events in one journal append (`raiseConditionalEvents`), and a `BatchWorker` for
+the sequencer's single writer. From the version-only
 sequencer onward the plan builds a general transactional key-value layer; when it is ported, that
 generic half is Thresh's, and BeneDB keeps only the SpiceDB layer over it.
 
