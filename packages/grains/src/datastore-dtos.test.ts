@@ -5,7 +5,6 @@ import {
   datastoreHeadWireGcFloor,
   type DatastoreHeadWire,
   type FullRelationshipsFilterWire,
-  type LogHeadEntry,
   type ProposedWrite,
   type SchemaVersionWire,
   type StoredRelationshipWire,
@@ -14,28 +13,9 @@ import type { RelationshipWire } from "./relationships-dtos";
 
 // `src/Spiceport.Server/Grains.Abstractions/DatastoreDtos.cs` is covered by
 // `DatastoreStateWireRoundTripTests` for the stored rows, schema versions and counter filters.
-// This file pins what that test does not reach: the two DIFFERENT integer widths in the same file,
-// the `GcFloor = 0` default parameter, and the byte-array reference-equality trap.
-describe("revisions versus storage versions", () => {
-  it("keeps every revision a bigint and every storage version a number", () => {
-    // The easiest silent bug in this file. `LogHeadEntry.LogVersion` and `SnapshotVersion` are
-    // `int` STORAGE versions (the CustomStorage optimistic-concurrency counter and the current
-    // meta-row version); `HeadRevision` is the `long` MVCC revision. They live side by side in one
-    // record and mean entirely different things.
-    const head: LogHeadEntry = {
-      logVersion: 12,
-      headRevision: 1730000000000000000n,
-      snapshotVersion: 3,
-    };
-
-    const back = deserializeValue<LogHeadEntry>(serializeValue(head));
-
-    expect(typeof back.logVersion).toBe("number");
-    expect(typeof back.snapshotVersion).toBe("number");
-    expect(typeof back.headRevision).toBe("bigint");
-    expect(back.headRevision).toBe(1730000000000000000n);
-  });
-
+// This file pins what that test does not reach: bigint revisions past 2^53, the `GcFloor = 0`
+// default parameter, and the byte-array reference-equality trap.
+describe("revisions", () => {
   it("carries a nanosecond revision past 2^53 without rounding", () => {
     // The whole reason revisions are bigints: 1.73e18 is a real timestamp revision, and `number`
     // would round it to a different value, so two distinct revisions would compare equal.

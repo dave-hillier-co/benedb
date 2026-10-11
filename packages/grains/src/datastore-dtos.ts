@@ -9,9 +9,7 @@ import type { RelationshipUpdateWire, RelationshipWire } from "./relationships-d
 // The width decisions this file makes, and the easiest silent bug in the whole layer: every MVCC
 // REVISION is a `bigint` (`createdRevision`, `deletedRevision`, `SchemaVersionWire.revision`,
 // `CounterVersionWire.revision`, `DatastoreHeadWire.head`/`gcFloor`), matching
-// `packages/datastore/src/datastore-state.ts`; every STORAGE VERSION (`LogHeadEntry.logVersion`,
-// `snapshotVersion`) is an `int` and stays a `number`. They sit side by side in one record and
-// mean entirely different things.
+// `packages/datastore/src/datastore-state.ts`.
 
 /**
  * A relationship row on the wire, carrying its MVCC visibility window. Mirrors the in-memory
@@ -144,24 +142,4 @@ export interface ProposedWrite {
   readonly schemaBytes?: Uint8Array | undefined;
   /** The counter deltas. */
   readonly counterChanges: readonly CounterDeltaWire[];
-}
-
-/**
- * The durable "head" pointer entry for the event-sourced datastore grain (a single grain-storage
- * row). It records the two distinct counters: the contiguous append-only log `logVersion` (the
- * custom-storage optimistic-concurrency version, = the number of confirmed events), and the latest
- * timestamp `headRevision` (the MVCC / zedtoken revision carried in the events).
- * `snapshotVersion` names the current flush boundary: under the thin-sequencer layout it is the
- * version of the current `meta/{version}` row (see `DatastoreMetaEntry`), so a cold read loads the
- * small state plus per-key shard rows and replays only the log tail above it. On a store written
- * by the retired whole-state layout the same field named the `snapshot/{version}` row; activation
- * migrates such a store in place (split into per-key rows + meta) on first read.
- */
-export interface LogHeadEntry {
-  /** The log version: an `int` STORAGE version, not a revision. */
-  readonly logVersion: number;
-  /** The head MVCC revision carried in the events. */
-  readonly headRevision: bigint;
-  /** The current flush boundary: an `int` STORAGE version, not a revision. */
-  readonly snapshotVersion: number;
 }

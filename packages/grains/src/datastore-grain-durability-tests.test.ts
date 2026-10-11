@@ -34,8 +34,8 @@ import {
  * directory, and the single in-memory activation), then build a BRAND-NEW cluster B over the SAME
  * durable backend and read back. Cluster B shares no memory whatsoever with A, so the only path for
  * the data to reappear is a real read from Postgres. This is strictly stronger than
- * `forceActivationCollection` (same-process reactivation, which `thin-sequencer-tests` already
- * covers): a fresh cluster cannot be fooled by a warm activation or a leftover in-process value.
+ * `forceActivationCollection` (same-process reactivation, which `projection-sequencer-tests`
+ * already covers): a fresh cluster cannot be fooled by a warm activation or a leftover in-process value.
  *
  * NEGATIVE CONTROL: the grain seeds a fresh head ONLY when its journal is empty. If durable state were lost, cluster B's activation would re-seed a fresh,
  * LARGER head with zero relationships - so the head-equality and relationship-count assertions

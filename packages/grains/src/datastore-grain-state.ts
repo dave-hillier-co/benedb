@@ -6,9 +6,8 @@ import type {
 
 /**
  * The serializable mirror of the in-memory MVCC `DatastoreState`: the full committed state of the
- * datastore at a head revision. Under the thin-sequencer layout this is no longer what the
- * datastore grain persists (rows live per key in `GraphShardState` rows, the rest in
- * `DatastoreMetaState`); it survives as the ASSEMBLED whole-state reply of
+ * datastore at a head revision. This is not what the datastore grain persists (rows live per
+ * key in each `GraphShardState` projection, the rest in `DatastoreMetaState`); it survives as the ASSEMBLED whole-state reply of
  * `IDatastoreGrain.readState` - small state plus every indexed forward key's current rows - which
  * the `GrainBackedDatastore`/scan seam converts to the in-memory state to reuse the
  * fold/transaction mechanics. Every relationship row carries its created/deleted revision stamps so
