@@ -72,10 +72,10 @@ import "./revision-not-found-surrogate";
  *  - `[GraphLocalityPlacement]` -> `{ placement: "custom", strategy }` plus the silo-side
  *    `addPlacementStrategy(GRAPH_LOCALITY_PLACEMENT_STRATEGY, ...)` registration. Thresh has no
  *    attribute mechanism and no strategy-vs-director split; what survives the pair is the name.
- *  - `SemaphoreSlim(1, 1)` -> the module-private {@link ShardGate}. `AsyncSerialExecutor` cannot
- *    express a permit held across a section the holder does not own as a callback.
- *  - `Task.Delay(10ms, ct)` -> a `setTimeout` promise wrapped in `raceSignal`, timer cleared in a
- *    `finally`. A bare `setTimeout` await would leave one unkillable window per iteration.
+ *  - The in-flight catch-up `Task` is a `Promise`; `catchUp.WaitAsync(cancellationToken)` is
+ *    `raceSignal(catchUp, signal)`. `Task.IsCompleted` has no `Promise` equivalent, so the catch-up
+ *    records its own settlement in a flag.
+ *  - `Task.Delay(10ms)` -> a `setTimeout` promise.
  *  - `Dictionary<(string, string), ...>` -> a `Map` over a LENGTH-PREFIXED composite key: a JS
  *    `Map` keys by reference, and relationship ids may contain any character at all.
  *  - `HashSet<StoredRelationshipWire>(ReferenceEqualityComparer.Instance)` -> a plain `Set`, which
@@ -93,10 +93,10 @@ export class GraphShardGrain extends Grain implements IGraphShardGrain {
   /** Log-tail page size for catch-up pulls (matches the Watch feed's page size). */
   static readonly #batchSize = 256;
 
-  // Single-flight gate: only one hydration/catch-up runs at a time. `rowsAt` is
-  // `alwaysInterleave`, so concurrent readers whose revision the watermark already covers skip the
-  // gate entirely (the fast path); the rest queue here and re-check after acquiring.
-  readonly #gate = new ShardGate();
+  // The hydration/catch-up in flight, or absent: single-flight. `rowsAt` is `alwaysInterleave`, so
+  // concurrent readers whose revision the watermark already covers never touch it (the fast path);
+  // the rest await the one in flight and re-check, starting another only if it fell short.
+  #catchUp: InFlight | undefined;
 
   #state: GraphShardState = GRAPH_SHARD_STATE_EMPTY;
   #hydrated = false;
@@ -140,62 +140,77 @@ export class GraphShardGrain extends Grain implements IGraphShardGrain {
       return this.#serve(revision, filter);
     }
 
-    await this.#gate.wait(signal);
-    try {
-      if (!this.#hydrated) {
-        // ALWAYS hydrate from the projection plus the pending tail first - never rely on
-        // `readFrom(0n)` semantics for a cold shard (see the class remarks).
+    while (!(this.#hydrated && this.#state.appliedRevision >= revision)) {
+      let catchUp = this.#catchUp;
+      const started = catchUp === undefined;
+      if (catchUp === undefined) this.#catchUp = catchUp = settles(this.#runCatchUp(revision));
+      try {
+        // The catch-up belongs to no one caller: a reader's cancellation abandons only its own
+        // wait, and the others keep the pull it started.
+        await raceSignal(catchUp.promise, signal);
+      } catch (error) {
+        // Another reader's catch-up failed: run one of our own rather than share its failure.
+        if (started || signal?.aborted === true) throw error;
+      } finally {
+        if (this.#catchUp === catchUp && catchUp.completed) this.#catchUp = undefined;
+      }
+    }
+
+    return this.#serve(revision, filter);
+  }
+
+  /**
+   * Hydrates if cold, then folds the log tail until the watermark covers `revision`: the one
+   * catch-up `rowsAt` readers share.
+   */
+  async #runCatchUp(revision: bigint): Promise<void> {
+    if (!this.#hydrated) {
+      // ALWAYS hydrate from the projection plus the pending tail first - never rely on
+      // `readFrom(0n)` semantics for a cold shard (see the class remarks).
+      this.#state = await this.#hydrate();
+      this.#hydrated = true;
+    }
+
+    // Watermark as of the last re-hydrate, or absent when no re-hydrate has happened yet in this
+    // catch-up. Guards the compaction-window spin: right after the singleton commits, its
+    // post-commit compaction can briefly leave the hydrated head below the retained recent-tail
+    // floor, so `readFrom` keeps rejecting the freshly re-hydrated watermark.
+    let lastRehydrateWatermark: bigint | undefined = undefined;
+
+    while (this.#state.appliedRevision < revision) {
+      let seg;
+      try {
+        seg = await this.#datastore.readFrom(
+          this.#state.appliedRevision,
+          GraphShardGrain.#batchSize,
+        );
+      } catch (error) {
+        if (!(error instanceof RevisionNotFoundException)) throw error;
+        // Fell below the grain's retained log window; re-hydrate from a fresh per-key snapshot and
+        // continue. If we must re-hydrate AGAIN without the watermark having advanced, we are
+        // inside the compaction window described above - back off briefly instead of hot-spinning
+        // against the singleton until its compaction settles.
+        if (lastRehydrateWatermark === this.#state.appliedRevision) await delay(10);
         this.#state = await this.#hydrate();
-        this.#hydrated = true;
+        lastRehydrateWatermark = this.#state.appliedRevision;
+        continue;
       }
 
-      // Watermark as of the last re-hydrate, or absent when no re-hydrate has happened yet in this
-      // catch-up. Guards the compaction-window spin: right after the singleton commits, its
-      // post-commit compaction can briefly leave the hydrated head below the retained recent-tail
-      // floor, so `readFrom` keeps rejecting the freshly re-hydrated watermark.
-      let lastRehydrateWatermark: bigint | undefined = undefined;
+      for (const ev of seg.events) this.#state = shardFoldApplyEvent(this.#state, ev, this.#key);
 
-      while (this.#state.appliedRevision < revision) {
-        signal?.throwIfAborted();
-
-        let seg;
-        try {
-          seg = await this.#datastore.readFrom(
-            this.#state.appliedRevision,
-            GraphShardGrain.#batchSize,
-          );
-        } catch (error) {
-          if (!(error instanceof RevisionNotFoundException)) throw error;
-          // Fell below the grain's retained log window; re-hydrate from a fresh per-key snapshot
-          // and continue. If we must re-hydrate AGAIN without the watermark having advanced, we
-          // are inside the compaction window described above - back off briefly instead of
-          // hot-spinning against the singleton until its compaction settles.
-          if (lastRehydrateWatermark === this.#state.appliedRevision) await delay(10, signal);
-          this.#state = await this.#hydrate();
-          lastRehydrateWatermark = this.#state.appliedRevision;
-          continue;
-        }
-
-        for (const ev of seg.events) this.#state = shardFoldApplyEvent(this.#state, ev, this.#key);
-
-        if (seg.events.length < GraphShardGrain.#batchSize) {
-          // A short page proves we drained to the observed head; jump the watermark to it (covers
-          // the seed/change-free-head case where head > the last event's revision). The pinned
-          // revision is always <= the grain head, so the loop condition now releases us.
-          this.#state = {
-            ...this.#state,
-            appliedRevision:
-              this.#state.appliedRevision > seg.headRevision
-                ? this.#state.appliedRevision
-                : seg.headRevision,
-          };
-          break;
-        }
+      if (seg.events.length < GraphShardGrain.#batchSize) {
+        // A short page proves we drained to the observed head; jump the watermark to it (covers
+        // the seed/change-free-head case where head > the last event's revision). The pinned
+        // revision is always <= the grain head, so the loop condition now releases us.
+        this.#state = {
+          ...this.#state,
+          appliedRevision:
+            this.#state.appliedRevision > seg.headRevision
+              ? this.#state.appliedRevision
+              : seg.headRevision,
+        };
+        break;
       }
-
-      return this.#serve(revision, filter);
-    } finally {
-      this.#gate.release();
     }
   }
 
@@ -386,55 +401,23 @@ function subjectIndexKey(subjectType: string, subjectId: string): string {
   return `${subjectType.length}:${subjectType}${subjectId.length}:${subjectId}`;
 }
 
-/**
- * `Task.Delay(TimeSpan.FromMilliseconds(ms), cancellationToken)`. The signal race is not optional:
- * `Task.Delay` observes the token and throws, so a bare `setTimeout` await would leave one
- * unkillable window per catch-up iteration.
- */
-async function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await raceSignal(
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, ms);
-      }),
-      signal,
-    );
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
+/** `Task.Delay(TimeSpan.FromMilliseconds(ms))`. */
+function delay(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * `SemaphoreSlim(1, 1)`: a NON-REENTRANT promise-chain mutex with an explicit `release`, because
- * the C# holds the permit from the top of `RowsAt`'s slow path through to the `finally` - a section
- * `AsyncSerialExecutor` cannot express, since it runs a queued callback to completion rather than
- * handing out a permit. Kept non-reentrant so the source's deadlock properties are unchanged.
- */
-class ShardGate {
-  #tail: Promise<void> = Promise.resolve();
-  #release: (() => void) | undefined;
+/** A catch-up in flight, and whether it has settled (the C#'s `Task.IsCompleted`). */
+interface InFlight {
+  readonly promise: Promise<void>;
+  readonly completed: boolean;
+}
 
-  async wait(signal?: AbortSignal | undefined): Promise<void> {
-    // `WaitAsync(cancellationToken)` observes the token before it queues.
-    signal?.throwIfAborted();
-    const previous = this.#tail;
-    let release!: () => void;
-    this.#tail = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await previous;
-    this.#release = release;
-    // Cancelled while queued: hand the permit straight on rather than stalling the chain.
-    if (signal?.aborted === true) {
-      this.release();
-      signal.throwIfAborted();
-    }
-  }
-
-  release(): void {
-    const release = this.#release;
-    this.#release = undefined;
-    release?.();
-  }
+/** Wraps `promise` with a flag that records its settlement. */
+function settles(promise: Promise<void>): InFlight {
+  const inFlight = { promise, completed: false };
+  const settled = (): void => {
+    inFlight.completed = true;
+  };
+  promise.then(settled, settled);
+  return inFlight;
 }
