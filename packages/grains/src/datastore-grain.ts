@@ -489,9 +489,12 @@ export class DatastoreGrain
       await this.#notifyCommitted(events);
     }
 
-    for (const e of evaluated) e.queued.resolve(e.reply);
-
+    // The flush a full tail triggers runs BEFORE the replies, so a caller that sees its reply sees
+    // the flush attempted. `#tryFlushProjection` never throws (a failed flush leaves the events
+    // pending), so the replies below always settle.
     if (this.state.pending.length >= FLUSH_INTERVAL) await this.#tryFlushProjection();
+
+    for (const e of evaluated) e.queued.resolve(e.reply);
   }
 
   /**
