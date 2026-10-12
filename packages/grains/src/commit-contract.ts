@@ -40,8 +40,8 @@ export interface DeleteByFilterWire {
 
 /**
  * The write wire contract of the graph-sharded design: a fully DECLARATIVE description of one
- * commit, executed inside the sequencer grain (`IDatastoreGrain.commit`) whose single-threaded,
- * non-reentrant activation is the serialization point - the request replaces the caller-side
+ * commit, executed inside the sequencer grain (`IDatastoreGrain.commit`) whose single-writer
+ * activation is the serialization point - the request replaces the caller-side
  * read-transact-CAS loop, so a declarative commit needs no retry. The lambda compatibility path
  * (`GrainBackedDatastore.readWriteTx`) survives by passing `expectedHead`, keeping the old
  * caller-evaluated CAS semantics.

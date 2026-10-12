@@ -26,7 +26,7 @@ describe("IDatastoreGrain", () => {
     expect(IDatastoreGrain.name).toBe("IDatastoreGrain");
   });
 
-  it("marks EXACTLY the five pure reads alwaysInterleave - including the INHERITED readFrom", () => {
+  it("marks EXACTLY the pure reads and the writes alwaysInterleave - including the INHERITED readFrom", () => {
     // Five methods carry [AlwaysInterleave] in the C#: ReadState, GetHead, ReadSchemaAt, ReadShard,
     // and ReadFrom, the last declared on IDatastoreLog and inherited. Thresh's per-method options
     // live on the CONCRETE GrainInterface value and are NOT inherited from an extended interface,
@@ -40,21 +40,20 @@ describe("IDatastoreGrain", () => {
       readShard: { alwaysInterleave: true },
       readShardTail: { alwaysInterleave: true },
       readFrom: { alwaysInterleave: true },
+      commit: { alwaysInterleave: true },
+      runGc: { alwaysInterleave: true },
+      flushProjection: { alwaysInterleave: true },
     });
   });
 
-  it("gives commit NO options at all - its non-interleaving is what makes the CAS exact", () => {
-    // The head read at the top of a commit and the append at the bottom stay atomic with respect
-    // to every other write precisely because Commit carries no interleave attribute. Adding one
-    // would let the head move under a declarative commit and make the ExpectedHead compare
-    // inexact. Nor do SubscribeWatch, UnsubscribeWatch or RunGc carry anything.
-    for (const method of [
-      "commit",
-      "subscribeWatch",
-      "unsubscribeWatch",
-      "runGc",
-      "flushProjection",
-    ]) {
+  it("interleaves the writes, which only enqueue, and gives the watch pair NO options", () => {
+    // Commit, RunGc and FlushProjection carry [AlwaysInterleave] in the C#: each enqueues into the
+    // grain's write queue, whose single writer gives the atomicity the interleaved-read suite's CAS
+    // gate pins. SubscribeWatch and UnsubscribeWatch carry nothing.
+    for (const method of ["commit", "runGc", "flushProjection"]) {
+      expect(IDatastoreGrain.options[method]).toEqual({ alwaysInterleave: true });
+    }
+    for (const method of ["subscribeWatch", "unsubscribeWatch"]) {
       expect(IDatastoreGrain.options[method]).toBeUndefined();
     }
   });

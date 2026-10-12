@@ -833,8 +833,8 @@ export class AuthzedPermissionsV1Service {
     // "could not CREATE relationship ..." message) so the client does not retry the doomed import;
     // a genuine write-write serialization conflict maps to Aborted so the client retries.
     // Cost of the one-commit shape, accepted with eyes open: the buffered rows cross the grain
-    // boundary as ONE message and the import executes as one commit turn on the sequencer's single
-    // non-reentrant activation, serializing against every other cluster write for its duration. A
+    // boundary as ONE message and the import executes as one commit on the sequencer's single-writer
+    // activation, serializing against every other cluster write for its duration. A
     // truly huge import should be split by the CALLER into idempotent-safe disjoint streams;
     // chunking here would silently forfeit the observed whole-stream atomicity.
     const relationships: RelationshipWire[] = [];

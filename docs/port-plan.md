@@ -84,6 +84,14 @@ production use case, not an obstacle to it.
   for locality. Thresh's `placementStrategyFor` is a closed switch over five built-ins; the
   named-director registry exists for placement _filters_ but not for strategies.
 
+The sequencer's write scaling follows Spiceport's staged plan
+([`../spiceport/docs/transaction-system.md`](../../spiceport/docs/transaction-system.md)), one
+stage at a time and only once Spiceport has built it. Group commit needs Thresh to write a
+confirm's pending events in one journal append (`raiseConditionalEvents`), and a `BatchWorker` for
+the sequencer's single writer. From the version-only
+sequencer onward the plan builds a general transactional key-value layer; when it is ported, that
+generic half is Thresh's, and BeneDB keeps only the SpiceDB layer over it.
+
 ## The per-file process
 
 Every file goes through the same pipeline, and the pipeline is what makes the port repeatable:

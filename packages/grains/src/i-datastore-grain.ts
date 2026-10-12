@@ -79,28 +79,31 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
   /**
    * Projects every pending event into the shard grains it touches and the shard index, then
    * journals that the projection has caught up. The sequencer does this itself every flush
-   * interval; calling it directly is a test and operations seam. A write: never interleaves
-   * another write.
+   * interval; calling it directly is a test and operations seam. A write: it queues behind the
+   * writes before it and never interleaves another, so the call itself is `alwaysInterleave` and
+   * waits in the sequencer's write queue rather than the activation's.
    */
   flushProjection(): Promise<void>;
 
   /**
    * Executes a declarative `CommitRequest` INSIDE the sequencer
-   * (`docs/graph-sharded-datastore.md` section 3): the single-threaded, non-reentrant activation
-   * evaluates preconditions, applies the mutations through the MVCC transaction over its own fold
-   * at head, mints the authoritative (timestamp) revision and appends the resulting canonical
-   * `LogEvent` (an append to durable grain storage, confirmed before the reply) - so a declarative
-   * commit (absent `CommitRequest.expectedHead`) needs no caller retry loop. WRITES carry no
-   * interleave option, so they never interleave EACH OTHER: the head read at the top of the call
-   * and the append at the bottom stay atomic with respect to all other writes, which is both why
-   * the head cannot move under a declarative commit and why the caller-evaluated CAS of the lambda
-   * compatibility path (the optional `expectedHead` compare) is exact. Rejections are returned as
+   * (`docs/graph-sharded-datastore.md` section 3): the single-writer activation evaluates
+   * preconditions, applies the mutations through the MVCC transaction over its own fold at head,
+   * mints the authoritative (timestamp) revision and appends the resulting canonical `LogEvent` (an
+   * append to durable grain storage, confirmed before the reply) - so a declarative commit (absent
+   * `CommitRequest.expectedHead`) needs no caller retry loop. Commits are GROUP-COMMITTED: the call
+   * is `alwaysInterleave` so a commit arriving while a batch is being written can queue for the next
+   * one, and each batch is evaluated in arrival order and appended in one write. Batches, GC rounds
+   * and projection flushes are work items in one write queue, drained in arrival order by a single
+   * writer, so writes never interleave EACH OTHER: each request
+   * is evaluated against the head left by every write before it, and its append lands before any
+   * later write evaluates, which is both why the head cannot move under a declarative commit and why
+   * the caller-evaluated CAS of the lambda compatibility path (the optional `expectedHead` compare)
+   * is exact. The reply is sent only once the batch is durable. Rejections are returned as
    * STRUCTURED REPLY DATA (`CommitReply.failure`), never as serialized exceptions, so the client
-   * rethrows its existing typed exceptions unchanged. Only the explicitly `alwaysInterleave`-marked
-   * pure reads (this interface's `readState`/`getHead`/`readSchemaAt`/`readShard`, and
-   * `IDatastoreLog.readFrom`) may run DURING an await inside this call - the activation's scheduler
-   * is still single-threaded, so an interleaved read only ever runs while this call itself is
-   * parked at an await, never concurrently with its own execution.
+   * rethrows its existing typed exceptions unchanged. The pure reads (this interface's
+   * `readState`/`getHead`/`readSchemaAt`/`readShard`, and `IDatastoreLog.readFrom`) read the
+   * confirmed state, so they never observe a batch before it is durable.
    */
   commit(request: CommitRequest): Promise<CommitReply>;
 
@@ -130,6 +133,7 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
    * body and a directly callable test seam. Returns the new floor, or `undefined` if no collection
    * was needed (the computed floor did not advance the current one). `0n` is a LEGAL floor, so a
    * falsy check on the result would report a genuine collection to revision 0 as no collection.
+   * Like `flushProjection`, it queues as one write and is `alwaysInterleave`.
    */
   runGc(): Promise<bigint | undefined>;
 }
@@ -137,16 +141,17 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
 /**
  * The runtime value for `IDatastoreGrain`.
  *
- * THE OPTIONS MAP IS THE MOST FRAGILE THING IN THIS FILE. Five methods carry `[AlwaysInterleave]`
+ * THE OPTIONS MAP IS THE MOST FRAGILE THING IN THIS FILE. The pure reads carry `[AlwaysInterleave]`
  * in the C#: `readState`, `getHead`, `readSchemaAt`, `readShard` and `readFrom` - the last declared
  * on `IDatastoreLog` and INHERITED. Thresh's per-method options live on the CONCRETE
  * `GrainInterface` value and are NOT inherited from an extended interface, so `readFrom` must be
  * REPEATED here. A dropped flag on any of the five parks a Watch stream or a shard hydration behind
  * an in-flight commit - a deadlock or a timeout storm that no unit test would show.
  *
- * Equally: never add an option to `commit`, whose non-interleaving is what makes the
- * head-read-and-append atomic and the `expectedHead` CAS exact. `subscribeWatch`,
- * `unsubscribeWatch` and `runGc` likewise carry nothing. And never `readOnly` anywhere: it
+ * The writes - `commit`, `runGc` and `flushProjection` - are `alwaysInterleave` too: each only
+ * enqueues into the grain's write queue, whose single writer gives them their atomicity, so none
+ * waits in the activation as a blocking turn that would hold the calls behind it. `subscribeWatch`
+ * and `unsubscribeWatch` carry nothing. And never `readOnly` anywhere: it
  * interleaves only when BOTH the blocking and the incoming turn are read-only, so it would not get
  * past the non-read-only `commit`.
  */
@@ -158,5 +163,8 @@ export const IDatastoreGrain = defineGrainInterface<IDatastoreGrain>("IDatastore
     readShard: { alwaysInterleave: true },
     readShardTail: { alwaysInterleave: true },
     readFrom: { alwaysInterleave: true },
+    commit: { alwaysInterleave: true },
+    runGc: { alwaysInterleave: true },
+    flushProjection: { alwaysInterleave: true },
   },
 });

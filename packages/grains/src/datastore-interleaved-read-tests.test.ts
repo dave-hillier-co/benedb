@@ -10,10 +10,12 @@ import { MemoryGrainStorage } from "@thresh/persistence/memory-grain-storage";
 import { TestCluster } from "@thresh/testing/test-cluster";
 import { describe, expect, it } from "vitest";
 
-import type { CommitRequest } from "./commit-contract";
+import type { CommitReply, CommitRequest } from "./commit-contract";
 import { graphShardGrainKeyBuild } from "./graph-shard-grain-key";
 import { graphShardKeyForResource } from "./graph-shard-key";
 import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "./i-datastore-grain";
+import type { IDatastoreWatcher as IDatastoreWatcherType } from "./i-datastore-watcher";
+import { IDatastoreWatcher } from "./i-datastore-watcher";
 import { IGraphShardGrain } from "./i-graph-shard-grain";
 import { configureSequencerSilo, SEQUENCER_GRAIN_REGISTRATIONS } from "./sequencer-test-silo";
 import { toWire } from "./wire-convert";
@@ -80,6 +82,19 @@ function touchCommit(rid: string, sid: string, expectedHead: bigint): CommitRequ
   };
 }
 
+/** A declarative commit (no expectedHead) of one relationship update. */
+function updateCommit(operation: "touch" | "create", rid: string, sid: string): CommitRequest {
+  return {
+    preconditions: [],
+    updates: [{ operation, relationship: toWire(rel(rid, sid)) }],
+    deleteByFilter: undefined,
+    schemaBytes: undefined,
+    expectedSchemaHash: undefined,
+    counterChanges: [],
+    expectedHead: undefined,
+  };
+}
+
 interface Deferred {
   readonly promise: Promise<void>;
   resolve(): void;
@@ -134,7 +149,9 @@ const gate: {
   headWriteParked: Deferred | undefined;
   throwOnceOnHeadWrite: boolean;
   throwOnceOnShardWrite: boolean;
+  journalAppends: number;
 } = {
+  journalAppends: 0,
   headWriteBlock: undefined,
   headWriteParked: undefined,
   throwOnceOnHeadWrite: false,
@@ -142,6 +159,7 @@ const gate: {
 };
 
 function resetGate(): void {
+  gate.journalAppends = 0;
   gate.headWriteBlock = undefined;
   gate.headWriteParked = undefined;
   gate.throwOnceOnHeadWrite = false;
@@ -167,6 +185,7 @@ class PausableJournal implements JournalStorage {
     expectedVersion: number | undefined,
     signal?: AbortSignal,
   ): Promise<number> {
+    gate.journalAppends += 1;
     if (gate.throwOnceOnHeadWrite) {
       gate.throwOnceOnHeadWrite = false;
       throw new Error("injected append failure (test seam)");
@@ -459,4 +478,171 @@ describe("DatastoreInterleavedReadTests", () => {
       expect(results.filter((r) => r.failure?.kind === "headMoved")).toHaveLength(1);
     });
   });
+
+  /**
+   * Group commit: commits that arrive while a write is parked are not queued behind it one write
+   * each. They are evaluated in order and appended together, so the sequencer's journal append
+   * count is two (the parked write, then one for the whole batch) rather than one per commit, and
+   * every commit still gets its own revision.
+   */
+  it("Commits_arriving_during_a_write_share_one_write", async () => {
+    await withCluster(async ({ cluster }) => {
+      const target = grain(cluster);
+      const oldHead = (await target.getHead()).head;
+      const appendsBefore = gate.journalAppends;
+
+      gate.headWriteBlock = deferred();
+      gate.headWriteParked = deferred();
+      const first = target.commit(updateCommit("touch", "first", "alice"));
+      let batched: Promise<CommitReply>[];
+      try {
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
+        gate.headWriteParked = undefined;
+        batched = Array.from({ length: 5 }, (_, i) =>
+          target.commit(updateCommit("touch", `b${i}`, "bob")),
+        );
+        // Let every batched call reach the activation before the parked write resumes.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } finally {
+        const block = gate.headWriteBlock;
+        gate.headWriteBlock = undefined;
+        block?.resolve();
+      }
+
+      const firstReply = await waitAsync(first, "the parked commit");
+      const replies = await waitAsync(Promise.all(batched), "the batched commits");
+
+      expect(firstReply.failure).toBeUndefined();
+      for (const reply of replies) expect(reply.failure).toBeUndefined();
+      const revisions = replies.map((r) => r.revision!);
+      expect(new Set(revisions).size).toBe(revisions.length);
+      for (const revision of revisions) expect(revision > firstReply.revision!).toBe(true);
+      expect(gate.journalAppends).toBe(appendsBefore + 2);
+
+      const segment = await target.readFrom(oldHead, -1);
+      expect(segment.events).toHaveLength(6);
+      expect(segment.headRevision).toBe(revisions.reduce((a, b) => (a > b ? a : b)));
+    });
+  });
+
+  /**
+   * A commit evaluated later in a batch sees the commits before it in the same batch: two creates of
+   * one relationship batched together still conflict, exactly one winning.
+   */
+  it("A_batched_commit_sees_the_commits_before_it_in_its_batch", async () => {
+    await withCluster(async ({ cluster }) => {
+      const target = grain(cluster);
+
+      gate.headWriteBlock = deferred();
+      gate.headWriteParked = deferred();
+      const first = target.commit(updateCommit("touch", "first", "alice"));
+      let creates: Promise<CommitReply>[];
+      try {
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
+        gate.headWriteParked = undefined;
+        creates = [
+          target.commit(updateCommit("create", "x", "carol")),
+          target.commit(updateCommit("create", "x", "carol")),
+        ];
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } finally {
+        const block = gate.headWriteBlock;
+        gate.headWriteBlock = undefined;
+        block?.resolve();
+      }
+
+      await waitAsync(first, "the parked commit");
+      const replies = await waitAsync(Promise.all(creates), "the batched creates");
+      expect(replies.filter((r) => r.revision !== undefined)).toHaveLength(1);
+      expect(replies.filter((r) => r.failure?.kind === "createAlreadyExists")).toHaveLength(1);
+    });
+  });
+  /**
+   * Writes run in arrival order through one queue: a GC round issued while a write is parked, and a
+   * commit issued after it, append in that order. The GC neither waits for every commit in flight to
+   * finish nor lets a later commit overtake it.
+   */
+  it("A_gc_round_queues_with_commits_in_arrival_order", async () => {
+    await withCluster(async ({ cluster }) => {
+      const target = grain(cluster);
+      const oldHead = (await target.getHead()).head;
+
+      gate.headWriteBlock = deferred();
+      gate.headWriteParked = deferred();
+      const first = target.commit(updateCommit("touch", "first", "alice"));
+      let gc: Promise<bigint | undefined>;
+      let after: Promise<CommitReply>;
+      try {
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
+        gate.headWriteParked = undefined;
+        gc = target.runGc();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        after = target.commit(updateCommit("touch", "after", "bob"));
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } finally {
+        const block = gate.headWriteBlock;
+        gate.headWriteBlock = undefined;
+        block?.resolve();
+      }
+
+      await waitAsync(first, "the parked commit");
+      expect(await waitAsync(gc, "the gc round")).toBeDefined();
+      expect((await waitAsync(after, "the later commit")).failure).toBeUndefined();
+
+      const segment = await target.readFrom(oldHead, -1);
+      expect(segment.events).toHaveLength(3);
+      const [e0, e1, e2] = segment.events;
+      expect(e0!.relationshipChanges.map((u) => u.relationship.resourceId)).toEqual(["first"]);
+      expect(e1!.gcFloor).toBeDefined();
+      expect(e2!.relationshipChanges.map((u) => u.relationship.resourceId)).toEqual(["after"]);
+    });
+  });
+
+  /**
+   * A write waiting its turn does not hold the activation: with a commit's write parked and a GC
+   * round issued behind it, a non-interleaving call (`subscribeWatch`, the watch hubs' heartbeat)
+   * still completes. Writes wait in the sequencer's own queue; a GC round waiting in the activation
+   * as its blocking request would hold every non-interleaving call behind the write.
+   */
+  it("A_queued_gc_round_does_not_block_the_watch_heartbeat", async () => {
+    await withCluster(async ({ cluster }) => {
+      const target = grain(cluster);
+      await target.getHead(); // activate first, so the parked write below is the commit's
+      const client = await cluster.client;
+      const watcher = client.createObjectReference<IDatastoreWatcherType>(
+        IDatastoreWatcher,
+        new NullWatcher(),
+      );
+
+      gate.headWriteBlock = deferred();
+      gate.headWriteParked = deferred();
+      const first = target.commit(updateCommit("touch", "first", "alice"));
+      let gc: Promise<bigint | undefined>;
+      try {
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
+        gate.headWriteParked = undefined;
+        gc = target.runGc();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        expect(await raceTimeout(target.subscribeWatch(watcher))).toBe("work");
+      } finally {
+        const block = gate.headWriteBlock;
+        gate.headWriteBlock = undefined;
+        block?.resolve();
+      }
+
+      await waitAsync(first, "the parked commit");
+      await waitAsync(gc, "the gc round");
+    });
+  }, 20_000);
 });
+
+class NullWatcher implements IDatastoreWatcherType {
+  headAdvanced(_head: bigint): Promise<void> {
+    return Promise.resolve();
+  }
+
+  schemaAdvanced(_schemaBytes: Uint8Array, _storedHash: string): Promise<void> {
+    return Promise.resolve();
+  }
+}
