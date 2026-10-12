@@ -242,7 +242,7 @@ export function liveCountersAt(
 
 /**
  * Collects MVCC history strictly below `floor`: this is the ONE fold definition GC events apply
- * (see `LogFold.applyEvent` in the grain layer), so the grain state and any other fold of the
+ * (see `meta-fold.ts` and `shard-fold.ts` in the grain layer), so the grain state and any other fold of the
  * same log all converge on the identical collected state.
  *
  * A no-op - returning THE SAME OBJECT REFERENCE, which callers check with `===` - when `floor`

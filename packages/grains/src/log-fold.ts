@@ -9,19 +9,21 @@ import { computeStoredSchemaHash } from "./stored-schema-hash";
 import { toCoreFilter, toUpdate } from "./wire-convert";
 
 /**
- * The event-log fold and its inverse (the proposal diff). This is the single definition of "apply a
- * committed {@link LogEvent} to the datastore state", used by the event-sourced datastore grain's
- * `transition` (replay + live append) and by the storage replay on reactivation. It is deliberately
- * implemented by REUSING the in-memory MVCC `MvccReadWriteTransaction` (the same mechanics the
- * write path runs through), so the fold is provably equal to the in-memory `commit()` rather than a
- * divergent re-derivation of the MVCC visibility rules.
+ * The whole-state reference fold and its inverse (the proposal diff): "apply a committed
+ * {@link LogEvent} to the full datastore state". A test helper, not production code: production
+ * never folds the whole state - the sequencer folds the small state (`meta-fold.ts`) and each shard
+ * folds its own key (`shard-fold.ts`) - so this is the oracle those restrictions are checked against
+ * (`shard-fold-lemma-tests.test.ts`, `meta-fold.test.ts`). It is deliberately implemented by REUSING
+ * the in-memory MVCC `MvccReadWriteTransaction` (the same mechanics the write path runs through), so
+ * the reference is provably equal to the in-memory `commit()` rather than a divergent re-derivation
+ * of the MVCC visibility rules.
  *
- * SYNCHRONOUS, and that is load-bearing. The C# calls `.GetAwaiter().GetResult()` because the
+ * SYNCHRONOUS, like the folds it is compared with. The C# calls `.GetAwaiter().GetResult()` because the
  * in-memory transaction stages immediately; in the port `writeRelationships` and
  * `writeStoredSchema` are NON-async methods that do their work synchronously and hand back
  * `Promise.resolve()`, and `commit()` is already synchronous. So the settled promises are simply
- * discarded and this stays a synchronous function - which it must be, because a journaled grain's
- * `transition` cannot await. A `CreateRelationshipExistsException` still propagates synchronously
+ * discarded and this stays a synchronous function, matching the journaled `transition` folds it is
+ * the reference for, which cannot await. A `CreateRelationshipExistsException` still propagates synchronously
  * out of the staging call, so no rejection escapes unobserved.
  */
 export function logFoldApplyEvent(state: DatastoreGrainState, ev: LogEvent): DatastoreGrainState {

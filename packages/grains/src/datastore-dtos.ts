@@ -131,8 +131,8 @@ export function datastoreHeadWireGcFloor(head: DatastoreHeadWire): bigint {
  * A revision-less net commit diff: the resolved relationship changes (Touch / Delete on full
  * payloads), an optional new schema (bytes), and the counter deltas (an ABSENT
  * `CounterDeltaWire.filter` being a tombstone). Once the wire shape of the retired two-step
- * propose/append write path, it survives as the input of the log-fold helper that stamps a minted
- * revision onto a canonical `LogEvent` (`logFoldEventFromProposal`) - the same net diff a
+ * propose/append write path, it survives as the input of the tests' reference-fold helper that stamps a minted
+ * revision onto a canonical `LogEvent` (`eventFromProposal`) - the same net diff a
  * `CommitRequest` carries field-by-field. It therefore carries no revision of its own.
  */
 export interface ProposedWrite {
