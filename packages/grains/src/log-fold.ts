@@ -1,11 +1,12 @@
 import { collectBelow, type CounterVersion } from "@benedb/datastore/datastore-state";
 import { MvccReadWriteTransaction } from "@benedb/datastore/mvcc-read-write-transaction";
 
-import type { ProposedWrite, SchemaVersionWire } from "./datastore-dtos";
+import type { SchemaVersionWire } from "./datastore-dtos";
 import type { DatastoreGrainState } from "./datastore-grain-state";
 import { toGrainState, toMemoryState } from "./datastore-state-converters";
-import type { LogEvent } from "./log-event";
+import type { CounterDeltaWire, LogEvent } from "./log-event";
 import { computeStoredSchemaHash } from "./stored-schema-hash";
+import type { RelationshipUpdateWire } from "./relationships-dtos";
 import { toCoreFilter, toUpdate } from "./wire-convert";
 
 /**
@@ -92,4 +93,20 @@ export function eventFromProposal(write: ProposedWrite, revision: bigint): LogEv
     counterChanges: write.counterChanges,
     gcFloor: undefined,
   };
+}
+
+/**
+ * A revision-less net commit diff: the resolved relationship changes (Touch / Delete on full
+ * payloads), an optional new schema (bytes), and the counter deltas (an ABSENT
+ * `CounterDeltaWire.filter` being a tombstone) - the same net diff a `CommitRequest` carries
+ * field-by-field, without a revision. The input of {@link eventFromProposal}, which stamps the
+ * minted one.
+ */
+export interface ProposedWrite {
+  /** The relationship changes, in request order. */
+  readonly relationshipChanges: readonly RelationshipUpdateWire[];
+  /** The new schema source bytes, or absent for no schema change. */
+  readonly schemaBytes?: Uint8Array | undefined;
+  /** The counter deltas. */
+  readonly counterChanges: readonly CounterDeltaWire[];
 }

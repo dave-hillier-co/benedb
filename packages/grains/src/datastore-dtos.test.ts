@@ -5,7 +5,6 @@ import {
   datastoreHeadWireGcFloor,
   type DatastoreHeadWire,
   type FullRelationshipsFilterWire,
-  type ProposedWrite,
   type SchemaVersionWire,
   type StoredRelationshipWire,
 } from "./datastore-dtos";
@@ -154,26 +153,6 @@ describe("the full relationships filter on the wire", () => {
       deserializeValue<FullRelationshipsFilterWire>(serializeValue(empty))
         .optionalSubjectsSelectors,
     ).toEqual([]);
-  });
-});
-
-describe("ProposedWrite", () => {
-  it("is a revision-less net diff: changes, optional schema bytes, counter deltas", () => {
-    // Once the wire shape of the retired two-step write path; it survives as the INPUT of
-    // `LogFold.EventFromProposal`, which stamps a minted revision onto it. It therefore carries no
-    // revision of its own, and that absence is the point.
-    const proposal: ProposedWrite = {
-      relationshipChanges: [{ operation: "touch", relationship: aRelationship() }],
-      counterChanges: [{ name: "c1" }],
-    };
-
-    const back = deserializeValue<ProposedWrite>(serializeValue(proposal));
-
-    expect(back.schemaBytes).toBeUndefined();
-    expect(back.relationshipChanges).toHaveLength(1);
-    // A null filter on a counter delta is a TOMBSTONE, not a missing value.
-    expect(back.counterChanges[0]?.filter).toBeUndefined();
-    expect("revision" in back).toBe(false);
   });
 });
 

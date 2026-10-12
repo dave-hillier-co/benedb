@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import type {
   CounterVersionWire,
   FullRelationshipsFilterWire,
-  ProposedWrite,
   SchemaVersionWire,
 } from "./datastore-dtos";
 import { datastoreGrainStateEmpty } from "./datastore-grain-state";
@@ -18,7 +17,7 @@ import {
 } from "./graph-shard-key";
 import { GRAPH_SHARD_STATE_EMPTY } from "./graph-shard-state";
 import type { CounterDeltaWire, LogEvent } from "./log-event";
-import { eventFromProposal, logFoldApplyEvent } from "./log-fold";
+import { eventFromProposal, logFoldApplyEvent, type ProposedWrite } from "./log-fold";
 import {
   metaFoldApplyEntry,
   metaFoldApplyEvent,
