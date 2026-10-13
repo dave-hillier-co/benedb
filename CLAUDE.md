@@ -75,6 +75,9 @@ pnpm --filter @benedb/api start   # run a host; attended and manual, never from 
   tests one static snapshot — no MVCC, revision, or write-race behaviour.
 - **The differential suite is the only external oracle.** It drives seeded random worlds through
   both a real `authzed/spicedb` container and BeneDB. It skips, never fails, without Docker.
+- **The fault-injection harness** (`packages/grains/src/fault-harness.ts`) checks the sequencer
+  and shard mesh against `ReferenceDatastore` under seeded storage failures, deactivations, GC
+  rounds and silo kills. A seed reproduces its run; a divergence names the seed and the trace.
 - **Verify grains through Thresh's `TestCluster`**, not by booting a host.
 - A real `zed`/`grpcurl` smoke test against a booted host is valuable but **attended and
   manual**, with explicit teardown. Never start a host from a test or from CI — a backgrounded
