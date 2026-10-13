@@ -147,6 +147,8 @@ async function raceTimeout(work: Promise<unknown>): Promise<"work" | "timeout"> 
 const gate: {
   headWriteBlock: Deferred | undefined;
   headWriteParked: Deferred | undefined;
+  shardWriteBlock: Deferred | undefined;
+  shardWriteParked: Deferred | undefined;
   throwOnceOnHeadWrite: boolean;
   throwOnceOnShardWrite: boolean;
   journalAppends: number;
@@ -154,6 +156,8 @@ const gate: {
   journalAppends: 0,
   headWriteBlock: undefined,
   headWriteParked: undefined,
+  shardWriteBlock: undefined,
+  shardWriteParked: undefined,
   throwOnceOnHeadWrite: false,
   throwOnceOnShardWrite: false,
 };
@@ -162,6 +166,8 @@ function resetGate(): void {
   gate.journalAppends = 0;
   gate.headWriteBlock = undefined;
   gate.headWriteParked = undefined;
+  gate.shardWriteBlock = undefined;
+  gate.shardWriteParked = undefined;
   gate.throwOnceOnHeadWrite = false;
   gate.throwOnceOnShardWrite = false;
 }
@@ -213,7 +219,10 @@ class PausableJournal implements JournalStorage {
   }
 }
 
-/** Wraps the in-memory grain storage so the next shard-projection write can be made to throw. */
+/**
+ * Wraps the in-memory grain storage so the next shard-projection write can be made to throw, or
+ * shard-projection writes parked until the test releases the gate deferred.
+ */
 class FaultyShardStorage implements GrainStorage {
   constructor(private readonly inner: GrainStorage) {}
 
@@ -226,15 +235,21 @@ class FaultyShardStorage implements GrainStorage {
     return this.inner.read(stateName, grainId, state, signal);
   }
 
-  write<T>(
+  async write<T>(
     stateName: string,
     grainId: GrainId,
     state: StateHolder<T>,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (gate.throwOnceOnShardWrite && String(grainId.type).toLowerCase().includes("graphshard")) {
+    const isShard = String(grainId.type).toLowerCase().includes("graphshard");
+    if (gate.throwOnceOnShardWrite && isShard) {
       gate.throwOnceOnShardWrite = false;
-      return Promise.reject(new Error("injected shard-projection write failure (test seam)"));
+      throw new Error("injected shard-projection write failure (test seam)");
+    }
+    const shardGate = gate.shardWriteBlock;
+    if (isShard && shardGate !== undefined) {
+      gate.shardWriteParked?.resolve();
+      await shardGate.promise;
     }
     return this.inner.write(stateName, grainId, state, signal);
   }
@@ -391,6 +406,45 @@ describe("DatastoreInterleavedReadTests", () => {
       expect(reply2.revision! > reply.revision!).toBe(true);
     });
   });
+
+  /**
+   * The commit that fills the pending tail to the flush interval replies only once the flush it
+   * triggered has run: a caller that sees the reply sees the flush attempted, as it did before
+   * commits were batched. Parks the flush's first shard write and checks the boundary reply waits
+   * for it, then completes once the write is released.
+   */
+  it("The_flush_boundary_commit_replies_after_its_flush", async () => {
+    await withCluster(async ({ cluster }) => {
+      const target = grain(cluster);
+      let head = (await target.getHead()).head;
+
+      for (let i = 0; i < 63; i += 1) {
+        const reply = await target.commit(touchCommit(`k${i}`, `u${i}`, head));
+        expect(reply.failure).toBeUndefined();
+        head = reply.revision!;
+      }
+
+      const shardWriteBlock = deferred();
+      gate.shardWriteBlock = shardWriteBlock;
+      gate.shardWriteParked = deferred();
+      let replied = false;
+      const boundary = target.commit(touchCommit("k63", "u63", head)).then((reply) => {
+        replied = true;
+        return reply;
+      });
+      try {
+        await waitAsync(gate.shardWriteParked.promise, "the flush's shard write to park");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(replied, "the boundary commit replied before its flush ran").toBe(false);
+      } finally {
+        shardWriteBlock.resolve();
+      }
+
+      const reply = await waitAsync(boundary, "the boundary commit");
+      expect(reply.failure).toBeUndefined();
+      expect(reply.revision).toBeDefined();
+    });
+  }, 20_000);
 
   /**
    * Gate 3b: a shard-projection write that fails at the FLUSH BOUNDARY (the 64th commit) must not
