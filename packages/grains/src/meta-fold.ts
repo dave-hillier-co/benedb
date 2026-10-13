@@ -7,7 +7,7 @@ import type { LogEvent } from "./log-event";
 import type { RelationshipWire } from "./relationships-dtos";
 
 /**
- * The SMALL-STATE restriction of `log-fold.ts`: folds the same committed {@link LogEvent} sequence,
+ * The SMALL-STATE restriction of the whole-state reference fold (`log-fold.ts`, a test helper): folds the same committed {@link LogEvent} sequence,
  * but keeps only what `DatastoreMetaState` carries - head, schema versions, counter versions, GC
  * floor, the types seen, and the pending (not yet projected) tail. Relationship row content is
  * deliberately NOT folded here; it belongs to the per-key `shard-fold.ts` (the shard grains'

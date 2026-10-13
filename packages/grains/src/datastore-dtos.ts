@@ -1,10 +1,7 @@
-import type { CounterDeltaWire } from "./log-event";
-import type { RelationshipUpdateWire, RelationshipWire } from "./relationships-dtos";
+import type { RelationshipWire } from "./relationships-dtos";
 
-// A deliberately MULTI-EXPORT module, per the port ledger. It is MUTUALLY RECURSIVE with
-// `log-event.ts` (a `ProposedWrite` carries `CounterDeltaWire`s; a `LogEvent` carries a
-// `SchemaVersionWire` and `FullRelationshipsFilterWire`s) - type-only circular imports are fine in
-// TypeScript, and the two files are ported together.
+// A deliberately MULTI-EXPORT module, per the port ledger, ported together with `log-event.ts` (a
+// `LogEvent` carries a `SchemaVersionWire` and `FullRelationshipsFilterWire`s).
 //
 // The width decisions this file makes, and the easiest silent bug in the whole layer: every MVCC
 // REVISION is a `bigint` (`createdRevision`, `deletedRevision`, `SchemaVersionWire.revision`,
@@ -125,21 +122,4 @@ export interface DatastoreHeadWire {
 /** Resolver for the C# default parameter `long GcFloor = 0`. */
 export function datastoreHeadWireGcFloor(head: DatastoreHeadWire): bigint {
   return head.gcFloor ?? 0n;
-}
-
-/**
- * A revision-less net commit diff: the resolved relationship changes (Touch / Delete on full
- * payloads), an optional new schema (bytes), and the counter deltas (an ABSENT
- * `CounterDeltaWire.filter` being a tombstone). Once the wire shape of the retired two-step
- * propose/append write path, it survives as the input of the log-fold helper that stamps a minted
- * revision onto a canonical `LogEvent` (`logFoldEventFromProposal`) - the same net diff a
- * `CommitRequest` carries field-by-field. It therefore carries no revision of its own.
- */
-export interface ProposedWrite {
-  /** The relationship changes, in request order. */
-  readonly relationshipChanges: readonly RelationshipUpdateWire[];
-  /** The new schema source bytes, or absent for no schema change. */
-  readonly schemaBytes?: Uint8Array | undefined;
-  /** The counter deltas. */
-  readonly counterChanges: readonly CounterDeltaWire[];
 }

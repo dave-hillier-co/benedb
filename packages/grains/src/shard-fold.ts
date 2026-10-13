@@ -9,7 +9,7 @@ import type { RelationshipWire } from "./relationships-dtos";
 import { toRelationship, toWire } from "./wire-convert";
 
 /**
- * The per-key restriction of `log-fold.ts`: folds the same committed {@link LogEvent} sequence, but
+ * The per-key restriction of the whole-state reference fold (`log-fold.ts`, a test helper): folds the same committed {@link LogEvent} sequence, but
  * keeps only the relationship rows of one adjacency slice (a {@link GraphShardKeyWire}). The
  * sharding lemma - `fold(log) == merge over keys of fold(log|key)` - is what makes this a FILTER
  * rather than a re-derivation, and it is pinned by `shard-fold-lemma-tests.test.ts`: per key, a
