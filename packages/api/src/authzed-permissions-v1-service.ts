@@ -107,6 +107,11 @@ import {
 } from "./request-limits";
 import { relationshipSchemaViolationRpcError } from "./relationship-schema-violation-status";
 import {
+  decodeReadRelationshipsCursor,
+  encodeReadRelationshipsCursor,
+  readRelationshipsRequestHash,
+} from "./read-relationships-cursor";
+import {
   MAX_BULK_EXPORT_RELATIONSHIPS_LIMIT,
   MAX_DELETE_RELATIONSHIPS_LIMIT,
   MAX_LOOKUP_RESOURCES_LIMIT,
@@ -344,16 +349,13 @@ export class AuthzedPermissionsV1Service {
     const consistency = toWireConsistency(request.consistency);
     // `(int)request.OptionalLimit`; the ceiling above has already bounded it to 1000.
     const limit = request.optionalLimit === 0 ? undefined : request.optionalLimit | 0;
-    const requestCursor = request.optionalCursor;
-    const cursor =
-      requestCursor !== undefined && requestCursor.token.length > 0
-        ? requestCursor.token
-        : undefined;
+    const requestHash = readRelationshipsRequestHash(request);
+    const cursor = decodeReadRelationshipsCursor(request.optionalCursor, requestHash);
 
     // One in-process read over one pinned snapshot (the grain hop and page loop are both gone).
-    // Each item carries the per-message read-at token and, as in SpiceDB, an after_result_cursor
-    // that optional_cursor resumes from; optional_limit stops the stream after that many
-    // relationships.
+    // Each item carries the per-message read-at token and, as in SpiceDB, an opaque
+    // after_result_cursor bound to this request that optional_cursor resumes from; optional_limit
+    // stops the stream after that many relationships.
     let emitted = 0;
     try {
       for await (const item of this.#relationshipReads.readRelationships(
@@ -363,7 +365,9 @@ export class AuthzedPermissionsV1Service {
         await responseStream.write({
           readAt: { token: relationshipStreamItemReadAtToken(item) },
           relationship: toProtoRelationship(item.relationship),
-          afterResultCursor: { token: item.resumeCursor },
+          afterResultCursor: {
+            token: encodeReadRelationshipsCursor(requestHash, item.resumeCursor),
+          },
         });
 
         emitted += 1;

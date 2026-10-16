@@ -86,6 +86,10 @@ import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { describe, expect, it } from "vitest";
 
 import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
+import {
+  encodeReadRelationshipsCursor,
+  readRelationshipsRequestHash,
+} from "./read-relationships-cursor";
 import { RpcError } from "./rpc-error";
 import type { ServerStreamWriter } from "./server-stream-writer";
 
@@ -1203,11 +1207,11 @@ describe("readRelationships", () => {
       { kind: "item", item: streamItem("doc2", "c2", "read-token") },
     ];
     const writer = new CollectingWriter<ReadRelationshipsResponse>();
+    const request = ReadRelationshipsRequest.fromPartial({
+      relationshipFilter: { resourceType: "document" },
+    });
 
-    await h.service.readRelationships(
-      ReadRelationshipsRequest.fromPartial({ relationshipFilter: { resourceType: "document" } }),
-      writer,
-    );
+    await h.service.readRelationships(request, writer);
 
     expect(writer.collected).toHaveLength(2);
     expect(writer.collected.map((r) => r.relationship?.resource?.objectId)).toEqual([
@@ -1218,10 +1222,12 @@ describe("readRelationships", () => {
       { token: "read-token" },
       { token: "read-token" },
     ]);
-    // Every item carries its resume cursor as after_result_cursor, as SpiceDB's do.
+    // Every item carries its resume cursor as an opaque after_result_cursor bound to the request,
+    // as SpiceDB's do.
+    const requestHash = readRelationshipsRequestHash(request);
     expect(writer.collected.map((r) => r.afterResultCursor)).toEqual([
-      { token: "c1" },
-      { token: "c2" },
+      { token: encodeReadRelationshipsCursor(requestHash, "c1") },
+      { token: encodeReadRelationshipsCursor(requestHash, "c2") },
     ]);
   });
 
@@ -1379,22 +1385,24 @@ describe("readRelationships", () => {
 
   it("passes the request's limit and cursor to the read", async () => {
     // `new ReadRelationshipsArgs(filter, limit, cursor, consistency)`: optional_limit and
-    // optional_cursor page the read, as SpiceDB's do.
+    // optional_cursor page the read, as SpiceDB's do. The cursor reaches the read as the decoded
+    // resume tuple.
     const h = harness();
     const writer = new CollectingWriter<ReadRelationshipsResponse>();
+    const request = ReadRelationshipsRequest.fromPartial({
+      relationshipFilter: { resourceType: "document" },
+      optionalLimit: 5,
+      consistency: { atLeastAsFresh: { token: "zt" } },
+    });
+    const resumeTuple = "document:doc1#viewer@user:alice";
+    request.optionalCursor = {
+      token: encodeReadRelationshipsCursor(readRelationshipsRequestHash(request), resumeTuple),
+    };
 
-    await h.service.readRelationships(
-      ReadRelationshipsRequest.fromPartial({
-        relationshipFilter: { resourceType: "document" },
-        optionalLimit: 5,
-        optionalCursor: { token: "resume-here" },
-        consistency: { atLeastAsFresh: { token: "zt" } },
-      }),
-      writer,
-    );
+    await h.service.readRelationships(request, writer);
 
     expect(h.reads.readArgs[0]?.limit).toBe(5);
-    expect(h.reads.readArgs[0]?.cursor).toBe("resume-here");
+    expect(h.reads.readArgs[0]?.cursor).toBe(resumeTuple);
     expect(h.reads.readArgs[0]?.consistency).toEqual({ mode: "atLeastAsFresh", token: "zt" });
   });
 

@@ -48,6 +48,10 @@ import { describe, expect, it } from "vitest";
 
 import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
 import { CollectingStreamWriter } from "./collecting-stream-writer";
+import {
+  encodeReadRelationshipsCursor,
+  readRelationshipsRequestHash,
+} from "./read-relationships-cursor";
 import { RpcError } from "./rpc-error";
 
 /**
@@ -1169,6 +1173,115 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
         (r) => r.relationship?.subject?.object?.objectId ?? "",
       );
       expect(ordinalSort(subjects)).toEqual(["alice", "bob", "carol"]);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships cursor that is not base64 is invalid argument", async () => {
+    // SpiceDB: cursor.Decode fails -> InvalidCursorError (INVALID_ARGUMENT), never an empty OK
+    // stream.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(cluster.datastore, ["readme", "viewer", "alice"]);
+
+      const error = await expectRpcError(
+        service(cluster).readRelationships(
+          ReadRelationshipsRequest.fromPartial({
+            relationshipFilter: readmeFilter(),
+            optionalCursor: { token: "zzz" },
+          }),
+          new CollectingStreamWriter<ReadRelationshipsResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details.startsWith("error decoding cursor: ")).toBe(true);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships cursor from a different request is invalid argument", async () => {
+    // SpiceDB binds the cursor to a hash of the request (filter, consistency, limit): a cursor
+    // minted for another call is rejected with ErrHashMismatch.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(cluster.datastore, ["readme", "viewer", "alice"], ["readme", "viewer", "bob"]);
+
+      const first = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 1,
+        }),
+        first,
+      );
+
+      const error = await expectRpcError(
+        service(cluster).readRelationships(
+          ReadRelationshipsRequest.fromPartial({
+            relationshipFilter: { resourceType: "document" },
+            optionalLimit: 1,
+            optionalCursor: first.collected[0]?.afterResultCursor,
+          }),
+          new CollectingStreamWriter<ReadRelationshipsResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(
+        error.details.startsWith(
+          "the cursor provided does not have the same arguments as the original API call",
+        ),
+      ).toBe(true);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships cursor without a parsable resume relationship is failed precondition", async () => {
+    // SpiceDB: a cursor for this call whose section is not a relationship -> NewInvalidCursorErr
+    // ("could not parse resume relationship"), FAILED_PRECONDITION.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const request = ReadRelationshipsRequest.fromPartial({ relationshipFilter: readmeFilter() });
+      request.optionalCursor = {
+        token: encodeReadRelationshipsCursor(readRelationshipsRequestHash(request), "not a tuple"),
+      };
+
+      const error = await expectRpcError(
+        service(cluster).readRelationships(
+          request,
+          new CollectingStreamWriter<ReadRelationshipsResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.FAILED_PRECONDITION);
+      expect(error.details).toBe(
+        "the cursor provided is not valid: could not parse resume relationship",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships after result cursor is opaque", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(cluster.datastore, ["readme", "viewer", "alice"]);
+
+      const read = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({ relationshipFilter: readmeFilter() }),
+        read,
+      );
+
+      expect(read.collected).toHaveLength(1);
+      const token = read.collected[0]?.afterResultCursor?.token ?? "";
+      expect(token).not.toContain("alice");
+      expect(Buffer.from(token, "base64").length).toBeGreaterThan(0);
+      expect(token).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
     } finally {
       await cluster.dispose();
     }
