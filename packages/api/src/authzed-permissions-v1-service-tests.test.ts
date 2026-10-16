@@ -2144,6 +2144,84 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
     }
   });
 
+  it("WriteRelationships update without relationship is invalid argument", async () => {
+    // An unset required submessage must reach the client as InvalidArgument (SpiceDB's request
+    // validation), never as the UNKNOWN status a TypeError in the wire mapping would produce.
+    // Driven through the handler so the validation-before-mapping order is pinned. The detail is
+    // the protoc-gen-validate text SpiceDB v1.49.2 returns (see request-limits-tests.test.ts).
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const req = WriteRelationshipsRequest.fromPartial({
+        updates: [{ operation: RelationshipUpdate_Operation.OPERATION_TOUCH }],
+      });
+
+      const error = await expectRpcError(service(cluster).writeRelationships(req));
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain("invalid RelationshipUpdate.Relationship: value is required");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships precondition without filter is invalid argument", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const req = writeReq(RelationshipUpdate_Operation.OPERATION_TOUCH, "readme", "alice");
+      req.optionalPreconditions.push({
+        operation: Precondition_Operation.OPERATION_MUST_MATCH,
+        filter: undefined,
+      });
+
+      const error = await expectRpcError(service(cluster).writeRelationships(req));
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "OptionalPreconditions[0]: embedded message failed validation | caused by: " +
+          "invalid Precondition.Filter: value is required",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships without relationship filter is invalid argument", async () => {
+    // DeleteRelationshipsRequest.relationship_filter is required: SpiceDB rejects its absence with
+    // InvalidArgument before the handler runs.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(cluster.datastore, ["readme", "viewer", "alice"]);
+
+      const error = await expectRpcError(
+        service(cluster).deleteRelationships(DeleteRelationshipsRequest.fromPartial({})),
+      );
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "invalid DeleteRelationshipsRequest.RelationshipFilter: value is required",
+      );
+      expect(await countStored(cluster, "document")).toBe(1);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships precondition without filter is invalid argument", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const req = DeleteRelationshipsRequest.fromPartial({
+        relationshipFilter: { resourceType: "document", optionalResourceId: "readme" },
+        optionalPreconditions: [{ operation: Precondition_Operation.OPERATION_MUST_MATCH }],
+      });
+
+      const error = await expectRpcError(service(cluster).deleteRelationships(req));
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "OptionalPreconditions[0]: embedded message failed validation | caused by: " +
+          "invalid Precondition.Filter: value is required",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
   it("LookupResources streams the accessible resources", async () => {
     const cluster = await MeshTestCluster.create(Schema);
     try {
