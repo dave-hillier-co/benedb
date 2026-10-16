@@ -27,18 +27,17 @@ import type { Relationship } from "./relationship";
  *  - .NET `\d` matches any Unicode Nd; JS `\d` is ASCII-only. The only `\d` is in the
  *    expiration sub-expression, where a non-ASCII digit would fail the subsequent date parse
  *    anyway, so the observable behaviour is unchanged.
- *  - The expiration is parsed by `tryParseRfc3339`, a transliteration of Spiceport's strict
- *    RFC3339 parser (itself matching Go's `time.Parse(time.RFC3339, ...)`). JS `Date.parse` is
- *    not used: it accepts non-RFC3339 shapes and holds only milliseconds. The whole-second part
- *    is validated the way `DateTime.TryParseExact` does, and the fraction and offset are applied
- *    in `bigint` nanoseconds. Go accepts year 0000 and UTC instants outside 0001..9999; the
- *    `bigint` representation could hold them, but Spiceport's `DateTimeOffset` cannot, so they
- *    are rejected here too and the port stays wire-identical to its source. Go's acceptance is
- *    wider in two more ways that Spiceport's expression and offset bound do not reproduce, and
- *    neither does this port: when Go's RFC3339 fast path fails it falls back to the general
- *    layout parser, which takes a one-digit hour (`T3:04:05Z`) and offsets up to `24:60`
- *    (`-24:00`, `-01:60`). `RFC3339_REGEX` ends in a plain `$`: the expiration character
- *    class admits no newline, so .NET's before-trailing-newline match cannot arise.
+ *  - The expiration is parsed by `tryParseRfc3339`, a transliteration of Spiceport's RFC3339
+ *    parser (itself matching Go 1.25's `time.Parse(time.RFC3339Nano, ...)`, including the
+ *    general layout parser Go falls back to when its strict fast path fails: a one-digit hour
+ *    such as `T3:04:05Z` and offsets up to `24:60`). JS `Date.parse` is not used: it accepts
+ *    non-RFC3339 shapes and holds only milliseconds. The whole-second part is validated the way
+ *    `DateTime.TryParseExact` does, and the fraction and offset are applied in `bigint`
+ *    nanoseconds. Go accepts year 0000 and UTC instants outside 0001..9999; the `bigint`
+ *    representation could hold them, but Spiceport's `DateTimeOffset` cannot, so they are
+ *    rejected here too and the port stays wire-identical to its source. `RFC3339_REGEX` ends in
+ *    a plain `$`: the expiration character class admits no newline, so .NET's
+ *    before-trailing-newline match cannot arise.
  *  - Caveat context values go through `JSON.parse`, which yields plain numbers, so a source
  *    literal such as `1.0` re-emits as `1`. C# deserializes into `JsonElement`, which re-emits
  *    the source literal verbatim. `JSON.parse` also reorders integer-like keys of nested
@@ -331,7 +330,7 @@ function toContextValue(value: unknown): unknown {
 }
 
 const RFC3339_REGEX =
-  /^(?<dateTime>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.(?<fraction>\d+))?(?<zone>Z|[+-]\d{2}:\d{2})$/;
+  /^(?<date>\d{4}-\d{2}-\d{2})T(?<hour>\d{1,2})(?<minuteSecond>:\d{2}:\d{2})(\.(?<fraction>\d+))?(?<zone>Z|[+-]\d{2}:\d{2})$/;
 
 const DATE_TIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/;
 
@@ -345,10 +344,13 @@ const MIN_INSTANT = -62_135_596_800n * NS_PER_SECOND;
 const MAX_INSTANT = 253_402_300_800n * NS_PER_SECOND - NS_PER_TICK;
 
 /**
- * Parses an RFC3339 timestamp strictly, as upstream SpiceDB does with Go's
- * `time.Parse(time.RFC3339, ...)`: a full date, a full time, an optional fraction of at least
- * one digit, and a mandatory `Z` or numeric offset of at most 23:59 (Go's bound, wider than the
- * +/-14:00 a `DateTimeOffset` offset allows, so the offset is applied arithmetically). Fractions
+ * Parses an RFC3339 timestamp as upstream SpiceDB does with Go 1.25's
+ * `time.Parse(time.RFC3339Nano, ...)`. Go tries a strict RFC3339 fast path and, when it fails,
+ * falls back to its general layout parser, so the accepted set is the union of the two: a full
+ * date, an hour of one or two digits (the layout's `15` element), two-digit minutes and
+ * seconds, an optional fraction of at least one digit, and a mandatory `Z` or two-digit numeric
+ * offset of at most 24:60 (the fallback parser's bound, wider than the +/-14:00 a
+ * `DateTimeOffset` offset allows, so the offset is applied arithmetically). Fractions
  * beyond the seven digits a tick can hold are truncated. The result is normalised to UTC, in
  * nanoseconds since the Unix epoch. Go also accepts year 0000 and instants whose UTC form falls
  * outside 0001..9999; a `DateTimeOffset` cannot represent those, so they are rejected.
@@ -360,7 +362,9 @@ function tryParseRfc3339(value: string): bigint | undefined {
   const groups = match.groups as Record<string, string | undefined>;
   let fraction = groups.fraction ?? "";
   fraction = fraction.length > 7 ? fraction.slice(0, 7) : fraction.padEnd(7, "0");
-  const local = tryParseExactDateTime(groups.dateTime ?? "");
+  const local = tryParseExactDateTime(
+    `${groups.date ?? ""}T${(groups.hour ?? "").padStart(2, "0")}${groups.minuteSecond ?? ""}`,
+  );
   if (local === undefined) return undefined;
 
   const zone = groups.zone ?? "";
@@ -368,7 +372,7 @@ function tryParseRfc3339(value: string): bigint | undefined {
   if (zone !== "Z") {
     const hours = Number(zone.slice(1, 3));
     const minutes = Number(zone.slice(4, 6));
-    if (hours > 23 || minutes > 59) return undefined;
+    if (hours > 24 || minutes > 60) return undefined;
     offset = (zone.startsWith("-") ? -1n : 1n) * BigInt(hours * 60 + minutes) * NS_PER_MINUTE;
   }
 
