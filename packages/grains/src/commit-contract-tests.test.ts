@@ -328,7 +328,6 @@ describe("CommitContractTests", () => {
       const limited = await cluster.relationships.deleteRelationships({
         filter: viewerFilter("bulk"),
         optionalLimit: 3n,
-        allowPartialDeletions: true,
       });
       expect(limited.deletedCount).toBe(3n);
       expect(limited.reachedLimit).toBe(true);
@@ -673,6 +672,51 @@ describe("CommitContractTests", () => {
       expect(reply.revision).not.toBeUndefined();
       expect(reply.deletedCount).toBe(1n);
       expect(reply.reachedLimit).toBe(false);
+      expect(await readViewers(cluster, "x")).toHaveLength(0);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 120_000);
+
+  // ---- 12b. A transactional DeleteByFilter rejects more than Limit matches, after preconditions. ----
+
+  it("Transactional_delete_by_filter_rejects_more_than_limit_matches_and_applies_nothing", async () => {
+    const cluster = await MeshTestCluster.create(VIEWER_SCHEMA);
+    try {
+      const grain = sequencer(cluster);
+      await cluster.relationships.writeRelationships({
+        updates: [touch("x", "alice"), touch("x", "bob"), touch("x", "carol")],
+      });
+      const headBefore = (await grain.getHead()).head;
+
+      // Over the limit: rejected as DeleteLimitExceeded with nothing applied.
+      const over = await grain.commit(
+        directCommit({
+          deleteByFilter: { filter: fullViewerFilter("x"), limit: 2n, rejectOverLimit: true },
+        }),
+      );
+      expect(over.revision).toBeUndefined();
+      expect(over.failure?.kind).toBe("deleteLimitExceeded");
+      expect((await grain.getHead()).head).toBe(headBefore);
+      expect(await readViewers(cluster, "x")).toHaveLength(3);
+
+      // A failing precondition is reported first (SpiceDB checks preconditions before the count).
+      const both = await grain.commit(
+        directCommit({
+          preconditions: [{ filter: fullViewerFilter("missing"), mustMatch: true }],
+          deleteByFilter: { filter: fullViewerFilter("x"), limit: 2n, rejectOverLimit: true },
+        }),
+      );
+      expect(both.failure?.kind).toBe("preconditionFailed");
+
+      // At the limit the delete runs.
+      const at = await grain.commit(
+        directCommit({
+          deleteByFilter: { filter: fullViewerFilter("x"), limit: 3n, rejectOverLimit: true },
+        }),
+      );
+      expect(at.failure).toBeUndefined();
+      expect(at.deletedCount).toBe(3n);
       expect(await readViewers(cluster, "x")).toHaveLength(0);
     } finally {
       await cluster.dispose();

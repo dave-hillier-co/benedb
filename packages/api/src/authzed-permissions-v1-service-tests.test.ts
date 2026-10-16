@@ -36,6 +36,7 @@ import {
   LookupSubjectsRequest_WildcardOption,
   Precondition_Operation,
   ReadRelationshipsRequest,
+  RelationshipFilter,
   WriteRelationshipsRequest,
   type CheckBulkPermissionsRequestItem,
   type ExportBulkRelationshipsResponse,
@@ -47,6 +48,10 @@ import { describe, expect, it } from "vitest";
 
 import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
 import { CollectingStreamWriter } from "./collecting-stream-writer";
+import {
+  encodeReadRelationshipsCursor,
+  readRelationshipsRequestHash,
+} from "./read-relationships-cursor";
 import { RpcError } from "./rpc-error";
 
 /**
@@ -205,6 +210,105 @@ function writeReq(
       },
     ],
   });
+}
+
+/**
+ * The schema from spiceport#56: `document#viewer` admits only `user`, so a `group#member` subject
+ * is outside its allowed direct relations; plus a permission and a caveat-only relation to
+ * exercise the other write-time rejections.
+ */
+const WriteValidationSchema = `definition user {}
+
+caveat only_on_tuesday(day string) {
+    day == "tuesday"
+}
+
+definition group {
+    relation member: user
+}
+
+definition document {
+    relation viewer: user
+    relation tuesday_viewer: user with only_on_tuesday
+    permission view = viewer
+}`;
+
+function writeOne(
+  operation: RelationshipUpdate_Operation,
+  resourceType: string,
+  resourceId: string,
+  relation: string,
+  subjectType: string,
+  subjectId: string,
+  subjectRelation?: string,
+  caveat?: string,
+): WriteRelationshipsRequest {
+  return WriteRelationshipsRequest.fromPartial({
+    updates: [
+      {
+        operation,
+        relationship: {
+          resource: { objectType: resourceType, objectId: resourceId },
+          relation,
+          subject: {
+            object: { objectType: subjectType, objectId: subjectId },
+            optionalRelation: subjectRelation ?? "",
+          },
+          optionalCaveat: caveat === undefined ? undefined : { caveatName: caveat },
+        },
+      },
+    ],
+  });
+}
+
+async function countStored(cluster: MeshTestCluster, resourceType: string): Promise<number> {
+  const writer = new CollectingStreamWriter<ReadRelationshipsResponse>();
+  await service(cluster).readRelationships(
+    ReadRelationshipsRequest.fromPartial({
+      consistency: { fullyConsistent: true },
+      relationshipFilter: { resourceType },
+    }),
+    writer,
+  );
+  return writer.collected.length;
+}
+
+const LookupSeed: readonly (readonly [res: string, rel: string, subj: string])[] = [
+  ["doc1", "viewer", "alice"],
+  ["doc2", "editor", "alice"],
+  ["doc3", "viewer", "bob"],
+  ["doc4", "viewer", "alice"],
+  ["doc5", "editor", "alice"],
+  ["doc6", "viewer", "alice"],
+  ["doc6", "editor", "alice"],
+  ["doc7", "viewer", "alice"],
+];
+
+function aliceViewLookup(cursor?: string): LookupResourcesRequest {
+  return LookupResourcesRequest.fromPartial({
+    consistency: { fullyConsistent: true },
+    resourceObjectType: "document",
+    permission: "view",
+    subject: userSubject("alice"),
+    optionalCursor: cursor === undefined ? undefined : { token: cursor },
+  });
+}
+
+/** `Order(StringComparer.Ordinal)`: an explicit code-unit comparator, never the locale default. */
+function ordinalSort(ids: readonly string[]): string[] {
+  return [...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+function readmeFilter(): RelationshipFilter {
+  return RelationshipFilter.fromPartial({ resourceType: "document", optionalResourceId: "readme" });
+}
+
+/**
+ * `MetadataOfBytes`: a `Struct` whose one string field is about `approximateBytes` long. A ts-proto
+ * `Struct` field arrives auto-unwrapped, so it is a plain object.
+ */
+function metadataOfBytes(approximateBytes: number): Record<string, unknown> {
+  return { blob: "x".repeat(approximateBytes) };
 }
 
 /** The C#'s `FakeAsyncStreamReader<T>`: replays a fixed sequence of inbound messages. */
@@ -508,6 +612,249 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
     }
   });
 
+  // --- spiceport#56: write-time schema validation ---
+
+  it("WriteRelationships subject type not allowed on relation is invalid argument", async () => {
+    // SpiceDB validates every update against the schema inside the write transaction
+    // (relationships.ValidateRelationshipUpdates) and rejects a subject type outside the relation's
+    // allowed direct relations with INVALID_ARGUMENT (InvalidSubjectTypeError). Nothing persists.
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_CREATE,
+            "document",
+            "doc",
+            "viewer",
+            "group",
+            "eng",
+            "member",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "subjects of type `group#member` are not allowed on relation `document#viewer`",
+      );
+      expect(await countStored(cluster, "document")).toBe(0);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships unknown definition is failed precondition", async () => {
+    // An unknown object definition is SpiceDB's NamespaceNotFound, which the v1 services rewrite to
+    // FAILED_PRECONDITION (the same mapping SchemaValidation applies for Check).
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "nonesuch",
+            "doc",
+            "viewer",
+            "user",
+            "alice",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.FAILED_PRECONDITION);
+      expect(error.details).toContain("object definition `nonesuch` not found");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships unknown relation is failed precondition", async () => {
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "document",
+            "doc",
+            "nonesuch",
+            "user",
+            "alice",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.FAILED_PRECONDITION);
+      expect(error.details).toContain(
+        "relation/permission `nonesuch` not found under definition `document`",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships to a permission is invalid argument", async () => {
+    // SpiceDB CannotWriteToPermissionError -> INVALID_ARGUMENT.
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "document",
+            "doc",
+            "view",
+            "user",
+            "alice",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "cannot write a relationship to permission `view` under definition `document`",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships caveat not allowed on relation is invalid argument", async () => {
+    // `document#viewer` admits only an uncaveated `user`; a caveated subject is not an allowed type.
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "document",
+            "doc",
+            "viewer",
+            "user",
+            "alice",
+            undefined,
+            "only_on_tuesday",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "subjects of type `user with only_on_tuesday` are not allowed on relation `document#viewer`",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships uncaveated subject on caveat only relation names the required caveat", async () => {
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "document",
+            "doc",
+            "tuesday_viewer",
+            "user",
+            "alice",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "subjects of type `user` are not allowed on relation `document#tuesday_viewer` without one of the following caveats: only_on_tuesday",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships delete ignores an unspecified caveat", async () => {
+    // The DELETE rule (ValidateRelationshipForDeletion) ignores the caveat when none is given, so
+    // an uncaveated DELETE of a caveat-only relation is valid; a disallowed subject type still is
+    // not.
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      await service(cluster).writeRelationships(
+        writeOne(
+          RelationshipUpdate_Operation.OPERATION_DELETE,
+          "document",
+          "doc",
+          "tuesday_viewer",
+          "user",
+          "alice",
+        ),
+      );
+
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_DELETE,
+            "document",
+            "doc",
+            "viewer",
+            "group",
+            "eng",
+            "member",
+          ),
+        ),
+      );
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships schema valid write succeeds", async () => {
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      await service(cluster).writeRelationships(
+        writeOne(
+          RelationshipUpdate_Operation.OPERATION_CREATE,
+          "group",
+          "eng",
+          "member",
+          "user",
+          "alice",
+        ),
+      );
+
+      expect(await countStored(cluster, "group")).toBe(1);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ImportBulkRelationships disallowed subject is invalid argument and imports nothing", async () => {
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const bad = ImportBulkRelationshipsRequest.fromPartial({
+        relationships: [
+          {
+            resource: { objectType: "document", objectId: "doc" },
+            relation: "viewer",
+            subject: {
+              object: { objectType: "group", objectId: "eng" },
+              optionalRelation: "member",
+            },
+          },
+        ],
+      });
+      const reader = asyncStream(importBatch(["doc1", "alice"]), bad);
+
+      const error = await expectRpcError(service(cluster).importBulkRelationships(reader));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(await countStored(cluster, "document")).toBe(0);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
   it("WriteRelationships duplicate relationship is invalid argument", async () => {
     // A relationship may appear in an update only once per request (SpiceDB:
     // NewDuplicateRelationshipErr -> InvalidArgument). The key ignores caveat/expiration, so a
@@ -704,6 +1051,441 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
 
       expect(writer.collected).toHaveLength(1);
       expect(writer.collected[0]?.relationship?.optionalExpiresAt).toEqual(expiresAt);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  // --- spiceport#46: limit ceilings and the transaction-metadata cap ---
+
+  it("LookupResources limit above 1000 is invalid argument", async () => {
+    // SpiceDB MaxLookupResourcesLimit (default 1000) -> ExceedsMaximumLimitErr, INVALID_ARGUMENT.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const request = aliceViewLookup();
+      request.optionalLimit = 1001;
+      const error = await expectRpcError(
+        service(cluster).lookupResources(
+          request,
+          new CollectingStreamWriter<LookupResourcesResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("provided limit 1001 is greater than maximum allowed of 1000");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships limit above 1000 is invalid argument", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).readRelationships(
+          ReadRelationshipsRequest.fromPartial({
+            relationshipFilter: readmeFilter(),
+            optionalLimit: 1001,
+          }),
+          new CollectingStreamWriter<ReadRelationshipsResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("provided limit 1001 is greater than maximum allowed of 1000");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships limit above 1000 is invalid argument", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).deleteRelationships(
+          DeleteRelationshipsRequest.fromPartial({
+            relationshipFilter: readmeFilter(),
+            optionalLimit: 1001,
+          }),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("provided limit 1001 is greater than maximum allowed of 1000");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ExportBulkRelationships limit above 10000 is invalid argument", async () => {
+    // SpiceDB MaxBulkExportRelationshipsLimit (default 10000).
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).exportBulkRelationships(
+          ExportBulkRelationshipsRequest.fromPartial({ optionalLimit: 10_001 }),
+          new CollectingStreamWriter<ExportBulkRelationshipsResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("provided limit 10001 is greater than maximum allowed of 10000");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships honours optional limit and resumes from after result cursor", async () => {
+    // SpiceDB returns at most optional_limit relationships, each with an after_result_cursor that
+    // optional_cursor resumes from.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const first = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 2,
+        }),
+        first,
+      );
+
+      expect(first.collected).toHaveLength(2);
+      for (const r of first.collected) expect(r.afterResultCursor?.token ?? "").not.toBe("");
+
+      const rest = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 2,
+          optionalCursor: first.collected[first.collected.length - 1]?.afterResultCursor,
+        }),
+        rest,
+      );
+
+      const subjects = [...first.collected, ...rest.collected].map(
+        (r) => r.relationship?.subject?.object?.objectId ?? "",
+      );
+      expect(ordinalSort(subjects)).toEqual(["alice", "bob", "carol"]);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships cursor that is not base64 is invalid argument", async () => {
+    // SpiceDB: cursor.Decode fails -> InvalidCursorError (INVALID_ARGUMENT), never an empty OK
+    // stream.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(cluster.datastore, ["readme", "viewer", "alice"]);
+
+      const error = await expectRpcError(
+        service(cluster).readRelationships(
+          ReadRelationshipsRequest.fromPartial({
+            relationshipFilter: readmeFilter(),
+            optionalCursor: { token: "zzz" },
+          }),
+          new CollectingStreamWriter<ReadRelationshipsResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details.startsWith("error decoding cursor: ")).toBe(true);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships cursor from a different request is invalid argument", async () => {
+    // SpiceDB binds the cursor to a hash of the request (filter, consistency, limit): a cursor
+    // minted for another call is rejected with ErrHashMismatch.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(cluster.datastore, ["readme", "viewer", "alice"], ["readme", "viewer", "bob"]);
+
+      const first = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 1,
+        }),
+        first,
+      );
+
+      const error = await expectRpcError(
+        service(cluster).readRelationships(
+          ReadRelationshipsRequest.fromPartial({
+            relationshipFilter: { resourceType: "document" },
+            optionalLimit: 1,
+            optionalCursor: first.collected[0]?.afterResultCursor,
+          }),
+          new CollectingStreamWriter<ReadRelationshipsResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(
+        error.details.startsWith(
+          "the cursor provided does not have the same arguments as the original API call",
+        ),
+      ).toBe(true);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships cursor without a parsable resume relationship is failed precondition", async () => {
+    // SpiceDB: a cursor for this call whose section is not a relationship -> NewInvalidCursorErr
+    // ("could not parse resume relationship"), FAILED_PRECONDITION.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const request = ReadRelationshipsRequest.fromPartial({ relationshipFilter: readmeFilter() });
+      request.optionalCursor = {
+        token: encodeReadRelationshipsCursor(readRelationshipsRequestHash(request), "not a tuple"),
+      };
+
+      const error = await expectRpcError(
+        service(cluster).readRelationships(
+          request,
+          new CollectingStreamWriter<ReadRelationshipsResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.FAILED_PRECONDITION);
+      expect(error.details).toBe(
+        "the cursor provided is not valid: could not parse resume relationship",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships after result cursor is opaque", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(cluster.datastore, ["readme", "viewer", "alice"]);
+
+      const read = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({ relationshipFilter: readmeFilter() }),
+        read,
+      );
+
+      expect(read.collected).toHaveLength(1);
+      const token = read.collected[0]?.afterResultCursor?.token ?? "";
+      expect(token).not.toContain("alice");
+      expect(Buffer.from(token, "base64").length).toBeGreaterThan(0);
+      expect(token).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships partial deletion honours optional limit", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const partial = await service(cluster).deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 2,
+          optionalAllowPartialDeletions: true,
+        }),
+      );
+
+      expect(partial.relationshipsDeletedCount).toBe("2");
+      expect(partial.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_PARTIAL,
+      );
+      expect(await countStored(cluster, "document")).toBe(1);
+
+      const complete = await service(cluster).deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 2,
+          optionalAllowPartialDeletions: true,
+        }),
+      );
+
+      expect(complete.relationshipsDeletedCount).toBe("1");
+      expect(complete.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_COMPLETE,
+      );
+      expect(await countStored(cluster, "document")).toBe(0);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships over limit without partial deletion is invalid argument and deletes nothing", async () => {
+    // SpiceDB CouldNotTransactionallyDeleteErr -> INVALID_ARGUMENT, nothing deleted.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const error = await expectRpcError(
+        service(cluster).deleteRelationships(
+          DeleteRelationshipsRequest.fromPartial({
+            relationshipFilter: readmeFilter(),
+            optionalLimit: 2,
+          }),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe(
+        "found more than 2 relationships to be deleted and partial deletion was not requested",
+      );
+      expect(await countStored(cluster, "document")).toBe(3);
+
+      // Exactly at the limit, the transactional delete removes everything; like SpiceDB (whose
+      // datastores report LimitReached when the deleted count equals the limit) it reports PARTIAL.
+      const resp = await service(cluster).deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 3,
+        }),
+      );
+      expect(resp.relationshipsDeletedCount).toBe("3");
+      expect(resp.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_PARTIAL,
+      );
+      expect(await countStored(cluster, "document")).toBe(0);
+
+      // Under the limit it reports COMPLETE.
+      await seed(cluster.datastore, ["readme", "viewer", "alice"]);
+      const under = await service(cluster).deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 3,
+        }),
+      );
+      expect(under.relationshipsDeletedCount).toBe("1");
+      expect(under.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_COMPLETE,
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships failed precondition wins over the transactional limit", async () => {
+    // SpiceDB evaluates optional_preconditions before the limit+1 count, so a request that fails
+    // both is FAILED_PRECONDITION, not CouldNotTransactionallyDelete's INVALID_ARGUMENT.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const request = DeleteRelationshipsRequest.fromPartial({
+        relationshipFilter: readmeFilter(),
+        optionalLimit: 2,
+        optionalPreconditions: [
+          {
+            operation: Precondition_Operation.OPERATION_MUST_MATCH,
+            filter: { resourceType: "document", optionalResourceId: "nonesuch" },
+          },
+        ],
+      });
+
+      const error = await expectRpcError(service(cluster).deleteRelationships(request));
+
+      expect(error.code).toBe(status.FAILED_PRECONDITION);
+      expect(await countStored(cluster, "document")).toBe(3);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships transactional limit is checked after a passing precondition", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const request = DeleteRelationshipsRequest.fromPartial({
+        relationshipFilter: readmeFilter(),
+        optionalLimit: 2,
+        optionalPreconditions: [
+          { operation: Precondition_Operation.OPERATION_MUST_MATCH, filter: readmeFilter() },
+        ],
+      });
+
+      const error = await expectRpcError(service(cluster).deleteRelationships(request));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe(
+        "found more than 2 relationships to be deleted and partial deletion was not requested",
+      );
+      expect(await countStored(cluster, "document")).toBe(3);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships transaction metadata over 65000 bytes is invalid argument", async () => {
+    // SpiceDB MaximumTransactionMetadataSize: TransactionMetadataTooLargeErr -> INVALID_ARGUMENT.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const request = writeReq(RelationshipUpdate_Operation.OPERATION_TOUCH, "readme", "alice");
+      request.optionalTransactionMetadata = metadataOfBytes(65_000);
+      const error = await expectRpcError(service(cluster).writeRelationships(request));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toMatch(
+        /^metadata size of [0-9]+ is greater than maximum allowed of 65000$/,
+      );
+      expect(await countStored(cluster, "document")).toBe(0);
+
+      // Metadata under the cap is accepted.
+      request.optionalTransactionMetadata = metadataOfBytes(100);
+      await service(cluster).writeRelationships(request);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships transaction metadata over 65000 bytes is invalid argument", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).deleteRelationships(
+          DeleteRelationshipsRequest.fromPartial({
+            relationshipFilter: readmeFilter(),
+            optionalTransactionMetadata: metadataOfBytes(65_000),
+          }),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toMatch(
+        /^metadata size of [0-9]+ is greater than maximum allowed of 65000$/,
+      );
     } finally {
       await cluster.dispose();
     }
@@ -1390,6 +2172,147 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
       }
     } finally {
       await cluster.dispose();
+    }
+  });
+
+  it.each([true, false])(
+    "LookupResources without limit emits after result cursor on every item (walk %s)",
+    async (useMembershipWalk) => {
+      // spiceport#47: SpiceDB populates after_result_cursor on every streamed item whenever cursor
+      // sections exist, with no limit condition (internal/services/v1/permissions.go). An
+      // unlimited stream must be resumable from any item - on the Leopard path (walk on) as well
+      // as the live traversal.
+      const cluster = await MeshTestCluster.create(Schema, { useMembershipWalk });
+      try {
+        await seed(cluster.datastore, ...LookupSeed);
+
+        const writer = new CollectingStreamWriter<LookupResourcesResponse>();
+        await service(cluster).lookupResources(aliceViewLookup(), writer);
+
+        expect(writer.collected.length).toBeGreaterThan(0);
+        for (const r of writer.collected) expect(r.afterResultCursor?.token ?? "").not.toBe("");
+      } finally {
+        await cluster.dispose();
+      }
+    },
+  );
+
+  it.each([true, false])(
+    "LookupResources unlimited resume from mid stream cursor yields the remainder (walk %s)",
+    async (useMembershipWalk) => {
+      const cluster = await MeshTestCluster.create(Schema, { useMembershipWalk });
+      try {
+        await seed(cluster.datastore, ...LookupSeed);
+
+        const full = new CollectingStreamWriter<LookupResourcesResponse>();
+        await service(cluster).lookupResources(aliceViewLookup(), full);
+        const fullIds = new Set(full.collected.map((r) => r.resourceObjectId));
+        expect(ordinalSort([...fullIds])).toEqual(["doc1", "doc2", "doc4", "doc5", "doc6", "doc7"]);
+
+        for (let k = 1; k < full.collected.length; k++) {
+          const resumed = new CollectingStreamWriter<LookupResourcesResponse>();
+          await service(cluster).lookupResources(
+            aliceViewLookup(full.collected[k - 1]?.afterResultCursor?.token),
+            resumed,
+          );
+
+          const union = new Set([
+            ...full.collected.slice(0, k).map((r) => r.resourceObjectId),
+            ...resumed.collected.map((r) => r.resourceObjectId),
+          ]);
+          expect(ordinalSort([...union])).toEqual(ordinalSort([...fullIds]));
+
+          // Resuming never re-emits an item already delivered before the cursor (beyond the
+          // per-entrypoint repeats the live traversal emits within one stream).
+          for (const r of resumed.collected) {
+            expect(
+              full.collected.slice(k).some((f) => f.resourceObjectId === r.resourceObjectId),
+            ).toBe(true);
+          }
+        }
+      } finally {
+        await cluster.dispose();
+      }
+    },
+  );
+
+  it("LookupResources candidate cursor resumes when the walk declines on resume", async () => {
+    // A cursor minted on the Leopard path must stay resumable when the accelerator is unavailable
+    // on the resuming request (here: a cluster with the walk disabled, over the same data).
+    let cursor: string;
+    let firstIds: string[];
+    const walkOn = await MeshTestCluster.create(Schema, { useMembershipWalk: true });
+    try {
+      await seed(walkOn.datastore, ...LookupSeed);
+      const full = new CollectingStreamWriter<LookupResourcesResponse>();
+      await service(walkOn).lookupResources(aliceViewLookup(), full);
+      cursor = full.collected[2]?.afterResultCursor?.token ?? "";
+      firstIds = full.collected.slice(0, 3).map((r) => r.resourceObjectId);
+    } finally {
+      await walkOn.dispose();
+    }
+
+    // The stream came from the accelerator: its cursors are candidate-resume cursors. A BeneDB
+    // token prefixes its payload with the request-shape hash and a newline, so the C#'s
+    // `StartsWith("C:")` applies to the payload after that separator.
+    const decoded = Buffer.from(cursor, "base64").toString("utf8");
+    expect(decoded.slice(decoded.indexOf("\n") + 1)).toMatch(/^C:/);
+
+    const walkOff = await MeshTestCluster.create(Schema, { useMembershipWalk: false });
+    try {
+      await seed(walkOff.datastore, ...LookupSeed);
+      const resumed = new CollectingStreamWriter<LookupResourcesResponse>();
+      await service(walkOff).lookupResources(aliceViewLookup(cursor), resumed);
+
+      const resumedIds = resumed.collected.map((r) => r.resourceObjectId);
+      expect(resumedIds.filter((id) => firstIds.includes(id))).toEqual([]);
+      expect(ordinalSort([...firstIds, ...resumedIds])).toEqual([
+        "doc1",
+        "doc2",
+        "doc4",
+        "doc5",
+        "doc6",
+        "doc7",
+      ]);
+      for (const r of resumed.collected) expect(r.afterResultCursor?.token ?? "").not.toBe("");
+    } finally {
+      await walkOff.dispose();
+    }
+  });
+
+  it("LookupResources candidate cursor pages through the live fallback with a limit", async () => {
+    // The live fallback keeps only the `limit` lowest ids past the cursor: chained limited resumes
+    // over it must still return every remaining resource exactly once, in ordinal order.
+    let cursor: string;
+    const walkOn = await MeshTestCluster.create(Schema, { useMembershipWalk: true });
+    try {
+      await seed(walkOn.datastore, ...LookupSeed);
+      const full = new CollectingStreamWriter<LookupResourcesResponse>();
+      await service(walkOn).lookupResources(aliceViewLookup(), full);
+      expect(full.collected[0]?.resourceObjectId).toBe("doc1");
+      cursor = full.collected[0]?.afterResultCursor?.token ?? "";
+    } finally {
+      await walkOn.dispose();
+    }
+
+    const walkOff = await MeshTestCluster.create(Schema, { useMembershipWalk: false });
+    try {
+      await seed(walkOff.datastore, ...LookupSeed);
+
+      const pages: string[][] = [];
+      for (let guard = 0; guard < 10; guard++) {
+        const request = aliceViewLookup(cursor);
+        request.optionalLimit = 2;
+        const page = new CollectingStreamWriter<LookupResourcesResponse>();
+        await service(walkOff).lookupResources(request, page);
+        if (page.collected.length === 0) break;
+        pages.push(page.collected.map((r) => r.resourceObjectId));
+        cursor = page.collected[page.collected.length - 1]?.afterResultCursor?.token ?? "";
+      }
+
+      expect(pages).toEqual([["doc2", "doc4"], ["doc5", "doc6"], ["doc7"]]);
+    } finally {
+      await walkOff.dispose();
     }
   });
 

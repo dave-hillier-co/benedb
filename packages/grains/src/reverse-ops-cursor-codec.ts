@@ -17,7 +17,9 @@ import type { LookupResourcesArgs, LookupSubjectsArgs } from "./reverse-ops-dtos
  * the gRPC responses, so callers treat them as a black-box token.
  *
  * LookupResources resumes from the engine's `LookupResourcesCursor` (one ordered section per
- * nesting level). LookupSubjects has no engine cursor - its results are deterministically ordered
+ * nesting level) when the live traversal produced the stream, or from a candidate-resume cursor
+ * (tag `C` plus the last resource id) when the Leopard accelerator did: that stream is the covered
+ * candidates in ordinal id order, so resumption skips ids at or before the last one. LookupSubjects has no engine cursor - its results are deterministically ordered
  * by subject id, so a cursor is simply the last id already returned and resumption skips ids at or
  * before it. An empty/whitespace token means "from the start".
  *
@@ -49,6 +51,7 @@ const HASH_SEPARATOR = "\n";
 const TAG_LEAF = "L"; // Portion-1 self-match: LastResourceId follows.
 const TAG_QUERY = "Q"; // Query entrypoint: a six-field keyset follows.
 const TAG_STRUCTURAL = "S"; // Structural rewrite / query first-chunk: no payload.
+const TAG_CANDIDATE = "C"; // Whole-token candidate resume: the last resource id follows.
 
 const INT32_MIN = -2147483648;
 const INT32_MAX = 2147483647;
@@ -206,6 +209,32 @@ function appendCanonical(value: unknown): string {
     return "n" + escapeDataString(String(value));
   }
   return "o" + escapeDataString(String(value));
+}
+
+/**
+ * Encodes a LookupResources candidate-resume cursor bound to the request-shape hash: the stream it
+ * resumes is ordered ordinally by resource id, so the last id emitted positions it completely.
+ */
+export function encodeCandidateResume(lastResourceId: string, requestHash: string): string {
+  return toToken(TAG_CANDIDATE + FIELD_SEPARATOR + escapeDataString(lastResourceId), requestHash);
+}
+
+/**
+ * Decodes a LookupResources token as a candidate-resume cursor, returning the last resource id;
+ * absent (with no exception) when the token is empty or is an engine cursor, which
+ * {@link decodeLookupResourcesCursor} then handles. The C# `bool TryDecodeCandidateResume(..., out
+ * string)` becomes a `string | undefined` return. A malformed token, or one minted for a request
+ * of another shape, throws {@link InvalidCursorException} exactly as the engine-cursor decode would.
+ */
+export function tryDecodeCandidateResume(
+  token: string | undefined,
+  requestHash: string,
+): string | undefined {
+  const raw = fromToken(token, requestHash);
+  const prefix = TAG_CANDIDATE + ":";
+  if (raw === undefined || !raw.startsWith(prefix)) return undefined;
+
+  return unescapeDataString(raw.slice(prefix.length));
 }
 
 /**

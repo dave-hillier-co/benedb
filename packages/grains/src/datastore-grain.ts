@@ -664,15 +664,13 @@ export class DatastoreGrain
     if (request.deleteByFilter !== undefined) {
       const deleteFilter = toCoreFilter(request.deleteByFilter.filter);
 
-      // Transactional-delete guard (upstream SpiceDB relationships.go DeleteRelationships): with a
-      // limit and partial deletions disallowed, probe for limit+1 matches FIRST and reject the whole
-      // commit when strictly MORE rows match than the limit - the staged transaction is abandoned
-      // before commit, so nothing is applied. Exactly limit matches passes the probe and deletes
-      // everything, but the delete below still reports reachedLimit (upstream datastores flag the
-      // limit as reached when deleted == limit), which the v1 API surfaces as PARTIAL progress.
-      // `allowPartial` absent means true (the C#'s constructor default).
+      // A transactional delete (SpiceDB: a limit without partial deletion) counts at most limit+1
+      // matches after the preconditions and rejects, applying nothing, when the limit is exceeded.
+      // Exactly limit matches passes the count and deletes everything, but the delete below still
+      // reports reachedLimit (upstream datastores flag the limit as reached when deleted == limit),
+      // which the v1 API surfaces as PARTIAL progress.
       const deleteLimit = request.deleteByFilter.limit;
-      if (request.deleteByFilter.allowPartial === false && deleteLimit !== undefined) {
+      if (request.deleteByFilter.rejectOverLimit === true && deleteLimit !== undefined) {
         let probed = 0n;
         for await (const _ of tx.queryRelationships(deleteFilter)) {
           if (++probed > deleteLimit) {
