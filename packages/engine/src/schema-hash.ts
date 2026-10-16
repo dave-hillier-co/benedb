@@ -23,25 +23,17 @@ import type { SetOperation, SetOperationChild } from "@benedb/core/userset-rewri
  * order. That sort is what makes the hash stable; it must never be "simplified away". The
  * rendering walks the full model (relations, type information, userset rewrites and their nested
  * set operations) so that two schemas sharing namespace names but differing in their relations
- * hash differently.
+ * hash differently. Caveats are rendered structurally too: the name, the serialized expression
+ * bytes (hex), and the parameters ordered by name with their full (possibly generic) type
+ * references, so that a caveat body or parameter-type edit changes the hash.
  *
  * EVERY CHARACTER EMITTED HERE IS LOAD-BEARING. `schema-hash.test.ts` pins the digests; if one
  * fails, the renderer changed, not the assertion.
  *
- * Two DELIBERATE, DOCUMENTED DIVERGENCES from the C#. Both are safe because this hash is internal
- * to the cluster and never appears on the wire:
- *
- *  1. CAVEATS ARE RENDERED FAITHFULLY. The C# does `sb.Append(c)` on a `CaveatDefinition`, which
- *     invokes the RECORD DEFAULT `ToString()`. That renders `SerializedExpression` as the literal
- *     text "System.Byte[]" and `ParameterTypes` as
- *     "System.Collections.Immutable.ImmutableDictionary`2[...]", so the C# caveat section hashes
- *     essentially only the NAME - two caveats differing only in their expression hash
- *     identically. That is a latent cache-correctness bug, not a contract, and reproducing it in
- *     TypeScript is impossible anyway, so this port renders the parameters and the expression
- *     bytes.
- *  2. ENUM CASING follows the BeneDB string unions, not the .NET enum names: "union" not
- *     "Union", "tupleObject" not "TupleObject", "any" not "Any". No mapping layer is introduced
- *     just to restore PascalCase.
+ * One DELIBERATE, DOCUMENTED DIVERGENCE from the C#, safe because this hash is internal to the
+ * cluster and never appears on the wire: ENUM CASING follows the BeneDB string unions, not the
+ * .NET enum names: "union" not "Union", "tupleObject" not "TupleObject", "any" not "Any". No
+ * mapping layer is introduced just to restore PascalCase.
  */
 
 /** Computes a lowercase hex SHA-256 over the given namespaces and caveats. */
@@ -208,36 +200,53 @@ function appendChild(parts: string[], child: SetOperationChild): void {
 }
 
 /**
- * Renders a caveat definition. Divergence 1 (see the module remarks): the C# renders the record's
- * default `ToString()`, which discards both the expression and the parameter types.
+ * `AppendCaveat`. `Convert.ToHexString` is UPPERCASE hex, unlike the lowercase digest; the
+ * parameters are ordered ORDINALLY by name.
  */
 function appendCaveat(parts: string[], caveat: CaveatDefinition): void {
-  parts.push("caveat ", caveat.name, "\n");
+  parts.push("caveat ", caveat.name, " expr=", toHexString(caveat.serializedExpression), "\n");
   const names = [...caveat.parameterTypes.keys()].sort((left, right) =>
     left < right ? -1 : left > right ? 1 : 0,
   );
   for (const name of names) {
     const type = caveat.parameterTypes.get(name);
     if (type === undefined) continue;
-    parts.push("  param ", name, " ", renderTypeReference(type), "\n");
+    parts.push("  param ", name, " ");
+    appendCaveatType(parts, type);
+    parts.push("\n");
   }
-
-  parts.push("  expr ", toHex(caveat.serializedExpression), "\n");
 }
 
 /**
- * `t` for a scalar, `t<a,b>` for a generic. An ABSENT child list renders bare; an EMPTY one
- * renders `t<>`. `@benedb/core/caveat-definition` keeps the two distinct and so does this.
+ * `AppendCaveatType`: `t` for a scalar, `t<a,b>` for a generic. The C# returns early on
+ * `ChildTypes is not { Count: > 0 }`, so an EMPTY child list renders bare, exactly like an absent
+ * one.
  */
-function renderTypeReference(type: CaveatTypeReference): string {
-  if (type.childTypes === undefined) return type.typeName;
-  return `${type.typeName}<${type.childTypes.map(renderTypeReference).join(",")}>`;
+function appendCaveatType(parts: string[], type: CaveatTypeReference): void {
+  parts.push(type.typeName);
+  const children = type.childTypes;
+  if (children === undefined || children.length === 0) {
+    return;
+  }
+
+  parts.push("<");
+  for (let i = 0; i < children.length; i++) {
+    if (i > 0) {
+      parts.push(",");
+    }
+
+    const child = children[i];
+    if (child !== undefined) appendCaveatType(parts, child);
+  }
+
+  parts.push(">");
 }
 
-function toHex(bytes: Uint8Array): string {
+/** `Convert.ToHexString`: two UPPERCASE hex digits per byte. */
+function toHexString(bytes: Uint8Array): string {
   let hex = "";
   for (const byte of bytes) {
-    hex += byte.toString(16).padStart(2, "0");
+    hex += byte.toString(16).toUpperCase().padStart(2, "0");
   }
   return hex;
 }

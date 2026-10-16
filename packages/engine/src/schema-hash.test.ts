@@ -39,11 +39,11 @@ import { computeSchemaHash, computeSchemaHashFromNamespaceMap } from "./schema-h
 //       if usersetRewrite: "    rewrite:" + <set operation> + "\n"
 //   "caveats:\n"
 //   for each caveat, ordered ORDINAL by name:
-//     "caveat <name>\n"
+//     "caveat <name> expr=<UPPERCASE hex of serializedExpression>\n"
 //     for each parameter, ordered ORDINAL by parameter name:
-//       "  param <name> <type>\n"          where <type> is "t" or "t<a,b>" (absent child list
-//                                          renders bare; an EMPTY child list renders "t<>")
-//     "  expr <lowercase hex of serializedExpression>\n"
+//       "  param <name> <type>\n"          where <type> is "t" or "t<a,b>" (an absent OR empty
+//                                          child list renders bare, as the C#'s
+//                                          `ChildTypes is not { Count: > 0 }` does)
 //
 //   <set operation> = "(" + type + (" " + <child>)* + ")"
 //   <child>         = "this" | "nil" | "self"
@@ -53,26 +53,17 @@ import { computeSchemaHash, computeSchemaHashFromNamespaceMap } from "./schema-h
 //                     + relation + "]"
 //                   | <set operation>          (a nested rewrite)
 //
-// Two DELIBERATE, DOCUMENTED DIVERGENCES from the C#, both safe because this hash is internal to
-// the cluster and never appears on the wire:
+// One DELIBERATE, DOCUMENTED DIVERGENCE from the C#, safe because this hash is internal to the
+// cluster and never appears on the wire: ENUM CASING follows the BeneDB string unions, not the
+// .NET enum names: "union" not "Union", "tupleObject" not "TupleObject", "any" not "Any". No
+// mapping layer is introduced just to restore PascalCase.
 //
-//  1. CAVEATS ARE RENDERED FAITHFULLY. The C# does `sb.Append(c)` on a `CaveatDefinition`, which
-//     invokes the RECORD DEFAULT `ToString()`. That renders `SerializedExpression` as the literal
-//     text "System.Byte[]" and `ParameterTypes` as
-//     "System.Collections.Immutable.ImmutableDictionary`2[...]", so the C# caveat section hashes
-//     essentially only the NAME and two caveats differing only in their expression hash
-//     IDENTICALLY. That is a latent cache-correctness bug, not a contract; reproducing it
-//     verbatim in TypeScript is impossible and pointless, so the port renders the parameters and
-//     the expression bytes. `caveats differing only in the expression hash differently` below
-//     pins the divergence.
-//  2. ENUM CASING follows the BeneDB string unions, not the .NET enum names: "union" not
-//     "Union", "tupleObject" not "TupleObject", "any" not "Any". No mapping layer is introduced
-//     just to restore PascalCase.
-//
-// Everything else is transliterated: the ORDINAL sort on both namespace and caveat names (which
-// is what makes the hash independent of enumeration order - never "simplify it away"), the
-// per-relation ordinal sort, the declaration-order allowed list, and
-// `Convert.ToHexStringLower(SHA256.HashData(UTF8(s)))`.
+// Everything else is transliterated: the ORDINAL sort on namespace, caveat and caveat-parameter
+// names (which is what makes the hash independent of enumeration order - never "simplify it
+// away"), the per-relation ordinal sort, the declaration-order allowed list, the caveat
+// rendering of `AppendCaveat` / `AppendCaveatType` (`Convert.ToHexString`, which is UPPERCASE,
+// for the expression bytes), and `Convert.ToHexStringLower(SHA256.HashData(UTF8(s)))` for the
+// digest.
 
 const documentRelations: readonly Relation[] = [
   // Given deliberately UNSORTED, so the ordinal sort by relation name is exercised.
@@ -108,12 +99,12 @@ const user: NamespaceDefinition = createNamespaceDefinition("user");
 // fails, the RENDERING changed - not the assertion. Fix the renderer, not the constant.
 const EMPTY_DIGEST = "82744a2b5c6679b2d049bb40d86034535a304e192b68569f92e471a4970ddb59";
 const NAMESPACES_DIGEST = "676ad4bacf25a3d390fa5bf4574456b42e7f521854562f751c6839a11aae3f7f";
-const WITH_CAVEAT_DIGEST = "636511887ecf8f9b26c4b4f859d3b15ba3d7522f329ed646fffdb9d2254b17fd";
+const WITH_CAVEAT_DIGEST = "993302b422f8b49300bdfedb7bf8e52128fffb493a95d8fae4461fcbe7ee8344";
 const WITH_OTHER_EXPRESSION_DIGEST =
-  "3ccdb34ac3771c816c4fd559c73ed171059edc5dc1f5afa54331aa990e341015";
+  "a8779b5bc260692ad657a61543b0e014bdd63bd661fcf0ec2dbe7882b9311912";
 const ORDINAL_NAMESPACES_DIGEST =
   "effb4fcb227998b0bfe495c534781ab4e5797535d151831a27296430e571666e";
-const ORDINAL_CAVEATS_DIGEST = "fcf25fbfad752da6cb659e5732cd705c6884114ce6b25ec26d4b13e4ca428af8";
+const ORDINAL_CAVEATS_DIGEST = "d76319e1d9d0c716f538c11f11f4bb86b91aa0f5fc8023ee95d5a21e749dd9d1";
 const ALL_CHILD_KINDS_DIGEST = "48e79336c8da2cc20968b52ea80624eebf8b919bf9de5229d03e94c4155e51cd";
 
 function onlyOnTuesday(expression: Uint8Array): CaveatDefinition {
@@ -333,9 +324,7 @@ describe("schema hash", () => {
         ).toBe(WITH_CAVEAT_DIGEST);
       });
 
-      it("hashes caveats differing only in the expression DIFFERENTLY (divergence 1)", () => {
-        // The C# would produce the SAME hash here, because its record ToString() renders the
-        // byte array as the literal "System.Byte[]". The port fixes that deliberately.
+      it("hashes caveats differing only in the expression DIFFERENTLY", () => {
         const withOther = computeSchemaHash(
           [document, user],
           [onlyOnTuesday(new Uint8Array([1, 2, 254]))],
@@ -345,7 +334,7 @@ describe("schema hash", () => {
         expect(withOther).not.toBe(WITH_CAVEAT_DIGEST);
       });
 
-      it("hashes caveats differing only in parameter types DIFFERENTLY (divergence 1)", () => {
+      it("hashes caveats differing only in parameter types DIFFERENTLY", () => {
         const bytes = new Uint8Array([1]);
         const a: CaveatDefinition = {
           name: "c",
@@ -361,7 +350,11 @@ describe("schema hash", () => {
         expect(computeSchemaHash([], [a])).not.toBe(computeSchemaHash([], [b]));
       });
 
-      it("distinguishes an absent child-type list from an empty one", () => {
+      it("renders an empty child-type list bare, as an absent one, as the C# does", () => {
+        // `AppendCaveatType` returns early on `ChildTypes is not { Count: > 0 }`, so a
+        // zero-argument generic and a scalar of the same name render identically. The compiler
+        // never builds the empty list (a scalar's child list is absent), so the two never meet
+        // in a compiled schema.
         const bytes = new Uint8Array(0);
         const scalar: CaveatDefinition = {
           name: "c",
@@ -374,7 +367,7 @@ describe("schema hash", () => {
           parameterTypes: new Map([["x", { typeName: "list", childTypes: [] }]]),
         };
 
-        expect(computeSchemaHash([], [scalar])).not.toBe(computeSchemaHash([], [emptyGeneric]));
+        expect(computeSchemaHash([], [scalar])).toBe(computeSchemaHash([], [emptyGeneric]));
       });
 
       it("is independent of caveat enumeration order", () => {
