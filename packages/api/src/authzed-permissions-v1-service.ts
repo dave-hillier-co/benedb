@@ -106,6 +106,13 @@ import {
   validateWriteRelationships,
 } from "./request-limits";
 import { relationshipSchemaViolationRpcError } from "./relationship-schema-violation-status";
+import {
+  MAX_BULK_EXPORT_RELATIONSHIPS_LIMIT,
+  MAX_DELETE_RELATIONSHIPS_LIMIT,
+  MAX_LOOKUP_RESOURCES_LIMIT,
+  MAX_READ_RELATIONSHIPS_LIMIT,
+  validateLimit,
+} from "./request-ceilings";
 import { RpcError } from "./rpc-error";
 import {
   checkNamespaceAndRelations,
@@ -331,20 +338,36 @@ export class AuthzedPermissionsV1Service {
     responseStream: ServerStreamWriter<ReadRelationshipsResponse>,
     signal?: AbortSignal | undefined,
   ): Promise<void> {
+    validateLimit(request.optionalLimit, MAX_READ_RELATIONSHIPS_LIMIT);
+
     const filter = toWireFilter(request.relationshipFilter ?? EMPTY_RELATIONSHIP_FILTER);
     const consistency = toWireConsistency(request.consistency);
+    // `(int)request.OptionalLimit`; the ceiling above has already bounded it to 1000.
+    const limit = request.optionalLimit === 0 ? undefined : request.optionalLimit | 0;
+    const requestCursor = request.optionalCursor;
+    const cursor =
+      requestCursor !== undefined && requestCursor.token.length > 0
+        ? requestCursor.token
+        : undefined;
 
     // One in-process read over one pinned snapshot (the grain hop and page loop are both gone).
-    // Each item carries the per-message read-at token, exactly as every page-message did before.
+    // Each item carries the per-message read-at token and, as in SpiceDB, an after_result_cursor
+    // that optional_cursor resumes from; optional_limit stops the stream after that many
+    // relationships.
+    let emitted = 0;
     try {
       for await (const item of this.#relationshipReads.readRelationships(
-        { filter, limit: undefined, cursor: undefined, consistency },
+        { filter, limit, cursor, consistency },
         signal,
       )) {
         await responseStream.write({
           readAt: { token: relationshipStreamItemReadAtToken(item) },
           relationship: toProtoRelationship(item.relationship),
+          afterResultCursor: { token: item.resumeCursor },
         });
+
+        emitted += 1;
+        if (limit !== undefined && emitted >= limit) break;
       }
     } catch (error) {
       if (error instanceof InvalidConsistencyTokenException) {
@@ -368,6 +391,7 @@ export class AuthzedPermissionsV1Service {
     request: DeleteRelationshipsRequest,
   ): Promise<DeleteRelationshipsResponse> {
     validateTransactionMetadataSize(request.optionalTransactionMetadata);
+    validateLimit(request.optionalLimit, MAX_DELETE_RELATIONSHIPS_LIMIT);
 
     try {
       const reply = await this.#relationships.deleteRelationships({
@@ -458,6 +482,8 @@ export class AuthzedPermissionsV1Service {
       : requestSubject.optionalRelation;
     const subjectObject = requestSubject.object ?? EMPTY_OBJECT_REFERENCE;
 
+    validateLimit(request.optionalLimit, MAX_LOOKUP_RESOURCES_LIMIT);
+
     // Reject an oversized request caveat context (SpiceDB: GetCaveatContext) -> InvalidArgument.
     const context5 = structToMap(validateCaveatContextSize(request.context));
     const consistency = toWireConsistency(request.consistency);
@@ -465,10 +491,8 @@ export class AuthzedPermissionsV1Service {
     // v1 contract: optional_limit (field 6) caps the resources returned; optional_cursor (field 7)
     // resumes after a prior page. Like SpiceDB, every streamed item carries after_result_cursor
     // whether or not a limit was set, so an unlimited stream can be resumed from any item.
-    // `(int)request.OptionalLimit` on a proto uint32: C# is unchecked, so a value above
-    // int.MaxValue WRAPS NEGATIVE. `| 0` is that same narrowing and is the identity for every
-    // value a real client sends; without it the port would accept a 3-billion limit the C#
-    // fast-fails on.
+    // `(int)request.OptionalLimit` on a proto uint32. `| 0` is the C#'s unchecked narrowing; the
+    // ceiling checked above bounds the limit first, so the narrowing is always the identity.
     const limit = request.optionalLimit === 0 ? undefined : request.optionalLimit | 0;
     const requestCursor = request.optionalCursor;
     const cursor =
@@ -877,14 +901,14 @@ export class AuthzedPermissionsV1Service {
     responseStream: ServerStreamWriter<ExportBulkRelationshipsResponse>,
     signal?: AbortSignal | undefined,
   ): Promise<void> {
+    validateLimit(request.optionalLimit, MAX_BULK_EXPORT_RELATIONSHIPS_LIMIT);
+
     const filter =
       request.optionalRelationshipFilter !== undefined
         ? toWireFilter(request.optionalRelationshipFilter)
         : EMPTY_FILTER;
-    // `(int)request.OptionalLimit` on a proto uint32: C# is unchecked, so a value above
-    // int.MaxValue WRAPS NEGATIVE. `| 0` is that same narrowing and is the identity for every
-    // value a real client sends; without it the port would accept a 3-billion limit the C#
-    // fast-fails on.
+    // `(int)request.OptionalLimit` on a proto uint32. `| 0` is the C#'s unchecked narrowing; the
+    // ceiling checked above bounds the limit first, so the narrowing is always the identity.
     const limit = request.optionalLimit | 0;
     const consistency = toWireConsistency(request.consistency);
     const requestCursor = request.optionalCursor;

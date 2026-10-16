@@ -1218,8 +1218,11 @@ describe("readRelationships", () => {
       { token: "read-token" },
       { token: "read-token" },
     ]);
-    // The C# never sets after_result_cursor on this RPC.
-    expect(writer.collected[0]?.afterResultCursor).toBeUndefined();
+    // Every item carries its resume cursor as after_result_cursor, as SpiceDB's do.
+    expect(writer.collected.map((r) => r.afterResultCursor)).toEqual([
+      { token: "c1" },
+      { token: "c2" },
+    ]);
   });
 
   it("renders an ellipsis subject relation as the empty string and populates optional_expires_at", async () => {
@@ -1374,9 +1377,9 @@ describe("readRelationships", () => {
     expect(h.reads.readArgs[1]?.filter).toEqual({ ...allAbsent, resourceType: "document" });
   });
 
-  it("passes NO limit and NO cursor to the read, whatever the request asked for", async () => {
-    // `new ReadRelationshipsArgs(filter, null, null, consistency)`: the v1 request's
-    // optional_limit and optional_cursor are read from the wire and then discarded.
+  it("passes the request's limit and cursor to the read", async () => {
+    // `new ReadRelationshipsArgs(filter, limit, cursor, consistency)`: optional_limit and
+    // optional_cursor page the read, as SpiceDB's do.
     const h = harness();
     const writer = new CollectingWriter<ReadRelationshipsResponse>();
 
@@ -1390,8 +1393,8 @@ describe("readRelationships", () => {
       writer,
     );
 
-    expect(h.reads.readArgs[0]?.limit).toBeUndefined();
-    expect(h.reads.readArgs[0]?.cursor).toBeUndefined();
+    expect(h.reads.readArgs[0]?.limit).toBe(5);
+    expect(h.reads.readArgs[0]?.cursor).toBe("resume-here");
     expect(h.reads.readArgs[0]?.consistency).toEqual({ mode: "atLeastAsFresh", token: "zt" });
   });
 
@@ -2586,17 +2589,26 @@ describe("exportBulkRelationships", () => {
    * port would instead accept a three-billion limit and try to serve it — a divergence that is not
    * the safer one, whatever else it is.
    */
-  it("narrows an out-of-int-range optional_limit exactly as the C# cast does", async () => {
+  it("rejects an out-of-int-range optional_limit at the export ceiling before any read", async () => {
+    // RequestCeilings.ValidateLimit runs before the `(int)` cast, so a limit the cast would wrap
+    // negative never reaches the read.
     const h = harness();
     h.reads.exportSteps = exportSteps(1);
     const writer = new CollectingWriter<ExportBulkRelationshipsResponse>();
 
-    await h.service.exportBulkRelationships(
-      ExportBulkRelationshipsRequest.fromPartial({ optionalLimit: 2_147_483_648 }),
-      writer,
-    );
+    const error = await h.service
+      .exportBulkRelationships(
+        ExportBulkRelationshipsRequest.fromPartial({ optionalLimit: 2_147_483_648 }),
+        writer,
+      )
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
 
-    expect(h.reads.exportArgs[0]?.limit).toBe(-2_147_483_648);
+    expect(error).toBeInstanceOf(RpcError);
+    expect((error as RpcError).code).toBe(status.INVALID_ARGUMENT);
+    expect(h.reads.exportArgs).toHaveLength(0);
   });
 
   it("defaults the per-message batch size to 1000 while still passing the REQUEST's limit down", async () => {

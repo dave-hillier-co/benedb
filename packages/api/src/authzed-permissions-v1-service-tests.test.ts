@@ -36,6 +36,7 @@ import {
   LookupSubjectsRequest_WildcardOption,
   Precondition_Operation,
   ReadRelationshipsRequest,
+  RelationshipFilter,
   WriteRelationshipsRequest,
   type CheckBulkPermissionsRequestItem,
   type ExportBulkRelationshipsResponse,
@@ -292,6 +293,18 @@ function aliceViewLookup(cursor?: string): LookupResourcesRequest {
 /** `Order(StringComparer.Ordinal)`: an explicit code-unit comparator, never the locale default. */
 function ordinalSort(ids: readonly string[]): string[] {
   return [...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+function readmeFilter(): RelationshipFilter {
+  return RelationshipFilter.fromPartial({ resourceType: "document", optionalResourceId: "readme" });
+}
+
+/**
+ * `MetadataOfBytes`: a `Struct` whose one string field is about `approximateBytes` long. A ts-proto
+ * `Struct` field arrives auto-unwrapped, so it is a plain object.
+ */
+function metadataOfBytes(approximateBytes: number): Record<string, unknown> {
+  return { blob: "x".repeat(approximateBytes) };
 }
 
 /** The C#'s `FakeAsyncStreamReader<T>`: replays a fixed sequence of inbound messages. */
@@ -1034,6 +1047,243 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
 
       expect(writer.collected).toHaveLength(1);
       expect(writer.collected[0]?.relationship?.optionalExpiresAt).toEqual(expiresAt);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  // --- spiceport#46: limit ceilings and the transaction-metadata cap ---
+
+  it("LookupResources limit above 1000 is invalid argument", async () => {
+    // SpiceDB MaxLookupResourcesLimit (default 1000) -> ExceedsMaximumLimitErr, INVALID_ARGUMENT.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const request = aliceViewLookup();
+      request.optionalLimit = 1001;
+      const error = await expectRpcError(
+        service(cluster).lookupResources(
+          request,
+          new CollectingStreamWriter<LookupResourcesResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("provided limit 1001 is greater than maximum allowed of 1000");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships limit above 1000 is invalid argument", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).readRelationships(
+          ReadRelationshipsRequest.fromPartial({
+            relationshipFilter: readmeFilter(),
+            optionalLimit: 1001,
+          }),
+          new CollectingStreamWriter<ReadRelationshipsResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("provided limit 1001 is greater than maximum allowed of 1000");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships limit above 1000 is invalid argument", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).deleteRelationships(
+          DeleteRelationshipsRequest.fromPartial({
+            relationshipFilter: readmeFilter(),
+            optionalLimit: 1001,
+          }),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("provided limit 1001 is greater than maximum allowed of 1000");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ExportBulkRelationships limit above 10000 is invalid argument", async () => {
+    // SpiceDB MaxBulkExportRelationshipsLimit (default 10000).
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).exportBulkRelationships(
+          ExportBulkRelationshipsRequest.fromPartial({ optionalLimit: 10_001 }),
+          new CollectingStreamWriter<ExportBulkRelationshipsResponse>(),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("provided limit 10001 is greater than maximum allowed of 10000");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ReadRelationships honours optional limit and resumes from after result cursor", async () => {
+    // SpiceDB returns at most optional_limit relationships, each with an after_result_cursor that
+    // optional_cursor resumes from.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const first = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 2,
+        }),
+        first,
+      );
+
+      expect(first.collected).toHaveLength(2);
+      for (const r of first.collected) expect(r.afterResultCursor?.token ?? "").not.toBe("");
+
+      const rest = new CollectingStreamWriter<ReadRelationshipsResponse>();
+      await service(cluster).readRelationships(
+        ReadRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 2,
+          optionalCursor: first.collected[first.collected.length - 1]?.afterResultCursor,
+        }),
+        rest,
+      );
+
+      const subjects = [...first.collected, ...rest.collected].map(
+        (r) => r.relationship?.subject?.object?.objectId ?? "",
+      );
+      expect(ordinalSort(subjects)).toEqual(["alice", "bob", "carol"]);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships partial deletion honours optional limit", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const partial = await service(cluster).deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 2,
+          optionalAllowPartialDeletions: true,
+        }),
+      );
+
+      expect(partial.relationshipsDeletedCount).toBe("2");
+      expect(partial.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_PARTIAL,
+      );
+      expect(await countStored(cluster, "document")).toBe(1);
+
+      const complete = await service(cluster).deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 2,
+          optionalAllowPartialDeletions: true,
+        }),
+      );
+
+      expect(complete.relationshipsDeletedCount).toBe("1");
+      expect(complete.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_COMPLETE,
+      );
+      expect(await countStored(cluster, "document")).toBe(0);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships over limit without partial deletion is invalid argument and deletes nothing", async () => {
+    // SpiceDB CouldNotTransactionallyDeleteErr -> INVALID_ARGUMENT, nothing deleted.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const error = await expectRpcError(
+        service(cluster).deleteRelationships(
+          DeleteRelationshipsRequest.fromPartial({
+            relationshipFilter: readmeFilter(),
+            optionalLimit: 2,
+          }),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe(
+        "found more than 2 relationships to be deleted and partial deletion was not requested",
+      );
+      expect(await countStored(cluster, "document")).toBe(3);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships transaction metadata over 65000 bytes is invalid argument", async () => {
+    // SpiceDB MaximumTransactionMetadataSize: TransactionMetadataTooLargeErr -> INVALID_ARGUMENT.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const request = writeReq(RelationshipUpdate_Operation.OPERATION_TOUCH, "readme", "alice");
+      request.optionalTransactionMetadata = metadataOfBytes(65_000);
+      const error = await expectRpcError(service(cluster).writeRelationships(request));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toMatch(
+        /^metadata size of [0-9]+ is greater than maximum allowed of 65000$/,
+      );
+      expect(await countStored(cluster, "document")).toBe(0);
+
+      // Metadata under the cap is accepted.
+      request.optionalTransactionMetadata = metadataOfBytes(100);
+      await service(cluster).writeRelationships(request);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships transaction metadata over 65000 bytes is invalid argument", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).deleteRelationships(
+          DeleteRelationshipsRequest.fromPartial({
+            relationshipFilter: readmeFilter(),
+            optionalTransactionMetadata: metadataOfBytes(65_000),
+          }),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toMatch(
+        /^metadata size of [0-9]+ is greater than maximum allowed of 65000$/,
+      );
     } finally {
       await cluster.dispose();
     }
