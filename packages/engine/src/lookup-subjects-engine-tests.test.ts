@@ -457,4 +457,108 @@ describe("LookupSubjectsEngine", () => {
       }
     },
   );
+
+  // SpiceDB's subject-set union (basesubjectset.go unionConcreteWithConcrete) merges a subject's
+  // caveats with shortcircuitedOr: an unconditional branch makes the union unconditional.
+  const SHORT_CIRCUIT_UNION_SCHEMA = `
+caveat somecaveat(x int) {
+  x > 1
+}
+
+definition user {}
+
+definition doc {
+  relation viewer: user
+  relation cond_viewer: user with somecaveat
+  permission view = viewer + cond_viewer
+}
+`;
+
+  it("unions an unconditional and a caveated same subject into an unconditional one", async () => {
+    const { store, rev } = await seed(
+      tuple("doc", "1", "viewer", onr("user", "alice")),
+      caveated("doc", "1", "cond_viewer", onr("user", "alice"), "somecaveat"),
+    );
+    const engine = buildEngine(SHORT_CIRCUIT_UNION_SCHEMA);
+    const reader = store.snapshotReader(rev);
+
+    const found = await collect(engine.lookupSubjects(reader, onr("doc", "1", "view"), "user"));
+
+    const alice = single(found);
+    expect(alice.subjectId).toBe("alice");
+    expect(alice.caveat).toBeUndefined();
+  });
+
+  // SpiceDB's intersectWildcardWithWildcard unions the exclusion sets through BaseSubjectSet.Add,
+  // which merges a doubly-excluded subject with shortcircuitedOr: an unconditional exclusion on
+  // either side excludes unconditionally.
+  const SHORT_CIRCUIT_EXCLUSION_SCHEMA = `
+caveat somecaveat(x int) {
+  x > 1
+}
+
+definition user {}
+
+definition doc {
+  relation a: user:*
+  relation b: user:*
+  relation banned: user
+  relation cbanned: user with somecaveat
+  permission p1 = a - cbanned
+  permission p2 = b - banned
+  permission view = p1 & p2
+}
+`;
+
+  it("intersects wildcards with a conditional and an unconditional exclusion to exclude unconditionally", async () => {
+    const { store, rev } = await seed(
+      tuple("doc", "1", "a", onr("user", PUBLIC_WILDCARD)),
+      tuple("doc", "1", "b", onr("user", PUBLIC_WILDCARD)),
+      tuple("doc", "1", "banned", onr("user", "alice")),
+      caveated("doc", "1", "cbanned", onr("user", "alice"), "somecaveat"),
+    );
+    const engine = buildEngine(SHORT_CIRCUIT_EXCLUSION_SCHEMA);
+    const reader = store.snapshotReader(rev);
+
+    const found = await collect(engine.lookupSubjects(reader, onr("doc", "1", "view"), "user"));
+
+    const wildcard = single(found);
+    expect(wildcard.isWildcard).toBe(true);
+    expect(wildcard.caveat).toBeUndefined();
+    expect(wildcard.excludedSubjects).toBeDefined();
+    const excluded = single(wildcard.excludedSubjects ?? []);
+    expect(excluded.subjectId).toBe("alice");
+    expect(excluded.caveat).toBeUndefined();
+  });
+
+  // SpiceDB's unionWildcardWithWildcard (basesubjectset.go) merges the two wildcards' caveats with
+  // shortcircuitedOr: an unconditional wildcard makes the union wildcard unconditional.
+  const SHORT_CIRCUIT_WILDCARD_UNION_SCHEMA = `
+caveat somecaveat(x int) {
+  x > 1
+}
+
+definition user {}
+
+definition doc {
+  relation a: user:*
+  relation b: user:* with somecaveat
+  permission view = a + b
+}
+`;
+
+  it("unions an unconditional and a caveated wildcard into an unconditional one", async () => {
+    const { store, rev } = await seed(
+      tuple("doc", "1", "a", onr("user", PUBLIC_WILDCARD)),
+      caveated("doc", "1", "b", onr("user", PUBLIC_WILDCARD), "somecaveat"),
+    );
+    const engine = buildEngine(SHORT_CIRCUIT_WILDCARD_UNION_SCHEMA);
+    const reader = store.snapshotReader(rev);
+
+    const found = await collect(engine.lookupSubjects(reader, onr("doc", "1", "view"), "user"));
+
+    const wildcard = single(found);
+    expect(wildcard.isWildcard).toBe(true);
+    expect(wildcard.caveat).toBeUndefined();
+  });
 });
