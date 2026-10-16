@@ -1,3 +1,5 @@
+import { bytesEqual } from "./structural-equality";
+
 /**
  * Cryptographic integrity information used to verify a relationship was written by a trusted
  * source.
@@ -18,23 +20,13 @@ export interface RelationshipIntegrity {
 }
 
 /**
- * Content equality over the key id, hash bytes and instant.
- *
- * DIVERGES FROM C#: C# record equality on a `byte[]` member is REFERENCE equality, so two
- * Spiceport values holding identical bytes are NOT equal, and that propagates into
- * `Relationship` equality. TypeScript gives no equality for free, so the comparison has to be
- * written by hand regardless; this port compares content, because a hash is a value.
+ * Value equality, comparing `hash` by content rather than by array reference. Ported from the C#
+ * record's `Equals` override.
  */
 export function relationshipIntegrityEquals(
   a: RelationshipIntegrity | undefined,
   b: RelationshipIntegrity | undefined,
 ): boolean {
   if (a === undefined || b === undefined) return a === b;
-  if (a.keyId !== b.keyId) return false;
-  if (a.hashedAt !== b.hashedAt) return false;
-  if (a.hash.length !== b.hash.length) return false;
-  for (let i = 0; i < a.hash.length; i++) {
-    if (a.hash[i] !== b.hash[i]) return false;
-  }
-  return true;
+  return a.keyId === b.keyId && bytesEqual(a.hash, b.hash) && a.hashedAt === b.hashedAt;
 }

@@ -15,8 +15,7 @@ import {
 //   * `ChildTypes` is NULL for a scalar, not an empty list, and the DSL compiler's test asserts
 //     exactly that. `undefined` and `[]` are therefore kept distinct, in the data and in equality.
 //   * `byte[] SerializedExpression` becomes `Uint8Array`. As with `RelationshipIntegrity.hash`,
-//     C# record equality over `byte[]` is REFERENCE equality; the port compares content, because
-//     a compiled expression is a value.
+//     the C# record overrides `Equals` to compare the bytes by content, and so does the port.
 //   * `ParameterTypes` is an `ImmutableDictionary` in C#, whose enumeration order is HASH order,
 //     not source order. A `Map` preserves insertion order instead. That divergence is harmless
 //     only while nothing serializes or hashes the parameter list in enumeration order - the

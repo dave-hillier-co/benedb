@@ -90,7 +90,7 @@ export function isDispatchTransportFailure(exception: unknown): boolean {
  * Classifies `exception` into the dispatch-error taxonomy. Pure: no I/O, no silo.
  *
  * ORDER MATTERS. Known domain exceptions are recognised FIRST so a domain failure that happens to be
- * wrapped is never mislabeled as a transport error. Then cancellation/deadline, then transport /
+ * wrapped is never mislabeled as a transport error. Then cancellation, then transport /
  * availability (retriable -> `unavailable`), then everything else -> `internal`.
  */
 export function classifyDispatchError(exception: unknown): DispatchClassification {
@@ -102,10 +102,12 @@ export function classifyDispatchError(exception: unknown): DispatchClassificatio
   // 1. Known typed domain exceptions keep their own gRPC semantics - pass through unchanged.
   if (isDispatchDomainException(exception)) return DISPATCH_CLASSIFICATION_DOMAIN;
 
-  // 2. Cancellation / deadline. A cancellation surfaced as a timeout (a deadline elapsed) is
-  //    DeadlineExceeded; a plain caller cancellation is Cancelled. The C#'s
+  // 2. Cancellation. The abort family is the caller's own cancellation -> Cancelled. The C#'s
   //    `is OperationCanceledException` becomes the guide's `isCancellationError` - the whole abort
-  //    family, including a plain Error named "AbortError".
+  //    family, including a plain Error named "AbortError". A `GrainCallTimeoutError` (the C#'s
+  //    `TimeoutException`) is NOT treated as a deadline here: it is a response timeout on one hop,
+  //    a transient silo fault, so it falls through to the transport branch below and maps to
+  //    retriable Unavailable.
   if (isCancellationError(exception)) return mappedDispatchClassification("cancelled");
 
   // 3. Transport / silo-availability failures are TRANSIENT -> retriable Unavailable (NOT
@@ -123,6 +125,10 @@ export function classifyDispatchError(exception: unknown): DispatchClassificatio
  * {@link DispatchFailedException} carrying its deliberately-mapped {@link DispatchErrorCode}. Pure,
  * given {@link classifyDispatchError}.
  *
+ * Called from the check-dispatch outgoing call filter, which sees every exception the grain call
+ * produces - caller cancellation included, since the caller's abort signal is propagated into the
+ * grain call and faults it with a cancellation error.
+ *
  * The reason strings are USER-VISIBLE and are copied from the C# verbatim.
  */
 export function translateDispatchError(exception: unknown): unknown {
@@ -139,6 +145,8 @@ export function translateDispatchError(exception: unknown): unknown {
     case "cancelled":
       reason = "the permission check was cancelled";
       break;
+    // No producer: classifyDispatchError never yields deadlineExceeded today (a timeout maps to
+    // unavailable). The arm is kept so the code's documented meaning stays wired end to end.
     case "deadlineExceeded":
       reason = "the permission check exceeded its deadline";
       break;

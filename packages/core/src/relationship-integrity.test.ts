@@ -8,14 +8,9 @@ import { relationshipIntegrityEquals, type RelationshipIntegrity } from "./relat
 //
 // 1. `byte[] Hash` becomes `Uint8Array`.
 //
-// 2. EQUALITY IS BY CONTENT, WHICH DIVERGES FROM C#. C# record equality on a `byte[]` member is
-//    REFERENCE equality: two `RelationshipIntegrity` values holding identical bytes are NOT
-//    equal in Spiceport, and that propagates into `Relationship` equality. TypeScript gives no
-//    equality for free, so the comparison has to be written by hand regardless; this port writes
-//    a content comparison, because a hash is a value and reference identity here is a C# codegen
-//    artifact rather than a decision anyone made. Recorded loudly because it is a behaviour
-//    change: anything in Spiceport that relied on two equal-byte integrities comparing unequal
-//    would behave differently here.
+// 2. EQUALITY IS BY CONTENT. The C# record overrides `Equals` to compare `Hash` by content
+//    rather than by array reference, and that propagates into `Relationship` equality.
+//    TypeScript gives no equality for free, so `relationshipIntegrityEquals` is that override.
 //
 // 3. `DateTimeOffset HashedAt` becomes NANOSECONDS SINCE THE UNIX EPOCH as a `bigint` - the same
 //    representation chosen for `Relationship.optionalExpiration`, and the same currency
@@ -49,7 +44,7 @@ describe("relationship integrity", () => {
   });
 
   describe("equality", () => {
-    it("compares hash bytes by content, not by reference (diverges from C#)", () => {
+    it("compares hash bytes by content, not by reference", () => {
       const a: RelationshipIntegrity = { keyId: "k", hash: new Uint8Array([1, 2, 3]), hashedAt };
       const b: RelationshipIntegrity = { keyId: "k", hash: new Uint8Array([1, 2, 3]), hashedAt };
 

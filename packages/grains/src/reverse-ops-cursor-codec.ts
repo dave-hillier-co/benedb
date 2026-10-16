@@ -21,18 +21,15 @@ import type { LookupResourcesArgs, LookupSubjectsArgs } from "./reverse-ops-dtos
  * (tag `C` plus the last resource id) when the Leopard accelerator did: that stream is the covered
  * candidates in ordinal id order, so resumption skips ids at or before the last one. LookupSubjects has no engine cursor - its results are deterministically ordered
  * by subject id, so a cursor is simply the last id already returned and resumption skips ids at or
- * before it. An empty/whitespace token means "from the start".
+ * before it. Both encode to a standard-alphabet base64 string (`+`, `/` and `=` padding, as SpiceDB's
+ * own cursors use `base64.StdEncoding`), so a token placed in a URL must be percent-encoded; an
+ * empty/whitespace token means "from the start".
  *
  * Every token is bound to a hash of the originating request's shape (op kind, resource/permission,
  * subject, caveat context) plus the hash of the schema in effect at the pinned revision - mirroring
  * SpiceDB's cursor request-hash check and its schema-hash-carrying cursors - so resuming with a
  * cursor minted for a different request, or across a schema change, fails with
  * {@link InvalidCursorException} rather than silently skipping or duplicating results.
- *
- * CONTRADICTION RESOLVED IN FAVOUR OF THE CODE. The C# doc comment says the tokens are "URL-safe
- * base64"; `ToToken` calls `Convert.ToBase64String`, which is STANDARD base64 with `+`, `/` and
- * `=`. A client hands the token back verbatim, so the CODE is the contract and the comment is the
- * bug - it is not carried across.
  *
  * WIRE-VISIBLE, so every mechanical detail below is load-bearing: the `Uri.EscapeDataString`
  * segment escape (shared with the grain-key codec, NOT `encodeURIComponent`), the

@@ -42,6 +42,7 @@ import {
   type IDispatcher,
   type ResolverMeta,
 } from "./i-dispatcher";
+import { SingleChildExclusionError } from "./single-child-exclusion-error";
 
 /** A non-terminal subject reached mid-walk, with the caveat carried by the tuple that reached it. */
 interface Intermediate {
@@ -330,6 +331,12 @@ export class LocalDispatcher implements IDispatcher {
       case "exclusion": {
         if (operation.children.length === 0) {
           return DISPATCH_CHECK_NONE;
+        }
+        // SpiceDB's difference treats a lone operand as a bug (MustBugf "difference requires more
+        // than a single child"). The schema parser never builds one, so reaching this means a
+        // malformed stored rewrite: fail loudly rather than quietly granting the base operand.
+        if (operation.children.length === 1) {
+          throw new SingleChildExclusionError("difference requires more than a single child");
         }
 
         const first = operation.children[0] as SetOperationChild;

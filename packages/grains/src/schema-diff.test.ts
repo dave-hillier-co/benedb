@@ -635,11 +635,9 @@ describe("computeSchemaDiff caveat parameters", () => {
     );
   });
 
-  it("DIVERGES from C#: structurally identical nested generics are NOT a change", () => {
-    // C# record equality over `ImmutableList<CaveatTypeReference>? ChildTypes` is REFERENCE
-    // equality, so the C# would emit CaveatParameterTypeChanged here. The port uses core's
-    // structural `caveatTypeReferenceEquals` instead; this only ever removes a spurious
-    // rejection, never adds one.
+  it("structurally identical nested generics are NOT a change", () => {
+    // `CaveatTypeEquals` delegates to `CaveatTypeReference`'s record equality, which compares
+    // `ChildTypes` element-wise; the port's `caveatTypeReferenceEquals` does the same.
     const before = caveat("c", "e", [["a", { typeName: "map", childTypes: [STR, INT] }]]);
     const after = caveat("c", "e", [["a", { typeName: "map", childTypes: [STR, INT] }]]);
 
@@ -782,8 +780,8 @@ describe("rewriteEquals", () => {
   it("DIVERGES from C#: an operationPath is compared structurally, not by reference", () => {
     // Divergence 3. `ChildEquals`'s value-equality arm (`a == b`) is C# record equality over
     // SetOperationChild, whose `ImmutableList<uint>? OperationPath` has REFERENCE-based Equals -
-    // so C# reports two separately built children carrying an equal path as DIFFERENT. Like
-    // divergence 1 this only ever removes a spurious PermissionExprChanged. Unreachable through
+    // so C# reports two separately built children carrying an equal path as DIFFERENT. This only
+    // ever removes a spurious PermissionExprChanged. Unreachable through
     // computeSchemaDiff (the compiler never populates operationPath) but reachable here.
     expect(
       rewriteEquals(
