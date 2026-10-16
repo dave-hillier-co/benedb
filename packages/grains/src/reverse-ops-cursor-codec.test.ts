@@ -18,10 +18,8 @@ import {
  * so these byte-exact characterization tests are its only gate. Characterized from
  * `src/Spiceport.Server/Grains/ReverseOpsCursorCodec.cs`.
  *
- * CONTRADICTION RESOLVED IN FAVOUR OF THE CODE. The C# doc comment claims "URL-safe base64", but
- * `ToToken` calls `Convert.ToBase64String`, which is STANDARD base64 with `+`, `/` and `=`
- * padding. The token is what a client hands back, so the CODE is the contract and the comment is
- * the bug; the exact-token cases below pin the standard alphabet.
+ * Tokens are STANDARD base64 (`Convert.ToBase64String`: `+`, `/` and `=` padding), as SpiceDB's own
+ * cursors are; the exact-token cases below pin the standard alphabet.
  *
  * The rest of the contract, verbatim from the C#:
  *   * Every token is `base64(requestHash + '\n' + payload)`: the request-shape hash prefix binds

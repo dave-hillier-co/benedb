@@ -13,7 +13,7 @@ import {
 } from "@thresh/core/errors";
 import { describe, expect, it } from "vitest";
 
-import { classifyDispatchError } from "./dispatch-error-mapper";
+import { classifyDispatchError, translateDispatchError } from "./dispatch-error-mapper";
 import { DispatchFailedException } from "./dispatch-failed-exception";
 import { PreconditionFailedException } from "./precondition-failed-exception";
 import { SchemaWriteValidationException } from "./schema-write-validation-exception";
@@ -98,6 +98,24 @@ describe("dispatch error mapper", () => {
 
     expect(c.passThrough).toBe(false);
     expect(c.code).toBe("cancelled");
+  });
+
+  it("translates a GrainCallTimeoutError into Unavailable, not DeadlineExceeded", () => {
+    // A grain response timeout is a transient silo fault on one hop, not the caller's own deadline
+    // elapsing, so it is retriable Unavailable rather than DeadlineExceeded. The classification is
+    // already pinned by the transport-failure cases; this pins what translate throws. The C#'s
+    // `TimeoutException` is Thresh's `GrainCallTimeoutError`, per the guide.
+    const translated = translateDispatchError(new GrainCallTimeoutError("response timed out"));
+
+    expect(translated).toBeInstanceOf(DispatchFailedException);
+    expect((translated as DispatchFailedException).code).toBe("unavailable");
+  });
+
+  it("translates a cancellation into Cancelled", () => {
+    const translated = translateDispatchError(new GrainCallAbortedError());
+
+    expect(translated).toBeInstanceOf(DispatchFailedException);
+    expect((translated as DispatchFailedException).code).toBe("cancelled");
   });
 
   it("maps an unrecognised exception to Internal", () => {
