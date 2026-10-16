@@ -773,6 +773,71 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
     }
   });
 
+  const WildcardCaveatSchema = `definition user {}
+
+caveat c1(a int) { a == 1 }
+
+caveat c2(a int) { a == 1 }
+
+definition doc {
+    relation wildcard_only: user:* with c2
+    relation mixed: user with c1 | user:* with c2
+}`;
+
+  it("WriteRelationships uncaveated concrete subject does not name a wildcard types caveat", async () => {
+    // SpiceDB's NewInvalidSubjectTypeError compares allowedType.GetRelation(), which is "" for a
+    // wildcard allowed type, so `user:* with c2` never matches the concrete subject `user:tom` and
+    // the error falls through to the fuzzy suggestion.
+    const cluster = await MeshTestCluster.create(WildcardCaveatSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "doc",
+            "1",
+            "wildcard_only",
+            "user",
+            "tom",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "subjects of type `user` are not allowed on relation `doc#wildcard_only`; did you mean `user:* with c2`?",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships required caveat hint lists only the concrete types caveats", async () => {
+    const cluster = await MeshTestCluster.create(WildcardCaveatSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "doc",
+            "1",
+            "mixed",
+            "user",
+            "tom",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "subjects of type `user` are not allowed on relation `doc#mixed` without one of the following caveats: c1",
+      );
+      expect(error.details).not.toContain("c1,c2");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
   it("WriteRelationships delete ignores an unspecified caveat", async () => {
     // The DELETE rule (ValidateRelationshipForDeletion) ignores the caveat when none is given, so
     // an uncaveated DELETE of a caveat-only relation is valid; a disallowed subject type still is
@@ -1465,6 +1530,49 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
       // Metadata under the cap is accepted.
       request.optionalTransactionMetadata = metadataOfBytes(100);
       await service(cluster).writeRelationships(request);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships reports a missing submessage before oversized metadata", async () => {
+    // SpiceDB's protoc-gen-validate interceptor runs before the handler, whose first statement is
+    // validateTransactionMetadata, so a request malformed both ways gets the shape error.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const request = WriteRelationshipsRequest.fromPartial({
+        updates: [{ operation: RelationshipUpdate_Operation.OPERATION_TOUCH }],
+        optionalTransactionMetadata: metadataOfBytes(65_000),
+      });
+      const error = await expectRpcError(service(cluster).writeRelationships(request));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe(
+        "invalid WriteRelationshipsRequest.Updates[0]: embedded message failed validation | caused by: " +
+          "invalid RelationshipUpdate.Relationship: value is required",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships reports oversized metadata before too many updates", async () => {
+    // Within the handler SpiceDB checks the metadata size ahead of the update count.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const request = WriteRelationshipsRequest.fromPartial({
+        optionalTransactionMetadata: metadataOfBytes(65_000),
+      });
+      for (let i = 0; i <= 1000; i++)
+        request.updates.push(
+          ...writeReq(RelationshipUpdate_Operation.OPERATION_TOUCH, `doc${i}`, "alice").updates,
+        );
+      const error = await expectRpcError(service(cluster).writeRelationships(request));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toMatch(
+        /^metadata size of [0-9]+ is greater than maximum allowed of 65000$/,
+      );
     } finally {
       await cluster.dispose();
     }

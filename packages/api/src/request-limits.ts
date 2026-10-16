@@ -67,8 +67,18 @@ export const MAX_TRANSACTION_METADATA_SIZE = 65_000;
 export function validateWriteRelationships(request: WriteRelationshipsRequest): void {
   // SpiceDB validates the request message (protoc-gen-validate) before its handler runs, so a
   // missing required submessage is reported ahead of the update-count and precondition limits.
-  const relationships = request.updates.map(requireRelationshipShape);
-  requirePreconditionFilters(request.optionalPreconditions, "WriteRelationshipsRequest");
+  const violations: string[] = [];
+  request.updates.forEach((update, index) => {
+    addMissingRelationshipShape(update, index, violations);
+  });
+  addMissingPreconditionFilters(
+    request.optionalPreconditions,
+    "WriteRelationshipsRequest",
+    violations,
+  );
+  throwIfViolations(violations);
+  // Every update now carries its required submessages.
+  const relationships = request.updates.map((update) => update.relationship as ShapedRelationship);
 
   // The handler then checks the metadata size ahead of the update and precondition limits.
   validateTransactionMetadataSize(request.optionalTransactionMetadata);
@@ -144,40 +154,40 @@ type ShapedSubject = { object: ObjectReference; optionalRelation: string };
 const EMBEDDED = "embedded message failed validation | caused by: ";
 
 /**
- * Rejects an update whose `relationship`, `relationship.resource`, `relationship.subject`, or
- * `relationship.subject.object` is missing, with SpiceDB's own INVALID_ARGUMENT message: its
- * protoc-gen-validate request validation at the service boundary (verified against a real SpiceDB
- * container). ts-proto leaves an absent required submessage as `undefined` rather than a default
- * instance, so without this guard a malformed request throws a raw `TypeError` - an UNKNOWN server
- * fault - before it can be reported.
+ * Collects the violation for an update whose `relationship`, `relationship.resource`,
+ * `relationship.subject`, or `relationship.subject.object` is missing, in SpiceDB's own
+ * INVALID_ARGUMENT text: its protoc-gen-validate request validation at the service boundary
+ * (verified against a real SpiceDB container). ts-proto leaves an absent required submessage as
+ * `undefined` rather than a default instance, so without this guard a malformed request throws a
+ * raw `TypeError` - an UNKNOWN server fault - before it can be reported. The `Relationship`'s own
+ * `ValidateAll` multi-error is the cause of a single embedded wrapper.
  */
-function requireRelationshipShape(update: RelationshipUpdate, index: number): ShapedRelationship {
-  const invalid = (cause: string): RpcError =>
-    new RpcError(
-      status.INVALID_ARGUMENT,
-      `invalid WriteRelationshipsRequest.Updates[${index}]: ${EMBEDDED}${cause}`,
-    );
-  const inRelationship = (cause: string): string =>
-    `invalid RelationshipUpdate.Relationship: ${EMBEDDED}${cause}`;
-
+function addMissingRelationshipShape(
+  update: RelationshipUpdate,
+  index: number,
+  violations: string[],
+): void {
+  const prefix = `invalid WriteRelationshipsRequest.Updates[${index}]: ${EMBEDDED}`;
   const relationship = update.relationship;
-  if (relationship === undefined)
-    throw invalid("invalid RelationshipUpdate.Relationship: value is required");
+  if (relationship === undefined) {
+    violations.push(`${prefix}invalid RelationshipUpdate.Relationship: value is required`);
+    return;
+  }
 
+  const causes: string[] = [];
   if (relationship.resource === undefined)
-    throw invalid(inRelationship("invalid Relationship.Resource: value is required"));
-
+    causes.push("invalid Relationship.Resource: value is required");
   if (relationship.subject === undefined)
-    throw invalid(inRelationship("invalid Relationship.Subject: value is required"));
-
-  if (relationship.subject.object === undefined)
-    throw invalid(
-      inRelationship(
-        `invalid Relationship.Subject: ${EMBEDDED}invalid SubjectReference.Object: value is required`,
-      ),
+    causes.push("invalid Relationship.Subject: value is required");
+  else if (relationship.subject.object === undefined)
+    causes.push(
+      `invalid Relationship.Subject: ${EMBEDDED}invalid SubjectReference.Object: value is required`,
     );
 
-  return relationship as ShapedRelationship;
+  if (causes.length > 0)
+    violations.push(
+      `${prefix}invalid RelationshipUpdate.Relationship: ${EMBEDDED}${causes.join("; ")}`,
+    );
 }
 
 /**
@@ -187,31 +197,44 @@ function requireRelationshipShape(update: RelationshipUpdate, index: number): Sh
  * the wire mapping would read the absent filter as an empty one.
  */
 export function validateDeleteRelationships(request: DeleteRelationshipsRequest): void {
+  const violations: string[] = [];
   if (request.relationshipFilter === undefined)
-    throw new RpcError(
-      status.INVALID_ARGUMENT,
-      "invalid DeleteRelationshipsRequest.RelationshipFilter: value is required",
-    );
-  requirePreconditionFilters(request.optionalPreconditions, "DeleteRelationshipsRequest");
+    violations.push("invalid DeleteRelationshipsRequest.RelationshipFilter: value is required");
+  addMissingPreconditionFilters(
+    request.optionalPreconditions,
+    "DeleteRelationshipsRequest",
+    violations,
+  );
+  throwIfViolations(violations);
 }
 
 /**
- * Rejects the first precondition with no `filter`, in the protoc-gen-validate text SpiceDB returns
- * for the repeated `optional_preconditions` field of `requestName`. Shared by the write and delete
- * guards, as the C#'s `AddMissingPreconditionFilters` is.
+ * Collects a violation for every precondition with no `filter`, in the protoc-gen-validate text
+ * SpiceDB returns for the repeated `optional_preconditions` field of `requestName`. Shared by the
+ * write and delete guards, as the C#'s `AddMissingPreconditionFilters` is.
  */
-function requirePreconditionFilters(
+function addMissingPreconditionFilters(
   preconditions: readonly Precondition[],
   requestName: string,
+  violations: string[],
 ): void {
   preconditions.forEach((precondition, index) => {
     if (precondition.filter === undefined)
-      throw new RpcError(
-        status.INVALID_ARGUMENT,
+      violations.push(
         `invalid ${requestName}.OptionalPreconditions[${index}]: ${EMBEDDED}` +
           "invalid Precondition.Filter: value is required",
       );
   });
+}
+
+/**
+ * Throws INVALID_ARGUMENT with protoc-gen-validate's `MultiError` text: the violations, in field
+ * order, joined with `"; "`.
+ */
+function throwIfViolations(violations: readonly string[]): void {
+  if (violations.length === 0) return;
+
+  throw new RpcError(status.INVALID_ARGUMENT, violations.join("; "));
 }
 
 /**

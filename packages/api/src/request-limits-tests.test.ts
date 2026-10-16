@@ -21,18 +21,15 @@ import { RpcError } from "./rpc-error";
  * INVALID_ARGUMENT in its request validation before any handler runs, so the boundary must too,
  * rather than letting a `TypeError` surface as an UNKNOWN status.
  *
+ * PGV wraps a nested failure as `invalid Outer.Field: embedded message failed validation | caused
+ * by: inner` and joins the violations `ValidateAll` collects with `"; "`.
+ *
  * PORT NOTES.
- *  - DETAIL TEXT DIVERGES FROM SPICEPORT ON PURPOSE. Spiceport words the detail in protovalidate's
- *    `ValidationError` format (`validation error: updates[0].relationship: value is required`).
- *    BeneDB already rejected the update shapes with the text a real `authzed/spicedb:v1.49.2`
- *    container returns - protoc-gen-validate's `invalid WriteRelationshipsRequest.Updates[0]:
- *    embedded message failed validation | caused by: ...` - and its differential suite pins that
- *    against the container. The C#'s `Assert.Contains($"{fieldPath}: value is required")` therefore
- *    becomes an exact assertion of the protoc-gen-validate text for the same field.
  *  - `rel.Resource = null` becomes building the relationship without that field, since a ts-proto
  *    message is a plain object.
- *  - The DeleteRelationships cases have no C# counterpart in this file (Spiceport pins them only
- *    at the service); they are added here beside their WriteRelationships twins.
+ *  - `ValidateDeleteRelationships_precondition_without_filter_is_invalid_argument` and
+ *    `ValidateDeleteRelationships_accepts_a_well_formed_request` have no C# counterpart (Spiceport
+ *    pins them only at the service); they are kept here beside their WriteRelationships twins.
  */
 
 const EMBEDDED = "embedded message failed validation | caused by: ";
@@ -104,6 +101,18 @@ describe("RequestLimitsTests", () => {
     );
   });
 
+  it("ValidateWriteRelationships_relationship_without_resource_or_subject_joins_both_causes", () => {
+    // One embedded wrapper whose cause is the Relationship's own ValidateAll multi-error.
+    const rel = { ...validRelationship(), resource: undefined, subject: undefined };
+    assertInvalidArgument(
+      () => validateWriteRelationships(writeOf(rel)),
+      `invalid WriteRelationshipsRequest.Updates[0]: ${EMBEDDED}` +
+        `invalid RelationshipUpdate.Relationship: ${EMBEDDED}` +
+        "invalid Relationship.Resource: value is required; " +
+        "invalid Relationship.Subject: value is required",
+    );
+  });
+
   it("ValidateWriteRelationships_names_the_index_of_the_malformed_update", () => {
     const request = writeOf(validRelationship());
     request.updates.push({
@@ -114,6 +123,27 @@ describe("RequestLimitsTests", () => {
       () => validateWriteRelationships(request),
       `invalid WriteRelationshipsRequest.Updates[1]: ${EMBEDDED}` +
         "invalid RelationshipUpdate.Relationship: value is required",
+    );
+  });
+
+  it("ValidateWriteRelationships_joins_every_violation_in_field_order", () => {
+    const request = writeOf(undefined);
+    request.updates.push({
+      operation: RelationshipUpdate_Operation.OPERATION_TOUCH,
+      relationship: undefined,
+    });
+    request.optionalPreconditions.push({
+      operation: Precondition_Operation.OPERATION_MUST_MATCH,
+      filter: undefined,
+    });
+    assertInvalidArgument(
+      () => validateWriteRelationships(request),
+      `invalid WriteRelationshipsRequest.Updates[0]: ${EMBEDDED}` +
+        "invalid RelationshipUpdate.Relationship: value is required; " +
+        `invalid WriteRelationshipsRequest.Updates[1]: ${EMBEDDED}` +
+        "invalid RelationshipUpdate.Relationship: value is required; " +
+        `invalid WriteRelationshipsRequest.OptionalPreconditions[0]: ${EMBEDDED}` +
+        "invalid Precondition.Filter: value is required",
     );
   });
 
@@ -149,6 +179,18 @@ describe("RequestLimitsTests", () => {
     assertInvalidArgument(
       () => validateDeleteRelationships(DeleteRelationshipsRequest.fromPartial({})),
       "invalid DeleteRelationshipsRequest.RelationshipFilter: value is required",
+    );
+  });
+
+  it("ValidateDeleteRelationships_joins_a_missing_filter_and_precondition_filter", () => {
+    const request = DeleteRelationshipsRequest.fromPartial({
+      optionalPreconditions: [{ operation: Precondition_Operation.OPERATION_MUST_MATCH }],
+    });
+    assertInvalidArgument(
+      () => validateDeleteRelationships(request),
+      "invalid DeleteRelationshipsRequest.RelationshipFilter: value is required; " +
+        `invalid DeleteRelationshipsRequest.OptionalPreconditions[0]: ${EMBEDDED}` +
+        "invalid Precondition.Filter: value is required",
     );
   });
 
