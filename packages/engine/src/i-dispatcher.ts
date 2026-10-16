@@ -49,23 +49,20 @@ export interface VisitKey {
 }
 
 /**
- * The canonical field separator (U+001F). Each field is ALSO length-prefixed, which is what
- * actually makes the rendering injective -- the separator alone is not enough.
+ * The separator between a part's length prefix and its characters (U+001F). It is not what makes
+ * the rendering injective -- nothing on the request path enforces the SpiceDB object-id grammar, so
+ * an id may contain it -- the length prefix is.
  *
  * In Spiceport `VisitKey` is a `readonly record struct` and the visited set is
  * `ImmutableHashSet<VisitKey>`, so its identity is genuine field-wise value equality;
  * `ToCanonicalString` is only a wire rendering. TypeScript has no value-equality `Set`, so this
- * string IS the identity here, and a plain join would make the cycle guard conflate two distinct
- * sub-problems whenever a separator fell inside a field. Nothing on this path enforces the
- * SpiceDB object-id grammar, so "the separator cannot occur" is not a property the engine may
- * rely on -- the same reasoning as `relationshipKeyString` in @benedb/datastore.
+ * string IS the identity here, which makes its injectivity load-bearing for the cycle guard as
+ * well as for the wire.
  */
 const SEPARATOR = String.fromCharCode(0x1f);
 
-/** One length-prefixed field of the canonical rendering. */
-function framed(part: string): string {
-  return `${part.length}${SEPARATOR}${part}`;
-}
+/** `int.MaxValue`: the largest length prefix `int.TryParse` accepts. */
+const INT32_MAX = 2_147_483_647;
 
 /** Builds a key from a (resource, subject) ONR pair. */
 export function visitKeyOf(resource: ObjectAndRelation, subject: ObjectAndRelation): VisitKey {
@@ -80,41 +77,68 @@ export function visitKeyOf(resource: ObjectAndRelation, subject: ObjectAndRelati
 }
 
 /**
- * Renders a key as a single unit-separated (U+001F) string. This is also the visited-set element
- * type: the canonical string IS the identity here, not merely a wire rendering of it.
+ * Renders a key as a single string, suitable for carrying across a wire boundary (the dispatch
+ * context's ambient request context). Each part is framed as `{length}U+001F{part}` (length in
+ * decimal UTF-16 code units, which is what a JS string's `length` counts, as .NET's does) and the
+ * frames are concatenated, so the rendering is injective for any six strings, whatever characters
+ * they contain. This is also the visited-set element type: the canonical string IS the identity
+ * here, not merely a wire rendering of it.
  */
 export function visitKeyToCanonicalString(key: VisitKey): string {
-  return (
-    framed(key.resourceType) +
-    framed(key.resourceId) +
-    framed(key.resourceRelation) +
-    framed(key.subjectType) +
-    framed(key.subjectId) +
-    framed(key.subjectRelation)
-  );
+  let builder = "";
+  for (const part of [
+    key.resourceType,
+    key.resourceId,
+    key.resourceRelation,
+    key.subjectType,
+    key.subjectId,
+    key.subjectRelation,
+  ]) {
+    builder += `${part.length}${SEPARATOR}${part}`;
+  }
+  return builder;
 }
 
 /**
  * Parses a canonical string produced by {@link visitKeyToCanonicalString}. Throws {@link FormatError}
- * (the port's `FormatException`) on a malformed value rather than silently defaulting any field.
+ * (the port's `FormatException`) on a malformed value (a bad, zero-padded or overrunning length
+ * prefix, a missing part, or trailing characters) rather than silently defaulting any field.
+ *
+ * `int.TryParse(prefix, NumberStyles.None, InvariantCulture)` accepts ASCII digits only -- no sign,
+ * no whitespace, no empty string -- and rejects a value past `int.MaxValue`; the digit-only test
+ * plus the range check reproduce it. `Number()` alone would not: it accepts `""`, `"+8"`, `" 8"`,
+ * `"0x8"` and `"1e1"`.
  */
 export function visitKeyFromCanonicalString(value: string): VisitKey {
   const parts: string[] = [];
   let at = 0;
-  while (at < value.length && parts.length < 6) {
+  for (let i = 0; i < 6; i++) {
     const mark = value.indexOf(SEPARATOR, at);
-    if (mark < 0) break;
-    const length = Number(value.slice(at, mark));
-    if (!Number.isInteger(length) || length < 0) break;
+    if (mark < 0) {
+      throw new FormatError(
+        `Malformed VisitKey canonical string: expected 6 length-prefixed parts, got ${i}.`,
+      );
+    }
+    const prefix = value.slice(at, mark);
+    // visitKeyToCanonicalString never emits a leading zero, so rejecting one keeps parsing the
+    // exact inverse of rendering: each key has one canonical string and no other string parses to
+    // it.
+    const length = /^[0-9]+$/.test(prefix) ? Number(prefix) : Number.NaN;
+    if ((prefix.length > 1 && prefix[0] === "0") || !(length <= INT32_MAX)) {
+      throw new FormatError(
+        `Malformed VisitKey canonical string: bad length prefix for part ${i}.`,
+      );
+    }
     const start = mark + 1;
-    const end = start + length;
-    if (end > value.length) break;
-    parts.push(value.slice(start, end));
-    at = end;
+    if (length > value.length - start) {
+      throw new FormatError(`Malformed VisitKey canonical string: part ${i} overruns the value.`);
+    }
+    parts.push(value.substring(start, start + length));
+    at = start + length;
   }
-  if (parts.length !== 6 || at !== value.length) {
+  if (at !== value.length) {
     throw new FormatError(
-      `Malformed VisitKey canonical string: expected 6 length-prefixed parts, got ${parts.length}.`,
+      "Malformed VisitKey canonical string: trailing characters after 6 parts.",
     );
   }
   return {

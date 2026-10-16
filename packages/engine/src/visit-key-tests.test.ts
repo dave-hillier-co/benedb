@@ -8,12 +8,13 @@ import {
   type VisitKey,
 } from "./i-dispatcher";
 
-// Ported from Spiceport `tests/Spiceport.Engine.Tests/VisitKeyTests.cs`, case for case.
+// Ported from Spiceport `tests/Spiceport.Engine.Tests/VisitKeyTests.cs`, case for case, plus one
+// BeneDB-only round-trip table (marked below).
 //
 // The C# `VisitKey` is a `readonly record struct` used as the element type of
 // `ImmutableHashSet<VisitKey>`. TypeScript has no value equality, so the visited set becomes a
 // `ReadonlySet<string>` keyed by this ALREADY-EXISTING canonical string - there is no second key.
-// That makes these four cases load-bearing rather than incidental: the canonical string is now the
+// That makes these cases load-bearing rather than incidental: the canonical string is now the
 // identity, not merely a wire rendering of it.
 //
 // `Assert.Equal(key, parsed)` is C# record equality; `toEqual` is its structural counterpart.
@@ -35,38 +36,6 @@ function key(
 }
 
 describe("VisitKey canonical string", () => {
-  // In Spiceport the visited set is `ImmutableHashSet<VisitKey>` over a `readonly record struct`,
-  // so its identity is field-wise value equality and `ToCanonicalString` is only a wire
-  // rendering. Here the string IS the identity, so it must be injective for ANY six strings --
-  // nothing on this path enforces the SpiceDB object-id grammar, so the separator's absence is
-  // not a property to rely on. A collision would silently merge two distinct sub-problems in the
-  // cycle guard.
-  it("distinguishes keys whose fields differ only by where a boundary falls", () => {
-    const sep = String.fromCharCode(0x1f);
-    const left = visitKeyOf(
-      { objectType: "d", objectId: "x", relation: "r" },
-      { objectType: "u", objectId: "a", relation: `b${sep}c` },
-    );
-    const right = visitKeyOf(
-      { objectType: "d", objectId: "x", relation: "r" },
-      { objectType: "u", objectId: `a${sep}b`, relation: "c" },
-    );
-
-    expect(visitKeyToCanonicalString(left)).not.toBe(visitKeyToCanonicalString(right));
-  });
-
-  it.each([String.fromCharCode(0x1f), " ", ":", "#", ""])(
-    "round-trips a field containing %j",
-    (char) => {
-      const key = visitKeyOf(
-        { objectType: "doc", objectId: `a${char}b`, relation: "viewer" },
-        { objectType: "user", objectId: "alice", relation: "..." },
-      );
-
-      expect(visitKeyFromCanonicalString(visitKeyToCanonicalString(key))).toEqual(key);
-    },
-  );
-
   it("round-trips through toCanonicalString then fromCanonicalString", () => {
     const original = key("document", "doc1", "view", "user", "alice", "member");
 
@@ -77,25 +46,63 @@ describe("VisitKey canonical string", () => {
   });
 
   it("is injective across adjacent field boundaries", () => {
-    // ("a", "bc", ...) and ("ab", "c", ...) must not collide on the joined string: the separator
-    // (U+001F) cannot appear in an ONR field, so no naive concatenation ambiguity survives.
+    // ("a", "bc", ...) and ("ab", "c", ...) must not collide on the rendered string: each part is
+    // length-prefixed, so no concatenation ambiguity survives.
     const first = key("a", "bc", "rel", "user", "u", "...");
     const second = key("ab", "c", "rel", "user", "u", "...");
 
     expect(visitKeyToCanonicalString(first)).not.toBe(visitKeyToCanonicalString(second));
   });
 
-  it("throws FormatError on too few parts", () => {
-    const tooFew = ["document", "doc1", "view", "user", "alice"].join(SEPARATOR);
+  it("round-trips ids containing the unit separator", () => {
+    // Nothing on the request path enforces the SpiceDB object-id grammar, so an id carrying the
+    // separator character reaches the dispatcher and must survive the wire rendering intact.
+    const original = key("document", `a${SEPARATOR}b`, "view", "user", "alice", "...");
 
-    expect(() => visitKeyFromCanonicalString(tooFew)).toThrow(FormatError);
+    const parsed = visitKeyFromCanonicalString(visitKeyToCanonicalString(original));
+
+    expect(parsed).toEqual(original);
   });
 
-  it("throws FormatError on too many parts", () => {
-    const tooMany = ["document", "doc1", "view", "user", "alice", "member", "extra"].join(
-      SEPARATOR,
+  it("renders keys differing only in separator placement distinctly", () => {
+    const first = key("document", `a${SEPARATOR}b`, "c", "user", "alice", "...");
+    const second = key("document", "a", `b${SEPARATOR}c`, "user", "alice", "...");
+
+    expect(visitKeyToCanonicalString(first)).not.toBe(visitKeyToCanonicalString(second));
+  });
+
+  it.each([
+    "",
+    "x",
+    `8${SEPARATOR}document`,
+    `-1${SEPARATOR}`,
+    `08${SEPARATOR}document4${SEPARATOR}doc14${SEPARATOR}view4${SEPARATOR}user5${SEPARATOR}alice3${SEPARATOR}...`,
+    `8${SEPARATOR}document4${SEPARATOR}doc14${SEPARATOR}view4${SEPARATOR}user5${SEPARATOR}alice03${SEPARATOR}...`,
+    `+8${SEPARATOR}document4${SEPARATOR}doc14${SEPARATOR}view4${SEPARATOR}user5${SEPARATOR}alice3${SEPARATOR}...`,
+    `99${SEPARATOR}document4${SEPARATOR}doc14${SEPARATOR}view4${SEPARATOR}user5${SEPARATOR}alice3${SEPARATOR}...`,
+    `8${SEPARATOR}document4${SEPARATOR}doc14${SEPARATOR}view4${SEPARATOR}user5${SEPARATOR}alice`,
+    `8${SEPARATOR}document4${SEPARATOR}doc14${SEPARATOR}view4${SEPARATOR}user5${SEPARATOR}alice9${SEPARATOR}...`,
+  ])("throws FormatError on a malformed length prefix: %j", (malformed) => {
+    expect(() => visitKeyFromCanonicalString(malformed)).toThrow(FormatError);
+  });
+
+  it("throws FormatError on trailing data", () => {
+    const canonical = visitKeyToCanonicalString(
+      key("document", "doc1", "view", "user", "alice", "member"),
     );
 
-    expect(() => visitKeyFromCanonicalString(tooMany)).toThrow(FormatError);
+    expect(() => visitKeyFromCanonicalString(canonical + "x")).toThrow(FormatError);
+    expect(() => visitKeyFromCanonicalString(`${canonical}0${SEPARATOR}`)).toThrow(FormatError);
+  });
+
+  // BeneDB-only: the string is the visited-set identity here (see above), so a wider table of
+  // field characters is pinned to round-trip.
+  it.each([SEPARATOR, " ", ":", "#", ""])("round-trips a field containing %j", (char) => {
+    const original = visitKeyOf(
+      { objectType: "doc", objectId: `a${char}b`, relation: "viewer" },
+      { objectType: "user", objectId: "alice", relation: "..." },
+    );
+
+    expect(visitKeyFromCanonicalString(visitKeyToCanonicalString(original))).toEqual(original);
   });
 });
