@@ -1816,9 +1816,9 @@ describe("lookupResources", () => {
     expect(writer.collected[1]?.partialCaveatInfo).toBeUndefined();
   });
 
-  it("treats optional_limit == 0 as unlimited and emits NO cursors", async () => {
-    // SpiceDB disables cursors entirely when no limit is set, so `emitCursors = limit is not null`
-    // even though every item carries an after-result cursor.
+  it("treats optional_limit == 0 as unlimited and still emits every cursor", async () => {
+    // Like SpiceDB, every streamed item carries its after-result cursor whether or not a limit was
+    // set (spiceport#47), so an unlimited stream can be resumed from any item.
     const h = harness();
     h.reverseOps.resourceSteps = resourceSteps("doc1", "doc2", "doc3");
     const writer = new CollectingWriter<LookupResourcesResponse>();
@@ -1826,7 +1826,11 @@ describe("lookupResources", () => {
     await h.service.lookupResources(lookupRequest({ optionalLimit: 0 }), writer);
 
     expect(writer.collected).toHaveLength(3);
-    expect(writer.collected.every((r) => r.afterResultCursor === undefined)).toBe(true);
+    expect(writer.collected.map((r) => r.afterResultCursor)).toEqual([
+      { token: "after-doc1" },
+      { token: "after-doc2" },
+      { token: "after-doc3" },
+    ]);
     expect(h.reverseOps.lookupResourcesArgs[0]?.limit).toBeUndefined();
   });
 

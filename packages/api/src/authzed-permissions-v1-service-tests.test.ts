@@ -268,6 +268,32 @@ async function countStored(cluster: MeshTestCluster, resourceType: string): Prom
   return writer.collected.length;
 }
 
+const LookupSeed: readonly (readonly [res: string, rel: string, subj: string])[] = [
+  ["doc1", "viewer", "alice"],
+  ["doc2", "editor", "alice"],
+  ["doc3", "viewer", "bob"],
+  ["doc4", "viewer", "alice"],
+  ["doc5", "editor", "alice"],
+  ["doc6", "viewer", "alice"],
+  ["doc6", "editor", "alice"],
+  ["doc7", "viewer", "alice"],
+];
+
+function aliceViewLookup(cursor?: string): LookupResourcesRequest {
+  return LookupResourcesRequest.fromPartial({
+    consistency: { fullyConsistent: true },
+    resourceObjectType: "document",
+    permission: "view",
+    subject: userSubject("alice"),
+    optionalCursor: cursor === undefined ? undefined : { token: cursor },
+  });
+}
+
+/** `Order(StringComparer.Ordinal)`: an explicit code-unit comparator, never the locale default. */
+function ordinalSort(ids: readonly string[]): string[] {
+  return [...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
 /** The C#'s `FakeAsyncStreamReader<T>`: replays a fixed sequence of inbound messages. */
 async function* asyncStream<T>(...messages: readonly T[]): AsyncIterable<T> {
   for (const message of messages) yield message;
@@ -1694,6 +1720,111 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
       }
     } finally {
       await cluster.dispose();
+    }
+  });
+
+  it.each([true, false])(
+    "LookupResources without limit emits after result cursor on every item (walk %s)",
+    async (useMembershipWalk) => {
+      // spiceport#47: SpiceDB populates after_result_cursor on every streamed item whenever cursor
+      // sections exist, with no limit condition (internal/services/v1/permissions.go). An
+      // unlimited stream must be resumable from any item - on the Leopard path (walk on) as well
+      // as the live traversal.
+      const cluster = await MeshTestCluster.create(Schema, { useMembershipWalk });
+      try {
+        await seed(cluster.datastore, ...LookupSeed);
+
+        const writer = new CollectingStreamWriter<LookupResourcesResponse>();
+        await service(cluster).lookupResources(aliceViewLookup(), writer);
+
+        expect(writer.collected.length).toBeGreaterThan(0);
+        for (const r of writer.collected) expect(r.afterResultCursor?.token ?? "").not.toBe("");
+      } finally {
+        await cluster.dispose();
+      }
+    },
+  );
+
+  it.each([true, false])(
+    "LookupResources unlimited resume from mid stream cursor yields the remainder (walk %s)",
+    async (useMembershipWalk) => {
+      const cluster = await MeshTestCluster.create(Schema, { useMembershipWalk });
+      try {
+        await seed(cluster.datastore, ...LookupSeed);
+
+        const full = new CollectingStreamWriter<LookupResourcesResponse>();
+        await service(cluster).lookupResources(aliceViewLookup(), full);
+        const fullIds = new Set(full.collected.map((r) => r.resourceObjectId));
+        expect(ordinalSort([...fullIds])).toEqual(["doc1", "doc2", "doc4", "doc5", "doc6", "doc7"]);
+
+        for (let k = 1; k < full.collected.length; k++) {
+          const resumed = new CollectingStreamWriter<LookupResourcesResponse>();
+          await service(cluster).lookupResources(
+            aliceViewLookup(full.collected[k - 1]?.afterResultCursor?.token),
+            resumed,
+          );
+
+          const union = new Set([
+            ...full.collected.slice(0, k).map((r) => r.resourceObjectId),
+            ...resumed.collected.map((r) => r.resourceObjectId),
+          ]);
+          expect(ordinalSort([...union])).toEqual(ordinalSort([...fullIds]));
+
+          // Resuming never re-emits an item already delivered before the cursor (beyond the
+          // per-entrypoint repeats the live traversal emits within one stream).
+          for (const r of resumed.collected) {
+            expect(
+              full.collected.slice(k).some((f) => f.resourceObjectId === r.resourceObjectId),
+            ).toBe(true);
+          }
+        }
+      } finally {
+        await cluster.dispose();
+      }
+    },
+  );
+
+  it("LookupResources candidate cursor resumes when the walk declines on resume", async () => {
+    // A cursor minted on the Leopard path must stay resumable when the accelerator is unavailable
+    // on the resuming request (here: a cluster with the walk disabled, over the same data).
+    let cursor: string;
+    let firstIds: string[];
+    const walkOn = await MeshTestCluster.create(Schema, { useMembershipWalk: true });
+    try {
+      await seed(walkOn.datastore, ...LookupSeed);
+      const full = new CollectingStreamWriter<LookupResourcesResponse>();
+      await service(walkOn).lookupResources(aliceViewLookup(), full);
+      cursor = full.collected[2]?.afterResultCursor?.token ?? "";
+      firstIds = full.collected.slice(0, 3).map((r) => r.resourceObjectId);
+    } finally {
+      await walkOn.dispose();
+    }
+
+    // The stream came from the accelerator: its cursors are candidate-resume cursors. A BeneDB
+    // token prefixes its payload with the request-shape hash and a newline, so the C#'s
+    // `StartsWith("C:")` applies to the payload after that separator.
+    const decoded = Buffer.from(cursor, "base64").toString("utf8");
+    expect(decoded.slice(decoded.indexOf("\n") + 1)).toMatch(/^C:/);
+
+    const walkOff = await MeshTestCluster.create(Schema, { useMembershipWalk: false });
+    try {
+      await seed(walkOff.datastore, ...LookupSeed);
+      const resumed = new CollectingStreamWriter<LookupResourcesResponse>();
+      await service(walkOff).lookupResources(aliceViewLookup(cursor), resumed);
+
+      const resumedIds = resumed.collected.map((r) => r.resourceObjectId);
+      expect(resumedIds.filter((id) => firstIds.includes(id))).toEqual([]);
+      expect(ordinalSort([...firstIds, ...resumedIds])).toEqual([
+        "doc1",
+        "doc2",
+        "doc4",
+        "doc5",
+        "doc6",
+        "doc7",
+      ]);
+      for (const r of resumed.collected) expect(r.afterResultCursor?.token ?? "").not.toBe("");
+    } finally {
+      await walkOff.dispose();
     }
   });
 

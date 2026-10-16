@@ -463,14 +463,13 @@ export class AuthzedPermissionsV1Service {
     const consistency = toWireConsistency(request.consistency);
 
     // v1 contract: optional_limit (field 6) caps the resources returned; optional_cursor (field 7)
-    // resumes after a prior page. SpiceDB disables cursors entirely when no limit is set, so we
-    // only attach after_result_cursor when a limit was requested.
+    // resumes after a prior page. Like SpiceDB, every streamed item carries after_result_cursor
+    // whether or not a limit was set, so an unlimited stream can be resumed from any item.
     // `(int)request.OptionalLimit` on a proto uint32: C# is unchecked, so a value above
     // int.MaxValue WRAPS NEGATIVE. `| 0` is that same narrowing and is the identity for every
     // value a real client sends; without it the port would accept a 3-billion limit the C#
     // fast-fails on.
     const limit = request.optionalLimit === 0 ? undefined : request.optionalLimit | 0;
-    const emitCursors = limit !== undefined;
     const requestCursor = request.optionalCursor;
     const cursor =
       requestCursor !== undefined && !isNullOrEmpty(requestCursor.token)
@@ -495,9 +494,9 @@ export class AuthzedPermissionsV1Service {
 
     // One in-process stream. A limited request takes at most `limit` items then stops (the RPC
     // stream terminates; the client resumes via the last item's cursor). An unlimited request
-    // drains the whole reachable set. `limit` also drives the engine path: a limited walk is
-    // cursor-bearing (so every item has a resume cursor), an unlimited/cursorless walk may take
-    // the Leopard fast path.
+    // drains the whole reachable set. `limit` also drives the engine path: a limited walk runs the
+    // live traversal, an unlimited/cursorless walk may take the Leopard fast path; both give every
+    // item a resume cursor.
     let emitted = 0;
     try {
       for await (const r of this.#reverseOps.streamLookupResources(
@@ -524,7 +523,7 @@ export class AuthzedPermissionsV1Service {
             missingRequiredContext: [...r.permissionship.missingContextParams],
           };
         }
-        if (emitCursors && !isNullOrEmpty(r.afterResultCursor)) {
+        if (!isNullOrEmpty(r.afterResultCursor)) {
           response.afterResultCursor = { token: r.afterResultCursor as string };
         }
         await responseStream.write(response);

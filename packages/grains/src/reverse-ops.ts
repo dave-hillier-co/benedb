@@ -3,9 +3,11 @@ import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import { isPublicWildcard, type ObjectAndRelation } from "@benedb/core/object-and-relation";
 import type { SetOperationType } from "@benedb/core/userset-rewrite";
 import type { IDatastore } from "@benedb/datastore/i-datastore";
+import type { IGraphReader } from "@benedb/datastore/i-graph-reader";
 import { CaveatEvaluator } from "@benedb/engine/caveat-evaluator";
 import type { CaveatExpression } from "@benedb/engine/caveat-expression";
 import { ExpandEngine } from "@benedb/engine/expand-engine";
+import type { FoundResource } from "@benedb/engine/found-resource";
 import type { FoundSubject } from "@benedb/engine/found-subject";
 import { LookupResourcesEngine } from "@benedb/engine/lookup-resources-engine";
 import { LookupSubjectsEngine } from "@benedb/engine/lookup-subjects-engine";
@@ -25,10 +27,12 @@ import type { MembershipWalkOptions } from "./membership-walk-options";
 import {
   decodeLookupResourcesCursor,
   decodeSubjectId,
+  encodeCandidateResume,
   encodeLookupResourcesCursor,
   encodeSubjectId,
   requestShapeHashLookupResources,
   requestShapeHashLookupSubjects,
+  tryDecodeCandidateResume,
 } from "./reverse-ops-cursor-codec";
 import {
   caveatedPermissionship,
@@ -272,10 +276,11 @@ export class ReverseOps {
 
   /**
    * Streams the resources (of the requested type) on which the subject holds the permission, one at
-   * a time, each with the opaque cursor positioned immediately after it. When `limit` is set this
-   * runs the cursor-bearing live traversal (so every item carries a resume cursor); an unlimited,
-   * cursorless enumeration may take the Leopard fast path (a complete candidate set confirmed by
-   * Check). The caller applies any client limit by stopping.
+   * a time, each with the opaque cursor positioned immediately after it - on every path, limited or
+   * not, as SpiceDB does. When `limit` or an engine cursor is set this runs the live traversal,
+   * whose cursors are engine positions; an unlimited, cursorless enumeration may take the Leopard
+   * fast path (a complete candidate set confirmed by Check, streamed in ordinal id order), whose
+   * cursors are candidate-resume cursors. The caller applies any client limit by stopping.
    */
   async *streamLookupResources(
     args: LookupResourcesArgs,
@@ -295,17 +300,39 @@ export class ReverseOps {
       snapshot.reachabilityFirst,
     );
     const requestHash = requestShapeHashLookupResources(args, snapshot.schemaHash);
-    const startCursor = decodeLookupResourcesCursor(args.cursor, requestHash);
-
-    // A supplied client limit means the caller needs per-item resume cursors: pass the limit into
-    // the engine so it runs the cursor-bearing live traversal. A limit of ZERO or negative becomes
-    // UNLIMITED, not a zero-result read.
+    const reader = this.#readerSource.graphReaderAt(pinned.revision);
+    // A limit of ZERO or negative becomes UNLIMITED, not a zero-result read.
     const limit = args.limit !== undefined && args.limit > 0 ? args.limit : undefined;
 
-    // The Leopard accelerator (absent unless it decides this request is a fresh, unpaged
-    // enumeration of a covered shape). `hasCursorOrLimit` tests the DERIVED limit, so `limit = 0`
-    // does NOT block the fast path while a present cursor - including an EMPTY one, which is still
-    // `not null` in the C# - does.
+    // A candidate-resume cursor continues a stream the Leopard accelerator produced: that stream
+    // is the covered candidates in ordinal id order, so the resume re-derives the same ordered set
+    // and skips ids at or before the last one emitted. Any limit is applied by the caller stopping.
+    const lastCandidate = tryDecodeCandidateResume(args.cursor, requestHash);
+    if (lastCandidate !== undefined) {
+      yield* this.#candidateOrderedStream(
+        engine,
+        reader,
+        snapshot,
+        args,
+        pinned.revision,
+        pinned.now,
+        pinned.token,
+        requestHash,
+        lastCandidate,
+        signal,
+      );
+      return;
+    }
+
+    const startCursor = decodeLookupResourcesCursor(args.cursor, requestHash);
+
+    // A client limit or an engine cursor runs the cursor-bearing live traversal (a paged walk must
+    // resume where the engine left off). An unlimited, cursorless enumeration may take the Leopard
+    // accelerator (absent unless it decides this shape is covered): it dispatches the
+    // membership-walk grain mesh and confirms every candidate with Check, so verdicts are
+    // unchanged from the live traversal, and each item carries a candidate-resume cursor.
+    // `hasCursorOrLimit` tests the DERIVED limit, so `limit = 0` does NOT block the fast path while
+    // a present cursor - including an EMPTY one, which is still `not null` in the C# - does.
     const candidates = await acquireCoveredCandidates(
       this.#grainFactory,
       this.#membershipWalkOptions,
@@ -320,34 +347,181 @@ export class ReverseOps {
       signal,
     );
 
-    for await (const found of engine.lookupResourcesWithCandidates(
-      this.#readerSource.graphReaderAt(pinned.revision),
+    if (candidates !== undefined) {
+      yield* confirmCandidates(
+        engine,
+        reader,
+        args,
+        ordinalAfter(candidates, undefined),
+        pinned.now,
+        pinned.token,
+        requestHash,
+        signal,
+      );
+      return;
+    }
+
+    // The engine traversal reads through the IGraphReaderSource seam at the same pinned revision;
+    // token minting stays on pinRevision, schema resolution on the ISchemaSource seam, and cursor
+    // handling on the codec.
+    for await (const found of engine.lookupResources(
+      reader,
       args.subjectType,
       args.subjectId,
       args.subjectRelation,
       args.resourceType,
       args.permission,
-      candidates,
       args.context,
       pinned.now,
       startCursor,
       limit,
       signal,
     )) {
-      // Anything that is not caveated - including a non-member, which the engine never yields -
-      // becomes Member. The else arm is unconditional, not a third case.
-      const permissionship =
-        found.membership === "caveated"
-          ? caveatedPermissionship(found.missingContextParams)
-          : PERMISSIONSHIP_MEMBER;
       yield {
         resourceId: found.resourceId,
-        permissionship,
+        permissionship: toPermissionship(found),
         afterResultCursor: encodeLookupResourcesCursor(found.afterCursor, requestHash),
         lookedUpAtToken: pinned.token,
       };
     }
   }
+
+  /**
+   * Resumes a candidate-ordered stream after `lastCandidate`. The accelerator is asked again as
+   * for a fresh enumeration; if it declines (disabled, uncovered, or an incomplete walk), the live
+   * traversal is drained instead, deduplicated by resource id, and put in the same ordinal order,
+   * so the resume is positioned identically either way.
+   */
+  async *#candidateOrderedStream(
+    engine: LookupResourcesEngine,
+    reader: IGraphReader,
+    snapshot: SchemaSnapshot,
+    args: LookupResourcesArgs,
+    revision: IRevision,
+    now: bigint,
+    token: string,
+    requestHash: string,
+    lastCandidate: string,
+    signal: AbortSignal | undefined,
+  ): AsyncGenerator<FoundResourceWire> {
+    const candidates = await acquireCoveredCandidates(
+      this.#grainFactory,
+      this.#membershipWalkOptions,
+      snapshot,
+      args.subjectType,
+      args.subjectId,
+      args.subjectRelation,
+      args.resourceType,
+      args.permission,
+      revision,
+      false,
+      signal,
+    );
+
+    if (candidates !== undefined) {
+      yield* confirmCandidates(
+        engine,
+        reader,
+        args,
+        ordinalAfter(candidates, lastCandidate),
+        now,
+        token,
+        requestHash,
+        signal,
+      );
+      return;
+    }
+
+    // Live fallback: one result per resource id. A resource reached through several entrypoints
+    // is a member if any path makes it one; otherwise it keeps the first caveated result's missing
+    // params.
+    const byId = new Map<string, FoundResource>();
+    for await (const found of engine.lookupResources(
+      reader,
+      args.subjectType,
+      args.subjectId,
+      args.subjectRelation,
+      args.resourceType,
+      args.permission,
+      args.context,
+      now,
+      undefined,
+      undefined,
+      signal,
+    )) {
+      const existing = byId.get(found.resourceId);
+      if (
+        existing === undefined ||
+        (existing.membership !== "member" && found.membership === "member")
+      ) {
+        byId.set(found.resourceId, found);
+      }
+    }
+
+    for (const id of ordinalAfter(byId.keys(), lastCandidate)) {
+      signal?.throwIfAborted();
+      yield {
+        resourceId: id,
+        permissionship: toPermissionship(byId.get(id) as FoundResource),
+        afterResultCursor: encodeCandidateResume(id, requestHash),
+        lookedUpAtToken: token,
+      };
+    }
+  }
+}
+
+/** Confirms ordered covered candidates with Check, each item carrying a candidate-resume cursor. */
+async function* confirmCandidates(
+  engine: LookupResourcesEngine,
+  reader: IGraphReader,
+  args: LookupResourcesArgs,
+  orderedCandidates: readonly string[],
+  now: bigint,
+  token: string,
+  requestHash: string,
+  signal: AbortSignal | undefined,
+): AsyncGenerator<FoundResourceWire> {
+  for await (const found of engine.lookupResourcesWithCandidates(
+    reader,
+    args.subjectType,
+    args.subjectId,
+    args.subjectRelation,
+    args.resourceType,
+    args.permission,
+    orderedCandidates,
+    args.context,
+    now,
+    undefined,
+    undefined,
+    signal,
+  )) {
+    yield {
+      resourceId: found.resourceId,
+      permissionship: toPermissionship(found),
+      afterResultCursor: encodeCandidateResume(found.resourceId, requestHash),
+      lookedUpAtToken: token,
+    };
+  }
+}
+
+/**
+ * The distinct ids in ordinal order, keeping only those strictly after `after`. ORDINAL (UTF-16
+ * code units, `StringComparer.Ordinal`), never `localeCompare`.
+ */
+function ordinalAfter(ids: Iterable<string>, after: string | undefined): string[] {
+  return [...new Set(ids)]
+    .filter((id) => after === undefined || id > after)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * Anything that is not caveated - including a non-member, which the engine never yields - becomes
+ * Member. The else arm is unconditional, not a third case.
+ */
+function toPermissionship(found: FoundResource): FoundResourceWire["permissionship"] {
+  return found.membership === "caveated"
+    ? caveatedPermissionship(found.missingContextParams)
+    : PERMISSIONSHIP_MEMBER;
 }
 
 /** The `{ getGrain }` slice of Thresh's `GrainRuntime` standing in for `IGrainFactory`. */
