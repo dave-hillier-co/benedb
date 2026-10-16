@@ -691,6 +691,45 @@ describe("ReferenceDatastore reads and writes", () => {
     expect(remaining).toHaveLength(1);
   });
 
+  it("DeleteRelationships_ExactlyLimitMatches_ReportsLimitReached", async () => {
+    // SpiceDB's datastores report LimitReached when the deleted count equals the limit (memdb:
+    // `counter == limit`; postgres: `RowsAffected() == limit`), even if nothing is left behind.
+    const ds = new ReferenceDatastore();
+    await ds.readWriteTx(async (tx) => {
+      await tx.writeRelationships([
+        create(rel("document", "doc1", "viewer", "user", "alice")),
+        create(rel("document", "doc2", "viewer", "user", "bob")),
+      ]);
+    });
+
+    let deleteResult: DeleteRelationshipsResult | undefined;
+    const rev = await ds.readWriteTx(async (tx) => {
+      deleteResult = await tx.deleteRelationships({ optionalResourceType: "document" }, 2n);
+    });
+
+    expect(deleteResult?.count).toBe(2n);
+    expect(deleteResult?.reachedLimit).toBe(true);
+    expect(await collect(ds.snapshotReader(rev).queryRelationships({}))).toEqual([]);
+  });
+
+  it("reports a zero limit over matching rows as reached, as Spiceport's expression does", async () => {
+    // Not a C# test: it pins the `matched > limit` arm of Spiceport's `reachedLimit` expression,
+    // which a zero limit is the only way to reach without also deleting `limit` rows. The v1 API
+    // maps optional_limit 0 to "no limit", so this is a datastore-contract detail only.
+    const ds = new ReferenceDatastore();
+    await ds.readWriteTx(async (tx) => {
+      await tx.writeRelationships([create(rel("document", "doc1", "viewer", "user", "alice"))]);
+    });
+
+    let deleteResult: DeleteRelationshipsResult | undefined;
+    await ds.readWriteTx(async (tx) => {
+      deleteResult = await tx.deleteRelationships({ optionalResourceType: "document" }, 0n);
+    });
+
+    expect(deleteResult?.count).toBe(0n);
+    expect(deleteResult?.reachedLimit).toBe(true);
+  });
+
   it("writes and reads back the stored schema", async () => {
     const ds = new ReferenceDatastore();
     const schema = new TextEncoder().encode("definition user {}");

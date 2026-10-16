@@ -1241,6 +1241,33 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
         "found more than 2 relationships to be deleted and partial deletion was not requested",
       );
       expect(await countStored(cluster, "document")).toBe(3);
+
+      // Exactly at the limit, the transactional delete removes everything; like SpiceDB (whose
+      // datastores report LimitReached when the deleted count equals the limit) it reports PARTIAL.
+      const resp = await service(cluster).deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 3,
+        }),
+      );
+      expect(resp.relationshipsDeletedCount).toBe("3");
+      expect(resp.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_PARTIAL,
+      );
+      expect(await countStored(cluster, "document")).toBe(0);
+
+      // Under the limit it reports COMPLETE.
+      await seed(cluster.datastore, ["readme", "viewer", "alice"]);
+      const under = await service(cluster).deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: readmeFilter(),
+          optionalLimit: 3,
+        }),
+      );
+      expect(under.relationshipsDeletedCount).toBe("1");
+      expect(under.deletionProgress).toBe(
+        DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_COMPLETE,
+      );
     } finally {
       await cluster.dispose();
     }

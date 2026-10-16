@@ -218,14 +218,20 @@ export class MvccReadWriteTransaction implements IReadWriteTransaction {
         matched.push({ keyString, key: relationshipKeyOf(rel) });
     }
 
+    // As in SpiceDB's datastores (memdb `counter == limit`, postgres `RowsAffected() == limit`), the
+    // limit counts as reached whenever the deletion removed exactly `limit` rows, even when nothing
+    // was left behind: the API reports DELETION_PROGRESS_PARTIAL from this flag.
+    const reachedLimit =
+      limit !== undefined &&
+      (BigInt(matched.length) > limit || (limit > 0n && BigInt(matched.length) === limit));
     let toRemove = matched;
     if (limit !== undefined && BigInt(matched.length) > limit) {
       // The subset a truncating limit removes must be a pure function of the MATCHED SET, never of
       // the base state's internal row order: the sequencer's write path assembles its base from
       // per-key shard states (whose concatenation order differs from the reference model's
       // insertion order), and the fold-equivalence gates require both backends to delete the SAME
-      // rows. Order canonically by the full six-tuple identity before truncating. When the limit
-      // is not exceeded every match dies, so ordering is irrelevant and skipped.
+      // rows. Order canonically by the full six-tuple identity before truncating. When no more
+      // than `limit` rows match every match dies, so ordering is irrelevant and skipped.
       //
       // (.NET `Dictionary` enumeration order is unspecified and disturbed by removals while a JS
       // `Map` is insertion-ordered and stable across removals - a benign divergence, and exactly
@@ -235,12 +241,6 @@ export class MvccReadWriteTransaction implements IReadWriteTransaction {
       // used only for the slice, where the value is provably below `matched.length`.
       toRemove = matched.slice(0, Number(limit));
     }
-
-    // Upstream SpiceDB datastores report the limit as reached when the DELETED row count equals
-    // the limit (postgres readwrite.go: RowsAffected() == limit; memdb readwrite.go: counter ==
-    // limit) - NOT only when strictly more rows matched. So limit == matches deletes every match
-    // yet still reports reachedLimit, which the v1 API surfaces as DELETION_PROGRESS_PARTIAL.
-    const reachedLimit = limit !== undefined && limit > 0n && BigInt(toRemove.length) === limit;
 
     for (const entry of toRemove) this.remove(entry.keyString);
 
