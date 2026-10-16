@@ -123,7 +123,12 @@ empty store: silent data loss during normal operation, not merely non-durability
 Thresh refuses that at build, naming `THRESH_STORAGE_URL`, unless
 `THRESH_STORAGE_ALLOW_IN_MEMORY_CLUSTER=true` says out loud that the state is disposable. A durable
 backend also shares the reminder table across silos, so the datastore grain's `mvcc-gc` reminder
-fires on whichever silo owns it.
+fires on whichever silo owns it; under the in-memory opt-in each silo has its own table, and a
+reminder registered on a silo that does not own its range never fires.
+
+**The cluster view is static.** `Clustering:Silos` becomes a fixed membership view with no liveness:
+a silo that exits stays in its peers' views and calls routed to it hang rather than fail. Thresh
+refuses such a view unless the host acknowledges it, which the clustered path does.
 
 A clustered host binds a real WebSocket listener, so `ws` must be present at the deployment target
 (see the packaging note below about real npm packages being left external to the bundle).

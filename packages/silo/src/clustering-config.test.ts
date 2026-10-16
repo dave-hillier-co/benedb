@@ -269,6 +269,21 @@ describe("applyClustering", () => {
     expect(calls.find((call) => call.name === "useStaticMembership")?.args[0]).toEqual(silos);
   });
 
+  it("acknowledges that a clustered static view has no liveness, which Thresh refuses otherwise", () => {
+    // Thresh refuses a multi-silo static view at build unless the caller accepts that a departed
+    // silo stays in the view (dave-hillier-co/thresh#85). This cluster is static by design (port
+    // decision 4), so it says so rather than failing at build.
+    const local = addressFor("127.0.0.1:11112");
+    const silos = [addressFor("127.0.0.1:11111"), local];
+    const { builder, calls } = recordingBuilder(local);
+
+    applyClustering(builder, { kind: "clustered", local, silos });
+
+    expect(calls.find((call) => call.name === "useStaticMembership")?.args[2]).toEqual({
+      allowWithoutLiveness: true,
+    });
+  });
+
   it("rejects a resolved address that is not the one the silo was constructed with", () => {
     const { builder } = recordingBuilder(addressFor("127.0.0.1:11111"));
     const local = addressFor("127.0.0.1:11112");
