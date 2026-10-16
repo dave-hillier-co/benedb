@@ -1,3 +1,5 @@
+import { bytesEqual } from "./structural-equality";
+
 /**
  * Caveat definitions and their parameter type references.
  *
@@ -7,9 +9,9 @@
  * Port decisions:
  *   * `ChildTypes` is NULL for a scalar, not an empty list, and the DSL compiler's test asserts
  *     exactly that. `undefined` and `[]` stay distinct, in the data and in equality.
- *   * `byte[] SerializedExpression` becomes `Uint8Array`. As with `RelationshipIntegrity.hash`,
- *     C# record equality over `byte[]` is REFERENCE equality; this port compares content, because
- *     a compiled expression is a value.
+ *   * `byte[] SerializedExpression` becomes `Uint8Array`. Both records override their equality to
+ *     compare by content (child types element-wise, expression bytes and the parameter map by
+ *     value), and the two `...Equals` functions here are those overrides.
  *   * `ParameterTypes` is an `ImmutableDictionary` in C#, enumerated in HASH order. A `Map`
  *     preserves insertion order instead. That divergence is harmless only while nothing
  *     serializes or hashes the parameter list in enumeration order.
@@ -56,19 +58,19 @@ export function caveatTypeReferenceEquals(a: CaveatTypeReference, b: CaveatTypeR
   return true;
 }
 
-function expressionEquals(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
-
-/** Content equality over the name, the expression bytes and the parameter map. */
+/**
+ * Value equality, comparing the expression bytes and the parameter map by content rather than by
+ * array and map reference.
+ */
 export function caveatDefinitionEquals(a: CaveatDefinition, b: CaveatDefinition): boolean {
-  if (a.name !== b.name) return false;
-  if (!expressionEquals(a.serializedExpression, b.serializedExpression)) return false;
-  if (a.parameterTypes.size !== b.parameterTypes.size) return false;
+  if (a === b) return true;
+  if (
+    a.name !== b.name ||
+    !bytesEqual(a.serializedExpression, b.serializedExpression) ||
+    a.parameterTypes.size !== b.parameterTypes.size
+  ) {
+    return false;
+  }
   for (const [name, type] of a.parameterTypes) {
     const other = b.parameterTypes.get(name);
     if (other === undefined) return false;

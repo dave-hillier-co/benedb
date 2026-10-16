@@ -6,14 +6,9 @@ import { contextualizedCaveatEquals, type ContextualizedCaveat } from "./context
 //
 // Three port decisions, all deliberate, all pinned below:
 //
-// 1. EQUALITY IS DEEP, WHICH DIVERGES FROM C#. C# record equality on an
-//    `IReadOnlyDictionary<string, object?>` member is REFERENCE equality, so two caveats with
-//    equal-content but distinct dictionaries are unequal in Spiceport. TypeScript has no free
-//    record equality at all, so an explicit comparison has to be written either way; this port
-//    chooses content equality, because "same caveat name, same context values" is what every
-//    caller actually means and reference identity is an artifact of C# codegen. Relationship
-//    dedup in the datastore keys on resource+subject only (see `RelationshipKey`), so nothing
-//    downstream depends on the C# behaviour.
+// 1. EQUALITY IS DEEP. The C# record overrides `Equals` to compare `Context` by content
+//    (`StructuralEquality.ContextEqual`) rather than by dictionary reference. TypeScript has no
+//    free record equality at all, so `contextualizedCaveatEquals` is that override.
 //
 // 2. Context comparison ignores key ORDER: a JSON object is an unordered map. Key order is
 //    preserved only for byte-exact tuple-string formatting (see tuple-strings.test.ts), which

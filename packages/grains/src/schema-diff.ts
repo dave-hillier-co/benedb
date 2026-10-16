@@ -29,26 +29,24 @@ import type { CompiledSchema } from "@benedb/schema/compiled-schema";
  * this file - order is source/collection order, and the by-name maps are membership indexes only;
  * every iteration is over the LIST.
  *
- * Two deliberate divergences from the C#, both recorded here because a later reader will otherwise
- * read them as bugs:
+ * Notes on the C#, recorded here because a later reader will otherwise read them as bugs:
  *
- *   1. PARAMETER TYPE EQUALITY. The C# `nextType != existingType` is record equality, and
- *      `CaveatTypeReference.ChildTypes` is an `ImmutableList<CaveatTypeReference>?` whose `Equals`
- *      is REFERENCE-based - so C# reports two separately-compiled but structurally identical
- *      NESTED generic types as CHANGED. This port uses core's structural
- *      `caveatTypeReferenceEquals` (which also keeps `undefined` - a scalar - distinct from `[]`).
- *      That only ever removes a SPURIOUS rejection and never adds one.
- *   2. PARAMETER DELTA ORDER. `CaveatDefinition.ParameterTypes` is an `ImmutableDictionary` in C#,
+ *   1. PARAMETER TYPE EQUALITY. The C#'s `CaveatTypeEquals` delegates to `CaveatTypeReference`'s
+ *      own record equality, which compares `ChildTypes` element-wise and keeps a null list (a
+ *      scalar) distinct from an empty one. That is core's `caveatTypeReferenceEquals`, which the
+ *      port calls directly; the C#'s one-line static wrapper is not carried across. Not a
+ *      divergence.
+ *   2. PARAMETER DELTA ORDER (a divergence). `CaveatDefinition.ParameterTypes` is an `ImmutableDictionary` in C#,
  *      enumerated in HASH order; it is a `Map` here, enumerated in INSERTION order. For a caveat
  *      with more than one changed parameter the added/removed/type-changed deltas therefore come
  *      out in a different order from C#, and since `SchemaChangeValidator` throws on the FIRST
  *      failing check the rejection MESSAGE can differ. Reproducing .NET hash order is not
  *      attempted. Only the adds-before-the-rest GROUPING is portable, and that is preserved.
- *   3. REWRITE-CHILD OPERATION PATHS. The C# `ChildEquals` value-equality arm (`a == b`) is record
- *      equality over `SetOperationChild`, which carries an `ImmutableList<uint>? OperationPath`
- *      whose `Equals` is REFERENCE-based - the same artifact as divergence 1, one level down. core's
- *      `setOperationChildEquals` compares the path STRUCTURALLY. Like divergence 1 this can only
- *      remove a spurious `PermissionExprChanged`, never add one, and it is unreachable through
+ *   3. REWRITE-CHILD OPERATION PATHS (a divergence). The C# `ChildEquals` value-equality arm
+ *      (`a == b`) is record equality over `SetOperationChild`, which carries an
+ *      `ImmutableList<uint>? OperationPath` whose `Equals` is REFERENCE-based. core's
+ *      `setOperationChildEquals` compares the path STRUCTURALLY. This can only remove a spurious
+ *      `PermissionExprChanged`, never add one, and it is unreachable through
  *      `computeSchemaDiff` today: the schema compiler never populates `operationPath`, so both
  *      sides are always absent. It is reachable through the exported `rewriteEquals`.
  */
@@ -400,8 +398,8 @@ function diffCaveatParameters(
       continue;
     }
 
-    // DIVERGENCE 1 (see the module remark): the C#'s `nextType != existingType` is record
-    // equality, which is REFERENCE equality over the nested `ChildTypes` list.
+    // The C#'s `CaveatTypeEquals`, which delegates to the record's structural equality (see the
+    // module remark, note 1).
     if (!caveatTypeReferenceEquals(nextType, existingType)) {
       deltas.push({
         kind: "caveatParameterTypeChanged",
