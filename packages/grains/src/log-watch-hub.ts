@@ -121,30 +121,47 @@ export class LogWatchHub implements IDatastoreWatcher {
   }
 
   /**
-   * Applies `schemaBytes` to the live schema provider, monotonically: a `storedHash` already
-   * applied (by an earlier push or heartbeat) is a no-op, so a racing push and heartbeat repair can
-   * never double-apply or thrash. A poison schema cannot reach here in practice (it would have
-   * failed `writeSchema`'s own validation before ever committing), but the update can still throw -
-   * caught and logged so a bad push can never kill the heartbeat loop or this observer callback.
+   * Applies `schemaBytes` to the live schema provider, deduplicated by `storedHash`: a hash already
+   * applied successfully (by an earlier push or heartbeat) is a no-op, so a racing push and
+   * heartbeat repair do not re-apply a schema the silo already serves. The hash is recorded only
+   * AFTER the apply succeeds. The update can still throw (a poison schema cannot reach here in
+   * practice - it would have failed `writeSchema`'s own validation before ever committing - but a
+   * transient provider failure can); the failure is caught and logged so a bad push can never kill
+   * the heartbeat loop or this observer callback, and the hash is left unrecorded so the next push
+   * or heartbeat (`needsApply`) retries it. Recording it first would pin the silo on its stale
+   * schema until a DIFFERENT schema was written.
    *
-   * The hash is recorded BEFORE the apply runs, so a THROWING apply still marks it applied. That is
-   * deliberate - it stops a poison schema being retried forever - and is not to be "fixed" into a
-   * rollback.
+   * The dedup check, the apply and the record run as one step - the C#'s `_schemaApplyLock`. A push
+   * (observer callback) and a heartbeat repair (background loop) can race with different hashes; if
+   * their applies and records interleaved, the provider could end up holding one schema while the
+   * other's hash is recorded, and every later push or heartbeat of the recorded hash would be
+   * deduplicated away - pinning the silo on a stale schema. Serialized, the recorded hash always
+   * names the schema the provider holds, so a stale apply that lands last is just a mismatch the
+   * next heartbeat's hash comparison repairs. Here the lock COLLAPSES, as `_lock` does (see the
+   * class remarks): the callback is synchronous, so this whole method is one synchronous block with
+   * no await, and nothing can run between the check, the apply and the record. The C# keeps the
+   * lock separate from `_lock` so a slow compile never blocks head pulses; with no locks at all
+   * that distinction has no counterpart.
    */
   private applySchema(schemaBytes: Uint8Array, storedHash: string): void {
-    // The C# `lock` block: synchronous, no await.
+    // The C# `lock (_schemaApplyLock)` block: synchronous, no await - keep it that way.
     if (storedHash === this.lastAppliedSchemaHash) return;
-    this.lastAppliedSchemaHash = storedHash;
 
-    if (this.applySchemaCallback === undefined) return;
-
-    try {
-      // `Encoding.UTF8.GetString`. The bytes arrive as a Uint8Array through the observer argument,
-      // so a latin1/binary-string decode would mangle every multi-byte definition name.
-      this.applySchemaCallback(new TextDecoder("utf-8").decode(schemaBytes));
-    } catch (error) {
-      this.logger?.warn("Discarding schema apply: update failed", { storedHash, error });
+    if (this.applySchemaCallback !== undefined) {
+      try {
+        // `Encoding.UTF8.GetString`. The bytes arrive as a Uint8Array through the observer
+        // argument, so a latin1/binary-string decode would mangle every multi-byte definition name.
+        this.applySchemaCallback(new TextDecoder("utf-8").decode(schemaBytes));
+      } catch (error) {
+        this.logger?.warn("Schema apply failed; will retry on the next push or heartbeat", {
+          storedHash,
+          error,
+        });
+        return;
+      }
     }
+
+    this.lastAppliedSchemaHash = storedHash;
   }
 
   /** Registers the observer reference and starts the heartbeat loop on first use (idempotent). */
