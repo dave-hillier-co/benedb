@@ -102,6 +102,7 @@ import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
 import {
   validateCaveatContextSize,
+  validateDeleteRelationships,
   validateTransactionMetadataSize,
   validateWriteRelationships,
 } from "./request-limits";
@@ -394,6 +395,9 @@ export class AuthzedPermissionsV1Service {
   async deleteRelationships(
     request: DeleteRelationshipsRequest,
   ): Promise<DeleteRelationshipsResponse> {
+    // Reject a missing required filter as InvalidArgument before the wire mapping reads it.
+    validateDeleteRelationships(request);
+
     validateTransactionMetadataSize(request.optionalTransactionMetadata);
     validateLimit(request.optionalLimit, MAX_DELETE_RELATIONSHIPS_LIMIT);
 

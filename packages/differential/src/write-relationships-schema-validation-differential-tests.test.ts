@@ -5,7 +5,11 @@ import { RpcError } from "@benedb/api/rpc-error";
 import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import type { Relationship } from "@benedb/protos/authzed/api/v1/core";
 import { RelationshipUpdate_Operation } from "@benedb/protos/authzed/api/v1/core";
-import { WriteRelationshipsRequest } from "@benedb/protos/authzed/api/v1/permission_service";
+import {
+  DeleteRelationshipsRequest,
+  Precondition_Operation,
+  WriteRelationshipsRequest,
+} from "@benedb/protos/authzed/api/v1/permission_service";
 import { WriteSchemaRequest } from "@benedb/protos/authzed/api/v1/schema_service";
 
 import {
@@ -179,6 +183,52 @@ const Malformed: readonly (readonly [
   ],
 ];
 
+/**
+ * Requests missing a required filter (spiceport#54): a precondition with no `filter` on a write or
+ * a delete, and a delete with no `relationship_filter`. Each is sent to both servers.
+ */
+const MissingFilter: readonly (readonly [
+  name: string,
+  send: (target: {
+    writeRelationships(request: WriteRelationshipsRequest): Promise<unknown>;
+    deleteRelationships(request: DeleteRelationshipsRequest): Promise<unknown>;
+  }) => Promise<unknown>,
+])[] = [
+  [
+    "write_precondition_without_filter",
+    (target) =>
+      target.writeRelationships(
+        WriteRelationshipsRequest.fromPartial({
+          updates: [
+            {
+              operation: TOUCH,
+              relationship: {
+                resource: { objectType: "document", objectId: "d" },
+                relation: "viewer",
+                subject: { object: { objectType: "user", objectId: "a" }, optionalRelation: "" },
+              },
+            },
+          ],
+          optionalPreconditions: [{ operation: Precondition_Operation.OPERATION_MUST_MATCH }],
+        }),
+      ),
+  ],
+  [
+    "delete_without_relationship_filter",
+    (target) => target.deleteRelationships(DeleteRelationshipsRequest.fromPartial({})),
+  ],
+  [
+    "delete_precondition_without_filter",
+    (target) =>
+      target.deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document" },
+          optionalPreconditions: [{ operation: Precondition_Operation.OPERATION_MUST_MATCH }],
+        }),
+      ),
+  ],
+];
+
 interface Outcome {
   readonly code: number;
   readonly details: string;
@@ -259,6 +309,37 @@ describe.sequential("WriteRelationshipsSchemaValidationDifferentialTests", () =>
           cluster.schemaProvider,
         );
         expect(await outcome(service.writeRelationships(build()))).toEqual(spiceDb);
+      } finally {
+        await cluster.dispose();
+      }
+    });
+  }
+
+  for (const [name, send] of MissingFilter) {
+    it(`Missing required filter agrees with SpiceDB [${name}]`, async (ctx) => {
+      ctx.skip(!spiceDbAvailable, spiceDbSkipReason);
+
+      let spiceDb: Outcome;
+      const spiceDbClient = new SpiceDbGrpcClient(fixture().address, fixture().preSharedKey);
+      try {
+        await resetSpiceDb(spiceDbClient);
+        await spiceDbClient.writeSchema(WriteSchemaRequest.fromPartial({ schema: Schema }));
+        spiceDb = await outcome(send(spiceDbClient));
+        expect(spiceDb.code).toBe(status.INVALID_ARGUMENT);
+      } finally {
+        spiceDbClient.close();
+      }
+
+      const cluster = await MeshTestCluster.create(Schema);
+      try {
+        const service = new AuthzedPermissionsV1Service(
+          cluster.checker,
+          cluster.grainFactory,
+          cluster.reverseOps,
+          cluster.relationshipReads,
+          cluster.schemaProvider,
+        );
+        expect(await outcome(send(service))).toEqual(spiceDb);
       } finally {
         await cluster.dispose();
       }
