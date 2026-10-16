@@ -1,14 +1,18 @@
+import { status } from "@grpc/grpc-js";
 import { ELLIPSIS } from "@benedb/core/core-constants";
 import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
 import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import type { RelationshipUpdateWire } from "@benedb/grains/relationships-dtos";
 import { RelationshipUpdate_Operation } from "@benedb/protos/authzed/api/v1/core";
+import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
+import { RelationshipFilter as RelationshipFilterMessage } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { WatchRequest, WatchResponse } from "@benedb/protos/authzed/api/v1/watch_service";
 import { WatchKind } from "@benedb/protos/authzed/api/v1/watch_service";
 import { describe, expect, it } from "vitest";
 
 import { AuthzedWatchV1Service } from "./authzed-watch-v1-service";
 import { CollectingStreamWriter } from "./collecting-stream-writer";
+import { RpcError } from "./rpc-error";
 
 /**
  * Ported from Spiceport `tests/Spiceport.Grains.Tests/AuthzedWatchV1ServiceTests.cs`.
@@ -16,7 +20,9 @@ import { CollectingStreamWriter } from "./collecting-stream-writer";
  * Drives the server-streaming `authzed.api.v1` {@link AuthzedWatchV1Service} IN-PROCESS (no listener,
  * no socket). Verifies: tailing from head sees a subsequent write with its `changes_through` token;
  * resuming from a pre-write token replays the write exactly once; cancellation terminates the stream
- * cleanly; the `optional_object_types` filter excludes updates of other resource types; and the two
+ * cleanly; the `optional_object_types` filter excludes updates of other resource types;
+ * `optional_relationship_filters` emit only updates matching any filter, cannot be combined with
+ * `optional_object_types`, and are validated in upstream's order; and the two
  * checkpoint cases - a content response followed by a checkpoint, and a checkpoint STILL emitted when
  * the object-type filter excludes the change.
  *
@@ -38,6 +44,9 @@ import { CollectingStreamWriter } from "./collecting-stream-writer";
  *    an aborted watch that rejected with an AbortError would be a service defect, not a test detail.
  *  - `ZedTokens.FromRevision` is `zedTokenFromRevision` from `@benedb/core/zed-tokens`.
  *  - `await using var cluster` becomes an explicit `try { ... } finally { await cluster.dispose(); }`.
+ *  - `Assert.ThrowsAsync<RpcException>` with `ex.StatusCode` / `ex.Status.Detail` becomes
+ *    `rpcErrorFrom` with the {@link RpcError}'s `code` / `details`; the `InvalidFilters` theory is
+ *    an `it.each` table.
  *
  * The checkpoints-ONLY case (spiceport#43) and the expiration round trip (spiceport#39) are both
  * pinned below, following the source's fixes (`21dc4d3`, `ad647b4`).
@@ -113,6 +122,96 @@ function watchRequest(fields: Partial<WatchRequest> = {}): WatchRequest {
     ...fields,
   };
 }
+
+/** A v1 relationship filter with every field the C# leaves at its proto default filled in. */
+function relFilter(
+  overrides: Parameters<typeof RelationshipFilterMessage.fromPartial>[0],
+): RelationshipFilter {
+  return RelationshipFilterMessage.fromPartial(overrides);
+}
+
+/** The C#'s `Assert.ThrowsAsync<RpcException>`. */
+async function rpcErrorFrom(promise: Promise<unknown>): Promise<RpcError> {
+  try {
+    await promise;
+  } catch (thrown) {
+    expect(thrown).toBeInstanceOf(RpcError);
+    return thrown as RpcError;
+  }
+  throw new Error("expected an RpcError, but the call succeeded");
+}
+
+const GroupSchema = `definition user {}
+definition group {
+    relation member: user
+}
+definition document {
+    relation viewer: user | group | group#member
+    permission view = viewer
+}`;
+
+/** `WriteGroupViewer(cluster, id, group, subjectRelation)`. */
+function writeGroupViewer(
+  cluster: MeshTestCluster,
+  id: string,
+  group: string,
+  subjectRelation: string,
+): Promise<unknown> {
+  const update: RelationshipUpdateWire = {
+    operation: "touch",
+    relationship: {
+      resourceType: "document",
+      resourceId: id,
+      resourceRelation: "viewer",
+      subjectType: "group",
+      subjectId: group,
+      subjectRelation,
+    },
+  };
+  return cluster.relationships.writeRelationships({ updates: [update] });
+}
+
+/** `InvalidFilters()`: the filter, the expected status and the expected detail, verbatim. */
+const invalidFilters: ReadonlyArray<readonly [string, RelationshipFilter, status, string]> = [
+  [
+    "empty",
+    relFilter({}),
+    status.INVALID_ARGUMENT,
+    "the relationship filter provided is not valid: at least one field must be set",
+  ],
+  [
+    "id and prefix",
+    relFilter({ resourceType: "document", optionalResourceId: "d", optionalResourceIdPrefix: "d" }),
+    status.INVALID_ARGUMENT,
+    "the relationship filter provided is not valid: resource_id and resource_id_prefix cannot be set at the same time",
+  ],
+  [
+    "unknown resource type",
+    relFilter({ resourceType: "nope" }),
+    status.FAILED_PRECONDITION,
+    "object definition `nope` not found",
+  ],
+  [
+    "unknown resource relation",
+    relFilter({ resourceType: "document", optionalRelation: "nope" }),
+    status.FAILED_PRECONDITION,
+    "relation/permission `nope` not found under definition `document`",
+  ],
+  [
+    "unknown subject type",
+    relFilter({ optionalSubjectFilter: { subjectType: "nope" } }),
+    status.FAILED_PRECONDITION,
+    "object definition `nope` not found",
+  ],
+  [
+    "unknown subject relation",
+    relFilter({
+      optionalSubjectFilter: { subjectType: "group", optionalRelation: { relation: "nope" } },
+    }),
+    status.FAILED_PRECONDITION,
+    "relation/permission `nope` not found under definition `group`",
+  ],
+];
 
 describe("AuthzedWatchV1ServiceTests", () => {
   it("Watch_from_head_sees_subsequent_write_with_token", async () => {
@@ -255,6 +354,238 @@ describe("AuthzedWatchV1ServiceTests", () => {
       await cluster.dispose();
     }
   }, 60_000);
+
+  it("Watch_with_relationship_filter_emits_only_matching_updates", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+
+      const request = watchRequest({
+        optionalRelationshipFilters: [
+          relFilter({
+            resourceType: "document",
+            optionalRelation: "viewer",
+            optionalSubjectFilter: { subjectType: "user", optionalSubjectId: "alice" },
+          }),
+        ],
+      });
+      const watchTask = svc.watch(request, writer, controller.signal);
+
+      // Same resource type and relation, but a different subject: filtered out server-side.
+      await writeViewer(cluster, "document", "doc1", "bob");
+      await writeViewer(cluster, "document", "doc2", "alice");
+
+      const response = await writer.waitForNext(10_000, watchTask);
+      controller.abort();
+      await watchTask;
+
+      expect(response.updates.length).toBe(1);
+      const update = response.updates[0]!;
+      expect(update.relationship?.resource?.objectId).toBe("doc2");
+      expect(update.relationship?.subject?.object?.objectId).toBe("alice");
+      for (const r of writer.collected) {
+        for (const u of r.updates) {
+          expect(u.relationship?.subject?.object?.objectId).toBe("alice");
+        }
+      }
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  it("Watch_with_multiple_relationship_filters_emits_updates_matching_any", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+
+      const request = watchRequest({
+        optionalRelationshipFilters: [
+          relFilter({ resourceType: "document", optionalResourceId: "doc1" }),
+          relFilter({ resourceType: "folder", optionalResourceIdPrefix: "f" }),
+        ],
+      });
+      const watchTask = svc.watch(request, writer, controller.signal);
+
+      // doc2 matches neither filter; f1 matches the second; doc1 matches the first.
+      await writeViewer(cluster, "document", "doc2", "alice");
+      await writeViewer(cluster, "folder", "f1", "alice");
+      await writeViewer(cluster, "document", "doc1", "alice");
+
+      const first = await writer.waitForNext(10_000, watchTask);
+      const second = await writer.waitForNext(10_000, watchTask);
+      controller.abort();
+      await watchTask;
+
+      expect(first.updates.map((u) => u.relationship?.resource?.objectId)).toEqual(["f1"]);
+      expect(second.updates.map((u) => u.relationship?.resource?.objectId)).toEqual(["doc1"]);
+      for (const r of writer.collected) {
+        for (const u of r.updates) {
+          expect(u.relationship?.resource?.objectId).not.toBe("doc2");
+        }
+      }
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  it("Watch_with_both_object_types_and_relationship_filters_is_invalid_argument", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+
+      const request = watchRequest({
+        optionalObjectTypes: ["document"],
+        optionalRelationshipFilters: [relFilter({ resourceType: "document" })],
+      });
+
+      const error = await rpcErrorFrom(svc.watch(request, writer, controller.signal));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("cannot specify both object types and relationship filters");
+      expect(writer.collected).toEqual([]);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  it("Watch_with_empty_subject_relation_emits_only_ellipsis_subjects", async () => {
+    const cluster = await MeshTestCluster.create(GroupSchema);
+    try {
+      const svc = service(cluster);
+
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+
+      // A present-but-empty optional_relation selects only ellipsis subjects, as upstream's
+      // RelationshipsFilterFromPublicFilter does (WithEllipsisRelation).
+      const request = watchRequest({
+        optionalRelationshipFilters: [
+          relFilter({
+            optionalSubjectFilter: { subjectType: "group", optionalRelation: { relation: "" } },
+          }),
+        ],
+      });
+      const watchTask = svc.watch(request, writer, controller.signal);
+
+      await writeGroupViewer(cluster, "doc1", "eng", "member");
+      await writeGroupViewer(cluster, "doc2", "eng", ELLIPSIS);
+
+      const response = await writer.waitForNext(10_000, watchTask);
+      controller.abort();
+      await watchTask;
+
+      expect(response.updates.length).toBe(1);
+      const update = response.updates[0]!;
+      expect(update.relationship?.resource?.objectId).toBe("doc2");
+      expect(update.relationship?.subject?.optionalRelation).toBe("");
+      for (const r of writer.collected) {
+        for (const u of r.updates) {
+          expect(u.relationship?.resource?.objectId).not.toBe("doc1");
+        }
+      }
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  it("Watch_with_named_subject_relation_emits_only_that_relation", async () => {
+    const cluster = await MeshTestCluster.create(GroupSchema);
+    try {
+      const svc = service(cluster);
+
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+
+      const request = watchRequest({
+        optionalRelationshipFilters: [
+          relFilter({
+            optionalSubjectFilter: {
+              subjectType: "group",
+              optionalRelation: { relation: "member" },
+            },
+          }),
+        ],
+      });
+      const watchTask = svc.watch(request, writer, controller.signal);
+
+      await writeGroupViewer(cluster, "doc1", "eng", ELLIPSIS);
+      await writeGroupViewer(cluster, "doc2", "eng", "member");
+
+      const response = await writer.waitForNext(10_000, watchTask);
+      controller.abort();
+      await watchTask;
+
+      expect(response.updates.length).toBe(1);
+      const update = response.updates[0]!;
+      expect(update.relationship?.resource?.objectId).toBe("doc2");
+      expect(update.relationship?.subject?.optionalRelation).toBe("member");
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  it("Watch_with_absent_subject_relation_emits_any_subject_relation", async () => {
+    const cluster = await MeshTestCluster.create(GroupSchema);
+    try {
+      const svc = service(cluster);
+
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+
+      const request = watchRequest({
+        optionalRelationshipFilters: [
+          relFilter({ optionalSubjectFilter: { subjectType: "group" } }),
+        ],
+      });
+      const watchTask = svc.watch(request, writer, controller.signal);
+
+      await writeGroupViewer(cluster, "doc1", "eng", "member");
+      await writeGroupViewer(cluster, "doc2", "eng", ELLIPSIS);
+
+      const first = await writer.waitForNext(10_000, watchTask);
+      const second = await writer.waitForNext(10_000, watchTask);
+      controller.abort();
+      await watchTask;
+
+      expect(first.updates.map((u) => u.relationship?.resource?.objectId)).toEqual(["doc1"]);
+      expect(second.updates.map((u) => u.relationship?.resource?.objectId)).toEqual(["doc2"]);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  it.each(invalidFilters)(
+    "Watch_with_invalid_relationship_filter_is_rejected (%s)",
+    async (_name, filter, expectedCode, expectedDetail) => {
+      const cluster = await MeshTestCluster.create(GroupSchema);
+      try {
+        const svc = service(cluster);
+
+        const controller = new AbortController();
+        const writer = new CollectingStreamWriter<WatchResponse>();
+
+        const request = watchRequest({ optionalRelationshipFilters: [filter] });
+
+        const error = await rpcErrorFrom(svc.watch(request, writer, controller.signal));
+
+        expect(error.code).toBe(expectedCode);
+        expect(error.details).toBe(expectedDetail);
+        expect(writer.collected).toEqual([]);
+      } finally {
+        await cluster.dispose();
+      }
+    },
+    60_000,
+  );
 
   it("Watch_with_checkpoints_emits_a_checkpoint_response_after_a_change", async () => {
     const cluster = await MeshTestCluster.create(SchemaText);

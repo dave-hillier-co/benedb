@@ -5,7 +5,11 @@ import {
   type Relationship,
   type RelationshipUpdate,
 } from "@benedb/protos/authzed/api/v1/core";
-import type { WriteRelationshipsRequest } from "@benedb/protos/authzed/api/v1/permission_service";
+import type {
+  DeleteRelationshipsRequest,
+  Precondition,
+  WriteRelationshipsRequest,
+} from "@benedb/protos/authzed/api/v1/permission_service";
 import { Struct } from "@benedb/protos/google/protobuf/struct";
 
 import { RpcError } from "./rpc-error";
@@ -55,7 +59,8 @@ export const MAX_TRANSACTION_METADATA_SIZE = 65_000;
  * `INVALID_ARGUMENT` for: more than {@link MAX_UPDATES_PER_WRITE} updates
  * (ERROR_REASON_TOO_MANY_UPDATES_IN_REQUEST), more than {@link MAX_PRECONDITIONS_COUNT}
  * preconditions, a missing `relationship`/`relationship.resource`/`relationship.subject`/
- * `relationship.subject.object` submessage, a relationship appearing in more than one update
+ * `relationship.subject.object` submessage or precondition `filter`, a relationship appearing in
+ * more than one update
  * (NewDuplicateRelationshipErr), or a per-relationship caveat context larger than
  * {@link MAX_RELATIONSHIP_CONTEXT_SIZE} bytes. Mirrors SpiceDB's `WriteRelationships` validation.
  */
@@ -63,6 +68,7 @@ export function validateWriteRelationships(request: WriteRelationshipsRequest): 
   // SpiceDB validates the request message (protoc-gen-validate) before its handler runs, so a
   // missing required submessage is reported ahead of the update-count and precondition limits.
   const relationships = request.updates.map(requireRelationshipShape);
+  requirePreconditionFilters(request.optionalPreconditions, "WriteRelationshipsRequest");
 
   // The handler then checks the metadata size ahead of the update and precondition limits.
   validateTransactionMetadataSize(request.optionalTransactionMetadata);
@@ -172,6 +178,40 @@ function requireRelationshipShape(update: RelationshipUpdate, index: number): Sh
     );
 
   return relationship as ShapedRelationship;
+}
+
+/**
+ * Validates the shape of a `DeleteRelationships` request: its `relationship_filter` and every
+ * precondition's `filter` are required by the `authzed.api.v1` protos. SpiceDB rejects a missing
+ * one with INVALID_ARGUMENT in its request validation before the handler runs; without this guard
+ * the wire mapping would read the absent filter as an empty one.
+ */
+export function validateDeleteRelationships(request: DeleteRelationshipsRequest): void {
+  if (request.relationshipFilter === undefined)
+    throw new RpcError(
+      status.INVALID_ARGUMENT,
+      "invalid DeleteRelationshipsRequest.RelationshipFilter: value is required",
+    );
+  requirePreconditionFilters(request.optionalPreconditions, "DeleteRelationshipsRequest");
+}
+
+/**
+ * Rejects the first precondition with no `filter`, in the protoc-gen-validate text SpiceDB returns
+ * for the repeated `optional_preconditions` field of `requestName`. Shared by the write and delete
+ * guards, as the C#'s `AddMissingPreconditionFilters` is.
+ */
+function requirePreconditionFilters(
+  preconditions: readonly Precondition[],
+  requestName: string,
+): void {
+  preconditions.forEach((precondition, index) => {
+    if (precondition.filter === undefined)
+      throw new RpcError(
+        status.INVALID_ARGUMENT,
+        `invalid ${requestName}.OptionalPreconditions[${index}]: ${EMBEDDED}` +
+          "invalid Precondition.Filter: value is required",
+      );
+  });
 }
 
 /**

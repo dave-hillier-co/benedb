@@ -137,10 +137,11 @@ export interface WriteRelationshipsReply {
 
 /**
  * Arguments for `IRelationshipsGrain.deleteRelationships`. When `optionalLimit` is set and
- * `allowPartialDeletions` is false (the RPC default - absent means false, the C#'s constructor
- * default), a filter matching MORE rows than the limit rejects the whole delete
- * (`DeleteLimitExceededException`) with nothing applied; true deletes up to the limit and reports
- * it via `DeleteRelationshipsReply.reachedLimit`.
+ * `rejectOverLimit` is true (the v1 front door sets it for a limit without
+ * optional_allow_partial_deletions), a filter matching MORE rows than the limit rejects the whole
+ * delete (`DeleteLimitExceededException`) with nothing applied; absent or false (the C#'s
+ * constructor default) deletes up to the limit and reports it via
+ * `DeleteRelationshipsReply.reachedLimit`.
  */
 export interface DeleteRelationshipsArgs {
   /** The filter naming the rows to close. */
@@ -149,8 +150,8 @@ export interface DeleteRelationshipsArgs {
   readonly optionalLimit?: bigint | undefined;
   /** The preconditions, or absent for none. */
   readonly preconditions?: readonly PreconditionWire[] | undefined;
-  /** Whether a limited delete may truncate rather than reject; absent means false. */
-  readonly allowPartialDeletions?: boolean | undefined;
+  /** Whether more than `optionalLimit` matches rejects the delete; absent means false. */
+  readonly rejectOverLimit?: boolean | undefined;
   /**
    * Optional caller-supplied transaction metadata (SpiceDB's `optional_transaction_metadata`),
    * carried through to the committed revision's log event and echoed by Watch. Absent means none

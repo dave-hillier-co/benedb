@@ -232,6 +232,11 @@ function invalidSubjectType(
     `\`${resource.objectType}#${resource.relation}\``;
 
   // An uncaveated subject where only caveated forms of the same subject type are allowed.
+  // Deliberately NOT transliterated from Spiceport's `InvalidSubjectType`, which compares
+  // `a.RelationName ?? Ellipsis` and so also lists the caveats of a WILDCARD allowed type when a
+  // concrete subject is written; SpiceDB compares `allowedType.GetRelation()`, which is empty for
+  // a wildcard, so wildcard caveats never appear in this hint. This copy follows SpiceDB, as the
+  // differential suite pins.
   if (rel.optionalCaveat === undefined) {
     const caveats: string[] = [];
     for (const a of allowed) {

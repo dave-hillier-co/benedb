@@ -23,8 +23,8 @@ import { LogWatchHub } from "./log-watch-hub";
  * `Stage3WatchOverLogTests` / `Stage3WatchPushMeshTests` (a later batch) and incidentally by
  * `GrainBackedDatastoreWriteBaseTests`, which constructs one and never starts it. Until those land
  * this file is the hub's only gate, so it pins the behaviour the C# actually has - the signal
- * swap order, the monotonic pulse, the four-jobs-in-one-hop heartbeat, the deliberate
- * hash-before-apply ordering, and the swallow-never-throw teardown - rather than any particular
+ * swap order, the monotonic pulse, the four-jobs-in-one-hop heartbeat, the record-after-apply
+ * schema dedup, and the swallow-never-throw teardown - rather than any particular
  * implementation of them.
  *
  * Port decisions this file pins deliberately:
@@ -341,20 +341,21 @@ describe("LogWatchHub", () => {
       await hub.dispose();
     });
 
-    it("marksAThrowingApplyAsAppliedAndSwallowsTheFailure", async () => {
+    it("leavesAThrowingApplyUnrecordedAndSwallowsTheFailure", async () => {
       let calls = 0;
       const hub = newHub(() => {
         calls += 1;
-        throw new Error("poison schema");
+        throw new Error("transient provider failure");
       });
 
-      // DELIBERATE, not a bug to "fix" into a rollback: the hash is recorded BEFORE the apply runs,
-      // so a poison schema is never retried forever. The failure is logged and swallowed, so a bad
-      // push can never kill this observer callback or the heartbeat loop.
+      // The hash is recorded only AFTER the apply succeeds, so a failed apply is retried by the
+      // next push of the same hash rather than pinning the silo on its stale schema. The failure is
+      // logged and swallowed, so a bad push can never kill this observer callback or the heartbeat
+      // loop.
       await expect(hub.schemaAdvanced(utf8.encode("bad"), "hash-1")).resolves.toBeUndefined();
-      await hub.schemaAdvanced(utf8.encode("bad"), "hash-1");
+      await expect(hub.schemaAdvanced(utf8.encode("bad"), "hash-1")).resolves.toBeUndefined();
 
-      expect(calls).toBe(1);
+      expect(calls).toBe(2);
       await hub.dispose();
     });
   });
@@ -469,8 +470,9 @@ describe("LogWatchHub", () => {
     });
 
     it("recordsTheAppliedHashEvenWithNoApplySchemaCallback", async () => {
-      // `applySchema` is optional (a hub built only to observe head advances). The hash is still
-      // recorded before the null check, so the cheap pre-check stops fetching after the first hop.
+      // `applySchema` is optional (a hub built only to observe head advances). With no callback
+      // there is nothing to fail, so the hash is still recorded and the cheap pre-check stops
+      // fetching after the first hop.
       const hub = newHub();
       grain.head = { head: 7n, schemaHash: "hash-1", gcFloor: 0n };
       grain.schemaBytes = utf8.encode("definition user {}");

@@ -86,6 +86,10 @@ import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { describe, expect, it } from "vitest";
 
 import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
+import {
+  encodeReadRelationshipsCursor,
+  readRelationshipsRequestHash,
+} from "./read-relationships-cursor";
 import { RpcError } from "./rpc-error";
 import type { ServerStreamWriter } from "./server-stream-writer";
 
@@ -1203,11 +1207,11 @@ describe("readRelationships", () => {
       { kind: "item", item: streamItem("doc2", "c2", "read-token") },
     ];
     const writer = new CollectingWriter<ReadRelationshipsResponse>();
+    const request = ReadRelationshipsRequest.fromPartial({
+      relationshipFilter: { resourceType: "document" },
+    });
 
-    await h.service.readRelationships(
-      ReadRelationshipsRequest.fromPartial({ relationshipFilter: { resourceType: "document" } }),
-      writer,
-    );
+    await h.service.readRelationships(request, writer);
 
     expect(writer.collected).toHaveLength(2);
     expect(writer.collected.map((r) => r.relationship?.resource?.objectId)).toEqual([
@@ -1218,8 +1222,13 @@ describe("readRelationships", () => {
       { token: "read-token" },
       { token: "read-token" },
     ]);
-    // The C# never sets after_result_cursor on this RPC.
-    expect(writer.collected[0]?.afterResultCursor).toBeUndefined();
+    // Every item carries its resume cursor as an opaque after_result_cursor bound to the request,
+    // as SpiceDB's do.
+    const requestHash = readRelationshipsRequestHash(request);
+    expect(writer.collected.map((r) => r.afterResultCursor)).toEqual([
+      { token: encodeReadRelationshipsCursor(requestHash, "c1") },
+      { token: encodeReadRelationshipsCursor(requestHash, "c2") },
+    ]);
   });
 
   it("renders an ellipsis subject relation as the empty string and populates optional_expires_at", async () => {
@@ -1374,24 +1383,26 @@ describe("readRelationships", () => {
     expect(h.reads.readArgs[1]?.filter).toEqual({ ...allAbsent, resourceType: "document" });
   });
 
-  it("passes NO limit and NO cursor to the read, whatever the request asked for", async () => {
-    // `new ReadRelationshipsArgs(filter, null, null, consistency)`: the v1 request's
-    // optional_limit and optional_cursor are read from the wire and then discarded.
+  it("passes the request's limit and cursor to the read", async () => {
+    // `new ReadRelationshipsArgs(filter, limit, cursor, consistency)`: optional_limit and
+    // optional_cursor page the read, as SpiceDB's do. The cursor reaches the read as the decoded
+    // resume tuple.
     const h = harness();
     const writer = new CollectingWriter<ReadRelationshipsResponse>();
+    const request = ReadRelationshipsRequest.fromPartial({
+      relationshipFilter: { resourceType: "document" },
+      optionalLimit: 5,
+      consistency: { atLeastAsFresh: { token: "zt" } },
+    });
+    const resumeTuple = "document:doc1#viewer@user:alice";
+    request.optionalCursor = {
+      token: encodeReadRelationshipsCursor(readRelationshipsRequestHash(request), resumeTuple),
+    };
 
-    await h.service.readRelationships(
-      ReadRelationshipsRequest.fromPartial({
-        relationshipFilter: { resourceType: "document" },
-        optionalLimit: 5,
-        optionalCursor: { token: "resume-here" },
-        consistency: { atLeastAsFresh: { token: "zt" } },
-      }),
-      writer,
-    );
+    await h.service.readRelationships(request, writer);
 
-    expect(h.reads.readArgs[0]?.limit).toBeUndefined();
-    expect(h.reads.readArgs[0]?.cursor).toBeUndefined();
+    expect(h.reads.readArgs[0]?.limit).toBe(5);
+    expect(h.reads.readArgs[0]?.cursor).toBe(resumeTuple);
     expect(h.reads.readArgs[0]?.consistency).toEqual({ mode: "atLeastAsFresh", token: "zt" });
   });
 
@@ -1488,7 +1499,7 @@ describe("deleteRelationships", () => {
       DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_PARTIAL,
     );
     expect(h.grain.deleteArgs[0]?.optionalLimit).toBe(10n);
-    expect(h.grain.deleteArgs[0]?.allowPartialDeletions).toBe(true);
+    expect(h.grain.deleteArgs[0]?.rejectOverLimit).toBe(false);
     expect(h.grain.deleteArgs[0]?.filter.resourceIds).toEqual(["readme"]);
   });
 
@@ -1539,9 +1550,9 @@ describe("deleteRelationships", () => {
     expect(response.deletionProgress).toBe(
       DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_COMPLETE,
     );
-    // optional_limit 0 and optional_allow_partial_deletions default: absent limit, allow-partial false.
+    // optional_limit 0: an absent limit, so there is nothing to reject over.
     expect(h.grain.deleteArgs[0]?.optionalLimit).toBeUndefined();
-    expect(h.grain.deleteArgs[0]?.allowPartialDeletions).toBe(false);
+    expect(h.grain.deleteArgs[0]?.rejectOverLimit).toBe(false);
 
     // More rows matched than optional_limit with partial deletions disallowed: SpiceDB's
     // CouldNotTransactionallyDeleteError -> InvalidArgument.
@@ -1816,9 +1827,9 @@ describe("lookupResources", () => {
     expect(writer.collected[1]?.partialCaveatInfo).toBeUndefined();
   });
 
-  it("treats optional_limit == 0 as unlimited and emits NO cursors", async () => {
-    // SpiceDB disables cursors entirely when no limit is set, so `emitCursors = limit is not null`
-    // even though every item carries an after-result cursor.
+  it("treats optional_limit == 0 as unlimited and still emits every cursor", async () => {
+    // Like SpiceDB, every streamed item carries its after-result cursor whether or not a limit was
+    // set (spiceport#47), so an unlimited stream can be resumed from any item.
     const h = harness();
     h.reverseOps.resourceSteps = resourceSteps("doc1", "doc2", "doc3");
     const writer = new CollectingWriter<LookupResourcesResponse>();
@@ -1826,7 +1837,11 @@ describe("lookupResources", () => {
     await h.service.lookupResources(lookupRequest({ optionalLimit: 0 }), writer);
 
     expect(writer.collected).toHaveLength(3);
-    expect(writer.collected.every((r) => r.afterResultCursor === undefined)).toBe(true);
+    expect(writer.collected.map((r) => r.afterResultCursor)).toEqual([
+      { token: "after-doc1" },
+      { token: "after-doc2" },
+      { token: "after-doc3" },
+    ]);
     expect(h.reverseOps.lookupResourcesArgs[0]?.limit).toBeUndefined();
   });
 
@@ -2582,17 +2597,26 @@ describe("exportBulkRelationships", () => {
    * port would instead accept a three-billion limit and try to serve it — a divergence that is not
    * the safer one, whatever else it is.
    */
-  it("narrows an out-of-int-range optional_limit exactly as the C# cast does", async () => {
+  it("rejects an out-of-int-range optional_limit at the export ceiling before any read", async () => {
+    // RequestCeilings.ValidateLimit runs before the `(int)` cast, so a limit the cast would wrap
+    // negative never reaches the read.
     const h = harness();
     h.reads.exportSteps = exportSteps(1);
     const writer = new CollectingWriter<ExportBulkRelationshipsResponse>();
 
-    await h.service.exportBulkRelationships(
-      ExportBulkRelationshipsRequest.fromPartial({ optionalLimit: 2_147_483_648 }),
-      writer,
-    );
+    const error = await h.service
+      .exportBulkRelationships(
+        ExportBulkRelationshipsRequest.fromPartial({ optionalLimit: 2_147_483_648 }),
+        writer,
+      )
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
 
-    expect(h.reads.exportArgs[0]?.limit).toBe(-2_147_483_648);
+    expect(error).toBeInstanceOf(RpcError);
+    expect((error as RpcError).code).toBe(status.INVALID_ARGUMENT);
+    expect(h.reads.exportArgs).toHaveLength(0);
   });
 
   it("defaults the per-message batch size to 1000 while still passing the REQUEST's limit down", async () => {

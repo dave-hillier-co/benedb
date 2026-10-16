@@ -29,7 +29,7 @@ import {
 //     "document:doc#viewer\n", which Spiceport accepts. Append "\n?" before "$".
 //   * .NET `\d` matches any Unicode Nd; JS `\d` is ASCII-only. This appears in the expiration
 //     sub-expression `[\d\-\.:TZ]+`. Spiceport rejects Arabic-Indic digits anyway, because
-//     `DateTimeOffset.TryParse` then fails, so ASCII-only `\d` reproduces the observable
+//     its RFC3339 date parse then fails, so ASCII-only `\d` reproduces the observable
 //     behaviour; the test below pins the outcome rather than the mechanism.
 //   * The namespace, relation and caveat-name sub-expressions have a MINIMUM LENGTH OF 3
 //     ([a-z] + {1,62} + [a-z0-9]) and a maximum of 64. Two-character namespaces, relations and
@@ -41,7 +41,8 @@ import {
 //     does every non-ASCII character; "\\", "\t" and "\n" keep their short escapes; and keys
 //     keep dictionary insertion order.
 //   * Expiration is nanoseconds since the Unix epoch as a `bigint` (see relationship.test.ts).
-//     `DateTimeOffset` resolution is 100ns, so parsing rounds to the nearest 100ns tick.
+//     `DateTimeOffset` resolution is 100ns, so parsing truncates to a 100ns tick. The strict
+//     RFC3339 acceptance rules are pinned in tuple-strings-expiration-tests.test.ts.
 //
 // Two deliberate divergences from Spiceport, both pinned explicitly below so they cannot drift
 // in silently:
@@ -457,39 +458,24 @@ describe("tryParseRelationship", () => {
       expect(rel.optionalExpiration).toBe(dec1 + 123_456_700n);
     });
 
-    it("rounds beyond 100ns resolution, as DateTimeOffset does", () => {
+    it("truncates beyond 100ns resolution", () => {
       const rel = expectParsed(
         "document:doc#viewer@user:alice[expiration:2023-12-01T00:00:00.1234567890Z]",
       );
 
-      expect(rel.optionalExpiration).toBe(dec1 + 123_456_800n);
+      expect(rel.optionalExpiration).toBe(dec1 + 123_456_700n);
       expect(formatRelationship(rel)).toBe(
-        "document:doc#viewer@user:alice[expiration:2023-12-01T00:00:00.1234568Z]",
+        "document:doc#viewer@user:alice[expiration:2023-12-01T00:00:00.1234567Z]",
       );
     });
 
-    it("accepts a date with no time, assuming midnight UTC", () => {
-      expect(
-        expectParsed("document:doc#viewer@user:alice[expiration:2023-12-01]").optionalExpiration,
-      ).toBe(dec1);
-    });
-
-    it("accepts a local-looking instant with no zone, assuming UTC", () => {
-      // DateTimeStyles.AssumeUniversal: an unzoned value is UTC, not machine-local.
-      expect(
-        expectParsed("document:doc#viewer@user:alice[expiration:2023-12-01T00:00:00]")
-          .optionalExpiration,
-      ).toBe(dec1);
-    });
-
-    // DateTimeStyles.AdjustToUniversal: a negative numeric offset is honoured and normalized
-    // to UTC. This is wire-visible — SpiceDB parses expirations with `time.RFC3339Nano`, whose
-    // `Z07:00` layout element accepts a numeric offset as well as "Z" — even though neither
-    // implementation ever emits the offset form itself.
+    // A negative numeric offset is honoured and normalized to UTC. This is wire-visible —
+    // SpiceDB parses expirations with `time.Parse(time.RFC3339, ...)`, whose `Z07:00` layout
+    // element accepts a numeric offset as well as "Z" — even though neither implementation ever
+    // emits the offset form itself.
     it.each([
       ["an extended negative offset", "2023-11-30T19:00:00-05:00"],
-      ["a compact negative offset", "2023-11-30T19:00:00-0500"],
-      ["an offset with minutes", "2023-11-30T20:30:00-0330"],
+      ["an offset with minutes", "2023-11-30T20:30:00-03:30"],
       ["a negative offset with a fraction", "2023-11-30T19:00:00.0000000-05:00"],
     ])("honours %s, normalizing to UTC", (_name, instant) => {
       expect(
@@ -500,6 +486,12 @@ describe("tryParseRelationship", () => {
     it.each([
       ["an out-of-range year", "document:doc#viewer@user:alice[expiration:99999-12-01T00:00:00Z]"],
       ["an impossible month", "document:doc#viewer@user:alice[expiration:2023-13-01T00:00:00Z]"],
+      ["a date with no time", "document:doc#viewer@user:alice[expiration:2023-12-01]"],
+      ["an instant with no zone", "document:doc#viewer@user:alice[expiration:2023-12-01T00:00:00]"],
+      [
+        "a compact offset, which RFC3339 does not allow",
+        "document:doc#viewer@user:alice[expiration:2023-11-30T19:00:00-0500]",
+      ],
       [
         // Rejected by the tuple expression, not the instant parser: "+" is absent from the
         // expiration character class `[\d\-\.:TZ]+`, so a positive offset never reaches it.

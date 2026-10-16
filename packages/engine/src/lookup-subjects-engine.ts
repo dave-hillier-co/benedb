@@ -586,7 +586,7 @@ class SubjectSet {
     if (existing !== undefined) {
       this.#concrete.set(adding.id, {
         id: adding.id,
-        caveat: caveatExpressionOrKeepOther(existing.caveat, adding.caveat),
+        caveat: caveatExpressionCombineOr(existing.caveat, adding.caveat),
       });
     } else {
       this.#concrete.set(adding.id, adding);
@@ -843,7 +843,7 @@ function unionWildcardWithWildcard(existing: Wildcard | undefined, adding: Wildc
 
   // The union wildcard applies when either applies; its exclusions are those excluded by BOTH
   // (intersection of exclusion sets), since an exclusion only survives if both exclude it.
-  const caveat = caveatExpressionOrKeepOther(existing.caveat, adding.caveat);
+  const caveat = caveatExpressionCombineOr(existing.caveat, adding.caveat);
   const addingExclusions = new Map<string, Concrete>();
   for (const e of adding.excluded) {
     addingExclusions.set(e.id, e);
@@ -905,7 +905,7 @@ function intersectWildcardWithWildcard(
     const x = exclusions.get(e.id);
     exclusions.set(
       e.id,
-      x !== undefined ? { id: e.id, caveat: caveatExpressionOrKeepOther(x.caveat, e.caveat) } : e,
+      x !== undefined ? { id: e.id, caveat: caveatExpressionCombineOr(x.caveat, e.caveat) } : e,
     );
   }
   return {

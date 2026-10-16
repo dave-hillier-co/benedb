@@ -324,7 +324,7 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
       deleteByFilter: {
         filter: toFullFilter(toFilter(args.filter)),
         limit: args.optionalLimit,
-        allowPartial: args.allowPartialDeletions ?? false,
+        rejectOverLimit: args.rejectOverLimit ?? false,
       },
       schemaBytes: undefined,
       expectedSchemaHash: undefined,

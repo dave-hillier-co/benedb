@@ -9,6 +9,12 @@ import {
   WatchDisabledException,
 } from "@benedb/datastore/datastore-exceptions";
 import type { IDatastore } from "@benedb/datastore/i-datastore";
+import {
+  relationshipsFilterMatches,
+  type RelationshipsFilter,
+  type SubjectRelationFilter,
+  type SubjectsSelector,
+} from "@benedb/datastore/relationships-filter";
 import type { RevisionChange, WatchContent, WatchOptions } from "@benedb/datastore/watch";
 import { WatchContent as WatchContentFlags } from "@benedb/datastore/watch";
 import type { ISchemaProvider, SchemaSnapshot } from "@benedb/grains/i-schema-provider";
@@ -32,7 +38,9 @@ import type { ServerStreamWriter } from "./server-stream-writer";
  * directly (a long-lived stream is a poor fit for a request/response grain). Each emitted
  * `WatchResponse` carries its own ZedToken (`changes_through`) so a client can resume exactly once
  * after a disconnect. v1 deltas vs the internal `watch-grpc-service.ts`: an
- * `optional_object_types` filter on emitted updates, an `is_checkpoint` field, and
+ * `optional_object_types` filter on emitted updates or, mutually exclusively,
+ * `optional_relationship_filters` (an update is emitted when it matches any filter), an
+ * `is_checkpoint` field, and
  * `WatchKind.INCLUDE_CHECKPOINTS` in the content selector.
  *
  * (The C# class doc-comment's "no `schema_updated` field (this snapshot watches relationships
@@ -76,17 +84,14 @@ export class AuthzedWatchV1Service {
     responseStream: ServerStreamWriter<WatchResponse>,
     signal?: AbortSignal | undefined,
   ): Promise<void> {
-    // `cannot specify both object types and relationship filters` (SpiceDB watch.go): the two
-    // filter modes are mutually exclusive whenever the request's content selection would include
-    // relationships at all - an empty kind list, UNSPECIFIED, or an explicit
-    // INCLUDE_RELATIONSHIP_UPDATES. A schema-only or checkpoints-only request never reaches the
-    // relationship filters at all, so upstream lets both lists ride unused in that case.
+    // Upstream rejects object types combined with relationship filters whenever relationship
+    // updates are being watched, before the start cursor is resolved. A schema-only or
+    // checkpoints-only request never reaches the relationship filters, so upstream lets both lists
+    // ride unused in that case.
     if (
+      includesRelationshipUpdates(request) &&
       request.optionalObjectTypes.length > 0 &&
-      request.optionalRelationshipFilters.length > 0 &&
-      (request.optionalUpdateKinds.length === 0 ||
-        request.optionalUpdateKinds.includes(WatchKind.WATCH_KIND_UNSPECIFIED) ||
-        request.optionalUpdateKinds.includes(WatchKind.WATCH_KIND_INCLUDE_RELATIONSHIP_UPDATES))
+      request.optionalRelationshipFilters.length > 0
     ) {
       throw new RpcError(
         status.INVALID_ARGUMENT,
@@ -122,17 +127,17 @@ export class AuthzedWatchV1Service {
       afterRevision = head.revision;
     }
 
-    // Validate each relationship filter AFTER resolving the start cursor (SpiceDB's order: decode
-    // the cursor, read the schema, then `buildRelationshipFilters`) but BEFORE opening the
-    // changefeed - an unknown definition/relation or a malformed filter is a request-shape error,
-    // not a stream fault.
-    const relationshipFilters =
-      request.optionalRelationshipFilters.length === 0
-        ? undefined
-        : request.optionalRelationshipFilters.map((filter) => {
-            validateRelationshipFilter(filter, this.#schemaProvider.current);
-            return filter;
-          });
+    // Empty => no filter; otherwise emit only updates matching at least one filter. Built after
+    // the cursor is resolved, as upstream does, so a bad cursor is reported ahead of a bad filter.
+    // Each filter is validated against the schema first (upstream: validateRelationshipsFilter).
+    let relationshipFilters: readonly WatchRelationshipFilter[] | undefined = undefined;
+    if (request.optionalRelationshipFilters.length > 0) {
+      const schema = this.#schemaProvider.current;
+      relationshipFilters = request.optionalRelationshipFilters.map((filter) => {
+        validateRelationshipFilter(schema, filter);
+        return toWatchFilter(filter);
+      });
+    }
 
     const datastoreId = await this.#datastore.getUniqueId(signal);
     const options: WatchOptions = { content: resolveContent(request) };
@@ -205,7 +210,7 @@ export class AuthzedWatchV1Service {
     change: RevisionChange,
     datastoreId: string,
     objectTypeFilter: ReadonlySet<string> | undefined,
-    relationshipFilters: readonly RelationshipFilter[] | undefined,
+    relationshipFilters: readonly WatchRelationshipFilter[] | undefined,
   ): WatchResponse {
     const token = zedTokenFromRevision(
       change.revision,
@@ -238,12 +243,10 @@ export class AuthzedWatchV1Service {
         continue;
       }
 
-      // A relationship-filter update is emitted once it matches AT LEAST ONE supplied filter
-      // (`filterRelationshipUpdates` in SpiceDB's watch.go).
       if (
         relationshipFilters !== undefined &&
         !relationshipFilters.some((filter) =>
-          relationshipFilterMatches(filter, update.relationship),
+          watchRelationshipFilterMatches(filter, update.relationship),
         )
       ) {
         continue;
@@ -257,94 +260,138 @@ export class AuthzedWatchV1Service {
 }
 
 /**
- * Validates one `optional_relationship_filters` entry, mirroring SpiceDB's
- * `validateRelationshipsFilter` (`internal/services/v1/relationships.go`): the resource
- * type/relation and the subject type/relation (when supplied) must resolve against the schema, a
- * resource id and a resource id prefix cannot both be set, and at least one field must be set.
+ * True when the request watches relationship updates: an empty selector, or one naming
+ * `WATCH_KIND_UNSPECIFIED` or `WATCH_KIND_INCLUDE_RELATIONSHIP_UPDATES`.
  */
-function validateRelationshipFilter(filter: RelationshipFilter, snapshot: SchemaSnapshot): void {
-  if (filter.resourceType.length > 0) {
-    checkNamespaceAndRelations(snapshot, {
-      definitionName: filter.resourceType,
-      relationName: filter.optionalRelation.length > 0 ? filter.optionalRelation : ELLIPSIS,
-      allowEllipsis: filter.optionalRelation.length === 0,
-    });
+function includesRelationshipUpdates(request: WatchRequest): boolean {
+  return (
+    request.optionalUpdateKinds.length === 0 ||
+    request.optionalUpdateKinds.some(
+      (kind) =>
+        kind === WatchKind.WATCH_KIND_UNSPECIFIED ||
+        kind === WatchKind.WATCH_KIND_INCLUDE_RELATIONSHIP_UPDATES,
+    )
+  );
+}
+
+/**
+ * A converted v1 relationship filter. The core {@link SubjectRelationFilter} cannot say "ellipsis
+ * only" (its ellipsis-only shape is the same value as `SUBJECT_RELATION_FILTER_ANY`), so a subject
+ * filter whose `optional_relation` is present but empty is carried as `subjectEllipsisOnly` and
+ * enforced here. The C#'s private nested record; its `Matches` is
+ * {@link watchRelationshipFilterMatches}.
+ */
+interface WatchRelationshipFilter {
+  readonly filter: RelationshipsFilter;
+  readonly subjectEllipsisOnly: boolean;
+}
+
+function watchRelationshipFilterMatches(
+  watchFilter: WatchRelationshipFilter,
+  relationship: Relationship,
+): boolean {
+  return (
+    relationshipsFilterMatches(watchFilter.filter, relationship) &&
+    (!watchFilter.subjectEllipsisOnly || relationship.reference.subject.relation === ELLIPSIS)
+  );
+}
+
+/**
+ * Validates a v1 `RelationshipFilter` as upstream's `validateRelationshipsFilter` does, in its
+ * order: the resource type and relation, then the subject type and relation, must exist in the
+ * schema (FAILED_PRECONDITION otherwise); resource id and resource id prefix are mutually
+ * exclusive; and at least one field must be set (INVALID_ARGUMENT for either).
+ */
+function validateRelationshipFilter(schema: SchemaSnapshot, f: RelationshipFilter): void {
+  checkFilterComponent(schema, f.resourceType, f.optionalRelation);
+
+  const sub = f.optionalSubjectFilter;
+  if (sub !== undefined) {
+    checkFilterComponent(schema, sub.subjectType, sub.optionalRelation?.relation ?? "");
   }
 
-  const subjectFilter = filter.optionalSubjectFilter;
-  if (subjectFilter !== undefined) {
-    const subjectRelation = subjectFilter.optionalRelation?.relation ?? "";
-    checkNamespaceAndRelations(snapshot, {
-      definitionName: subjectFilter.subjectType,
-      relationName: subjectRelation.length > 0 ? subjectRelation : ELLIPSIS,
-      allowEllipsis: subjectRelation.length === 0,
-    });
-  }
-
-  if (filter.optionalResourceId.length > 0 && filter.optionalResourceIdPrefix.length > 0) {
-    throw new RpcError(
-      status.INVALID_ARGUMENT,
-      "the relationship filter provided is not valid: resource_id and resource_id_prefix " +
-        "cannot be set at the same time",
-    );
+  if (f.optionalResourceId.length > 0 && f.optionalResourceIdPrefix.length > 0) {
+    throw invalidFilter("resource_id and resource_id_prefix cannot be set at the same time");
   }
 
   if (
-    filter.resourceType.length === 0 &&
-    filter.optionalResourceId.length === 0 &&
-    filter.optionalResourceIdPrefix.length === 0 &&
-    filter.optionalRelation.length === 0 &&
-    filter.optionalSubjectFilter === undefined
+    f.resourceType.length === 0 &&
+    f.optionalResourceId.length === 0 &&
+    f.optionalResourceIdPrefix.length === 0 &&
+    f.optionalRelation.length === 0 &&
+    f.optionalSubjectFilter === undefined
   ) {
-    throw new RpcError(
-      status.INVALID_ARGUMENT,
-      "the relationship filter provided is not valid: at least one field must be set",
-    );
+    throw invalidFilter("at least one field must be set");
   }
 }
 
 /**
- * Tests a single relationship against one `RelationshipFilter`, mirroring
- * `RelationshipsFilter.Test` / `SubjectsSelector.Test` (`pkg/datastore/datastore.go`) applied to the
- * wire shape of a v1 `RelationshipFilter` directly (a single resource id / subject id rather than the
- * datastore's list form).
+ * Upstream's `checkFilterComponent`: an empty type places no constraint; otherwise the type must
+ * exist, and the relation must too, with an empty relation standing for the ellipsis.
  */
-function relationshipFilterMatches(
-  filter: RelationshipFilter,
-  relationship: Relationship,
-): boolean {
-  const resource = relationship.reference.resource;
-  if (filter.resourceType.length > 0 && filter.resourceType !== resource.objectType) return false;
-  if (filter.optionalResourceId.length > 0 && filter.optionalResourceId !== resource.objectId)
-    return false;
-  if (
-    filter.optionalResourceIdPrefix.length > 0 &&
-    !resource.objectId.startsWith(filter.optionalResourceIdPrefix)
-  )
-    return false;
-  if (filter.optionalRelation.length > 0 && filter.optionalRelation !== resource.relation)
-    return false;
+function checkFilterComponent(
+  schema: SchemaSnapshot,
+  objectType: string,
+  optionalRelation: string,
+): void {
+  if (objectType.length === 0) return;
 
-  const subjectFilter = filter.optionalSubjectFilter;
-  if (subjectFilter !== undefined) {
-    const subject = relationship.reference.subject;
-    if (subjectFilter.subjectType.length > 0 && subjectFilter.subjectType !== subject.objectType)
-      return false;
-    if (
-      subjectFilter.optionalSubjectId.length > 0 &&
-      subjectFilter.optionalSubjectId !== subject.objectId
-    )
-      return false;
+  const allowEllipsis = optionalRelation.length === 0;
+  checkNamespaceAndRelations(schema, {
+    definitionName: objectType,
+    relationName: allowEllipsis ? ELLIPSIS : optionalRelation,
+    allowEllipsis,
+  });
+}
 
-    const relationFilter = subjectFilter.optionalRelation;
-    if (relationFilter !== undefined) {
-      const wantEllipsis = relationFilter.relation.length === 0;
-      const wantRelation = wantEllipsis ? ELLIPSIS : relationFilter.relation;
-      if (subject.relation !== wantRelation) return false;
+function invalidFilter(reason: string): RpcError {
+  return new RpcError(
+    status.INVALID_ARGUMENT,
+    `the relationship filter provided is not valid: ${reason}`,
+  );
+}
+
+/**
+ * Maps a validated v1 `RelationshipFilter` as upstream's `RelationshipsFilterFromPublicFilter`
+ * does: an empty field places no constraint; a subject filter's present-but-empty
+ * `optional_relation` selects only the ellipsis relation, a non-empty one selects exactly that
+ * relation, and an absent one selects any relation.
+ */
+function toWatchFilter(f: RelationshipFilter): WatchRelationshipFilter {
+  let selectors: readonly SubjectsSelector[] | undefined = undefined;
+  let subjectEllipsisOnly = false;
+  const sub = f.optionalSubjectFilter;
+  if (sub !== undefined) {
+    let relationFilter: SubjectRelationFilter | undefined = undefined;
+    const relation = sub.optionalRelation;
+    if (relation !== undefined) {
+      if (relation.relation.length === 0) subjectEllipsisOnly = true;
+      else relationFilter = { nonEllipsisRelation: relation.relation };
     }
+
+    selectors = [
+      {
+        optionalSubjectType: undefinedIfEmpty(sub.subjectType),
+        optionalSubjectIds:
+          sub.optionalSubjectId.length === 0 ? undefined : [sub.optionalSubjectId],
+        relationFilter,
+      },
+    ];
   }
 
-  return true;
+  const filter: RelationshipsFilter = {
+    optionalResourceType: undefinedIfEmpty(f.resourceType),
+    optionalResourceIds: f.optionalResourceId.length === 0 ? undefined : [f.optionalResourceId],
+    optionalResourceIdPrefix: undefinedIfEmpty(f.optionalResourceIdPrefix),
+    optionalResourceRelation: undefinedIfEmpty(f.optionalRelation),
+    optionalSubjectsSelectors: selectors,
+  };
+  return { filter, subjectEllipsisOnly };
+}
+
+/** The C#'s `NullIfEmpty`. */
+function undefinedIfEmpty(value: string): string | undefined {
+  return value.length === 0 ? undefined : value;
 }
 
 /**
