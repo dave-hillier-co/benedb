@@ -390,7 +390,8 @@ export class ReverseOps {
    * Resumes a candidate-ordered stream after `lastCandidate`. The accelerator is asked again as
    * for a fresh enumeration; if it declines (disabled, uncovered, or an incomplete walk), the live
    * traversal is drained instead, deduplicated by resource id, and put in the same ordinal order,
-   * so the resume is positioned identically either way.
+   * so the resume is positioned identically either way; under a client limit the drain retains
+   * only the page it can return.
    */
   async *#candidateOrderedStream(
     engine: LookupResourcesEngine,
@@ -434,8 +435,15 @@ export class ReverseOps {
 
     // Live fallback: one result per resource id. A resource reached through several entrypoints
     // is a member if any path makes it one; otherwise it keeps the first caveated result's missing
-    // params.
+    // params. The traversal is unordered, so the whole result set is walked, but only ids after
+    // the cursor are kept and, under a client limit, only the `limit` lowest of them: retained
+    // memory is bounded by the page size. An id evicted for being above the retained maximum can
+    // never re-enter, because the retained set only ever gets lower, so later results for it are
+    // discarded the same way.
+    const cap = args.limit !== undefined && args.limit > 0 ? args.limit : undefined;
     const byId = new Map<string, FoundResource>();
+    // The C#'s ordinal `SortedSet<string>`: kept sorted ascending, so its `Max` is the last entry.
+    const retained: string[] = [];
     for await (const found of engine.lookupResources(
       reader,
       args.subjectType,
@@ -449,13 +457,24 @@ export class ReverseOps {
       undefined,
       signal,
     )) {
-      const existing = byId.get(found.resourceId);
-      if (
-        existing === undefined ||
-        (existing.membership !== "member" && found.membership === "member")
-      ) {
-        byId.set(found.resourceId, found);
+      const id = found.resourceId;
+      if (id <= lastCandidate) continue;
+
+      const existing = byId.get(id);
+      if (existing !== undefined) {
+        if (existing.membership !== "member" && found.membership === "member") byId.set(id, found);
+        continue;
       }
+
+      if (cap !== undefined && retained.length >= cap) {
+        const max = retained[retained.length - 1] as string;
+        if (id > max) continue;
+        byId.delete(max);
+        retained.pop();
+      }
+
+      byId.set(id, found);
+      insertOrdinal(retained, id);
     }
 
     for (const id of ordinalAfter(byId.keys(), lastCandidate)) {
@@ -502,6 +521,18 @@ async function* confirmCandidates(
       lookedUpAtToken: token,
     };
   }
+}
+
+/** Inserts `id` (absent from `sorted`) into the ordinally ascending `sorted`, by binary search. */
+function insertOrdinal(sorted: string[], id: string): void {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if ((sorted[mid] as string) < id) low = mid + 1;
+    else high = mid;
+  }
+  sorted.splice(low, 0, id);
 }
 
 /**

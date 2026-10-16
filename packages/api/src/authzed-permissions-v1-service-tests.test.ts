@@ -2280,6 +2280,42 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
     }
   });
 
+  it("LookupResources candidate cursor pages through the live fallback with a limit", async () => {
+    // The live fallback keeps only the `limit` lowest ids past the cursor: chained limited resumes
+    // over it must still return every remaining resource exactly once, in ordinal order.
+    let cursor: string;
+    const walkOn = await MeshTestCluster.create(Schema, { useMembershipWalk: true });
+    try {
+      await seed(walkOn.datastore, ...LookupSeed);
+      const full = new CollectingStreamWriter<LookupResourcesResponse>();
+      await service(walkOn).lookupResources(aliceViewLookup(), full);
+      expect(full.collected[0]?.resourceObjectId).toBe("doc1");
+      cursor = full.collected[0]?.afterResultCursor?.token ?? "";
+    } finally {
+      await walkOn.dispose();
+    }
+
+    const walkOff = await MeshTestCluster.create(Schema, { useMembershipWalk: false });
+    try {
+      await seed(walkOff.datastore, ...LookupSeed);
+
+      const pages: string[][] = [];
+      for (let guard = 0; guard < 10; guard++) {
+        const request = aliceViewLookup(cursor);
+        request.optionalLimit = 2;
+        const page = new CollectingStreamWriter<LookupResourcesResponse>();
+        await service(walkOff).lookupResources(request, page);
+        if (page.collected.length === 0) break;
+        pages.push(page.collected.map((r) => r.resourceObjectId));
+        cursor = page.collected[page.collected.length - 1]?.afterResultCursor?.token ?? "";
+      }
+
+      expect(pages).toEqual([["doc2", "doc4"], ["doc5", "doc6"], ["doc7"]]);
+    } finally {
+      await walkOff.dispose();
+    }
+  });
+
   it("LookupSubjects populates the modern and the deprecated fields", async () => {
     const cluster = await MeshTestCluster.create(Schema);
     try {
