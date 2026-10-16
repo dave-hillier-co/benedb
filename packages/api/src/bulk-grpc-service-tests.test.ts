@@ -1,3 +1,4 @@
+import { status } from "@grpc/grpc-js";
 import { ELLIPSIS } from "@benedb/core/core-constants";
 import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import type { RelationshipUpdateWire } from "@benedb/grains/relationships-dtos";
@@ -11,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import { BulkGrpcService } from "./bulk-grpc-service";
 import { CollectingStreamWriter } from "./collecting-stream-writer";
+import { RpcError } from "./rpc-error";
 import type { ServerStreamWriter } from "./server-stream-writer";
 
 /**
@@ -161,6 +163,66 @@ describe("BulkGrpcServiceTests", () => {
       await cluster.dispose();
     }
   }, 120_000);
+
+  it("Import_of_a_relation_the_schema_does_not_define_is_failed_precondition_and_imports_nothing", async () => {
+    // spiceport#56: every imported row is validated against the schema (SpiceDB
+    // ValidateRelationshipsForCreateOrTouch). An unknown relation is RelationNotFound ->
+    // FAILED_PRECONDITION; the whole import is rejected, so the clean row before it is not applied.
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+
+      const bad = { ...viewer("doc2", "bob"), resourceRelation: "owner" };
+      const req: ImportBulkRelationshipsRequest = { relationships: [viewer("doc1", "alice"), bad] };
+
+      const controller = new AbortController();
+      const error = await svc
+        .importBulkRelationships(streamOf([req], controller.signal), controller.signal)
+        .then(
+          () => undefined,
+          (reason: unknown) => reason,
+        );
+
+      expect(error).toBeInstanceOf(RpcError);
+      expect((error as RpcError).code).toBe(status.FAILED_PRECONDITION);
+      expect((error as RpcError).details).toContain(
+        "relation/permission `owner` not found under definition `document`",
+      );
+
+      const writer = new CollectingStreamWriter<ExportBulkRelationshipsResponse>();
+      await svc.exportBulkRelationships(exportRequest({}), writer, controller.signal);
+      expect(writer.collected.flatMap((r) => r.relationships)).toHaveLength(0);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("Import_of_a_disallowed_subject_type_is_invalid_argument", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+
+      const base = viewer("doc1", "alice");
+      const bad: ProtoRelationship = {
+        ...base,
+        subject: { object: { objectType: "document", objectId: "alice" }, optionalRelation: "" },
+      };
+      const req: ImportBulkRelationshipsRequest = { relationships: [bad] };
+
+      const controller = new AbortController();
+      const error = await svc
+        .importBulkRelationships(streamOf([req], controller.signal), controller.signal)
+        .then(
+          () => undefined,
+          (reason: unknown) => reason,
+        );
+
+      expect(error).toBeInstanceOf(RpcError);
+      expect((error as RpcError).code).toBe(status.INVALID_ARGUMENT);
+    } finally {
+      await cluster.dispose();
+    }
+  });
 
   it("Export_round_trips_the_imported_set", async () => {
     const cluster = await MeshTestCluster.create(SchemaText);

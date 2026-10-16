@@ -207,6 +207,67 @@ function writeReq(
   });
 }
 
+/**
+ * The schema from spiceport#56: `document#viewer` admits only `user`, so a `group#member` subject
+ * is outside its allowed direct relations; plus a permission and a caveat-only relation to
+ * exercise the other write-time rejections.
+ */
+const WriteValidationSchema = `definition user {}
+
+caveat only_on_tuesday(day string) {
+    day == "tuesday"
+}
+
+definition group {
+    relation member: user
+}
+
+definition document {
+    relation viewer: user
+    relation tuesday_viewer: user with only_on_tuesday
+    permission view = viewer
+}`;
+
+function writeOne(
+  operation: RelationshipUpdate_Operation,
+  resourceType: string,
+  resourceId: string,
+  relation: string,
+  subjectType: string,
+  subjectId: string,
+  subjectRelation?: string,
+  caveat?: string,
+): WriteRelationshipsRequest {
+  return WriteRelationshipsRequest.fromPartial({
+    updates: [
+      {
+        operation,
+        relationship: {
+          resource: { objectType: resourceType, objectId: resourceId },
+          relation,
+          subject: {
+            object: { objectType: subjectType, objectId: subjectId },
+            optionalRelation: subjectRelation ?? "",
+          },
+          optionalCaveat: caveat === undefined ? undefined : { caveatName: caveat },
+        },
+      },
+    ],
+  });
+}
+
+async function countStored(cluster: MeshTestCluster, resourceType: string): Promise<number> {
+  const writer = new CollectingStreamWriter<ReadRelationshipsResponse>();
+  await service(cluster).readRelationships(
+    ReadRelationshipsRequest.fromPartial({
+      consistency: { fullyConsistent: true },
+      relationshipFilter: { resourceType },
+    }),
+    writer,
+  );
+  return writer.collected.length;
+}
+
 /** The C#'s `FakeAsyncStreamReader<T>`: replays a fixed sequence of inbound messages. */
 async function* asyncStream<T>(...messages: readonly T[]): AsyncIterable<T> {
   for (const message of messages) yield message;
@@ -503,6 +564,249 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
       );
 
       expect(error.code).toBe(status.ALREADY_EXISTS);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  // --- spiceport#56: write-time schema validation ---
+
+  it("WriteRelationships subject type not allowed on relation is invalid argument", async () => {
+    // SpiceDB validates every update against the schema inside the write transaction
+    // (relationships.ValidateRelationshipUpdates) and rejects a subject type outside the relation's
+    // allowed direct relations with INVALID_ARGUMENT (InvalidSubjectTypeError). Nothing persists.
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_CREATE,
+            "document",
+            "doc",
+            "viewer",
+            "group",
+            "eng",
+            "member",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "subjects of type `group#member` are not allowed on relation `document#viewer`",
+      );
+      expect(await countStored(cluster, "document")).toBe(0);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships unknown definition is failed precondition", async () => {
+    // An unknown object definition is SpiceDB's NamespaceNotFound, which the v1 services rewrite to
+    // FAILED_PRECONDITION (the same mapping SchemaValidation applies for Check).
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "nonesuch",
+            "doc",
+            "viewer",
+            "user",
+            "alice",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.FAILED_PRECONDITION);
+      expect(error.details).toContain("object definition `nonesuch` not found");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships unknown relation is failed precondition", async () => {
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "document",
+            "doc",
+            "nonesuch",
+            "user",
+            "alice",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.FAILED_PRECONDITION);
+      expect(error.details).toContain(
+        "relation/permission `nonesuch` not found under definition `document`",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships to a permission is invalid argument", async () => {
+    // SpiceDB CannotWriteToPermissionError -> INVALID_ARGUMENT.
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "document",
+            "doc",
+            "view",
+            "user",
+            "alice",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "cannot write a relationship to permission `view` under definition `document`",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships caveat not allowed on relation is invalid argument", async () => {
+    // `document#viewer` admits only an uncaveated `user`; a caveated subject is not an allowed type.
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "document",
+            "doc",
+            "viewer",
+            "user",
+            "alice",
+            undefined,
+            "only_on_tuesday",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "subjects of type `user with only_on_tuesday` are not allowed on relation `document#viewer`",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships uncaveated subject on caveat only relation names the required caveat", async () => {
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_TOUCH,
+            "document",
+            "doc",
+            "tuesday_viewer",
+            "user",
+            "alice",
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toContain(
+        "subjects of type `user` are not allowed on relation `document#tuesday_viewer` without one of the following caveats: only_on_tuesday",
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships delete ignores an unspecified caveat", async () => {
+    // The DELETE rule (ValidateRelationshipForDeletion) ignores the caveat when none is given, so
+    // an uncaveated DELETE of a caveat-only relation is valid; a disallowed subject type still is
+    // not.
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      await service(cluster).writeRelationships(
+        writeOne(
+          RelationshipUpdate_Operation.OPERATION_DELETE,
+          "document",
+          "doc",
+          "tuesday_viewer",
+          "user",
+          "alice",
+        ),
+      );
+
+      const error = await expectRpcError(
+        service(cluster).writeRelationships(
+          writeOne(
+            RelationshipUpdate_Operation.OPERATION_DELETE,
+            "document",
+            "doc",
+            "viewer",
+            "group",
+            "eng",
+            "member",
+          ),
+        ),
+      );
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteRelationships schema valid write succeeds", async () => {
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      await service(cluster).writeRelationships(
+        writeOne(
+          RelationshipUpdate_Operation.OPERATION_CREATE,
+          "group",
+          "eng",
+          "member",
+          "user",
+          "alice",
+        ),
+      );
+
+      expect(await countStored(cluster, "group")).toBe(1);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("ImportBulkRelationships disallowed subject is invalid argument and imports nothing", async () => {
+    const cluster = await MeshTestCluster.create(WriteValidationSchema);
+    try {
+      const bad = ImportBulkRelationshipsRequest.fromPartial({
+        relationships: [
+          {
+            resource: { objectType: "document", objectId: "doc" },
+            relation: "viewer",
+            subject: {
+              object: { objectType: "group", objectId: "eng" },
+              optionalRelation: "member",
+            },
+          },
+        ],
+      });
+      const reader = asyncStream(importBatch(["doc1", "alice"]), bad);
+
+      const error = await expectRpcError(service(cluster).importBulkRelationships(reader));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(await countStored(cluster, "document")).toBe(0);
     } finally {
       await cluster.dispose();
     }

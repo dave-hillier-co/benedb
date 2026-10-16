@@ -28,21 +28,20 @@ import { RpcError } from "./rpc-error";
  *    STRING, so the expectation is `"2"`, never the number 2.
  *  - `resp.ReadCounterValue.ReadAt?.Token` is null-conditional in the C#, so the optional
  *    dereference is kept rather than asserting the submessage exists.
- *  - The non-matching write uses resource type "user" with relation `self` - a relation the
- *    counter's filter (resource type "document", relation "viewer") never matches. The C# and
- *    an earlier port used an ELLIPSIS as the resource-side relation here, which the schema does
- *    not define; write-time schema validation (issue #1) now rejects that, so `user` gained a
- *    `self` relation instead of the write being schema-illegal.
+ *  - The non-matching write is `folder:docs#viewer`, a resource type the counter's filter
+ *    (resource type "document", relation "viewer") never matches. It must still be a write the
+ *    schema allows, because writes are validated against it.
  *  - The C#'s positional `RelationshipWire(...)` record is spelled with NAMED fields here so no
  *    argument can slide a slot.
  */
 
-const Schema = `definition user {
-    relation self: user
-}
+const Schema = `definition user {}
 definition document {
     relation viewer: user
     permission view = viewer
+}
+definition folder {
+    relation viewer: user
 }`;
 
 function service(cluster: MeshTestCluster): AuthzedExperimentalV1Service {
@@ -140,9 +139,9 @@ describe("AuthzedExperimentalV1ServiceTests", () => {
           {
             operation: "touch",
             relationship: {
-              resourceType: "user",
-              resourceId: "alice",
-              resourceRelation: "self",
+              resourceType: "folder",
+              resourceId: "docs",
+              resourceRelation: "viewer",
               subjectType: "user",
               subjectId: "carol",
               subjectRelation: ELLIPSIS,
