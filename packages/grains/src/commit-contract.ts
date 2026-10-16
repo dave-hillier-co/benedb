@@ -24,18 +24,18 @@ export interface CommitPreconditionWire {
 /**
  * A bulk delete-by-filter inside a `CommitRequest`: close every live relationship matching
  * `filter`, up to `limit` rows when present (the reply reports the deleted count and whether the
- * limit was reached, mirroring the DeleteRelationships RPC semantics). When `allowPartial` is
- * false and MORE rows match than a present `limit`, the whole commit is rejected
- * (`CommitFailureKind` `deleteLimitExceeded`) with nothing applied - upstream SpiceDB's
- * transactional-delete guard. True keeps the truncating delete-up-to-the-limit behavior.
+ * limit was reached, mirroring the DeleteRelationships RPC semantics).
+ * When `rejectOverLimit` is set and more than `limit` rows match, the commit is rejected as
+ * `CommitFailureKind` `deleteLimitExceeded` instead (SpiceDB's transactional delete, a limit
+ * without partial deletion); the count runs after the preconditions, as in SpiceDB.
  */
 export interface DeleteByFilterWire {
   /** The filter naming the rows to close. */
   readonly filter: FullRelationshipsFilterWire;
   /** The `ulong?` row limit, or absent for unbounded. */
   readonly limit?: bigint | undefined;
-  /** Whether a limited delete may truncate rather than reject; absent means true (the C#'s constructor default). */
-  readonly allowPartial?: boolean | undefined;
+  /** Whether more than `limit` matches rejects the commit; absent means false (the C# default). */
+  readonly rejectOverLimit?: boolean | undefined;
 }
 
 /**
@@ -127,7 +127,7 @@ export type CommitFailureKind =
   | "counterNotRegistered"
   /**
    * The delete-by-filter matched more rows than its limit and partial deletion was not allowed
-   * (`DeleteByFilterWire.allowPartial` false); nothing was applied. Detail carries the limit as a
+   * (`DeleteByFilterWire.rejectOverLimit`); nothing was applied. Detail carries the limit as a
    * decimal string.
    */
   | "deleteLimitExceeded";

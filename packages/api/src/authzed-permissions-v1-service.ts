@@ -393,12 +393,20 @@ export class AuthzedPermissionsV1Service {
     validateTransactionMetadataSize(request.optionalTransactionMetadata);
     validateLimit(request.optionalLimit, MAX_DELETE_RELATIONSHIPS_LIMIT);
 
+    const filter = toWireFilter(request.relationshipFilter ?? EMPTY_RELATIONSHIP_FILTER);
+    const limit = request.optionalLimit === 0 ? undefined : BigInt(request.optionalLimit);
+
+    // A limit without optional_allow_partial_deletions is a transactional cap: SpiceDB rejects the
+    // request (CouldNotTransactionallyDeleteErr) when more than `limit` relationships match,
+    // deleting nothing. The sequencer counts at most limit+1 matches inside the commit itself,
+    // after the preconditions (SpiceDB's order), so no write can race between the count and the
+    // delete.
     try {
       const reply = await this.#relationships.deleteRelationships({
-        filter: toWireFilter(request.relationshipFilter ?? EMPTY_RELATIONSHIP_FILTER),
-        optionalLimit: request.optionalLimit === 0 ? undefined : BigInt(request.optionalLimit),
+        filter,
+        optionalLimit: limit,
         preconditions: toWirePreconditions(request.optionalPreconditions),
-        allowPartialDeletions: request.optionalAllowPartialDeletions,
+        rejectOverLimit: limit !== undefined && !request.optionalAllowPartialDeletions,
         transactionMetadata: structToMap(request.optionalTransactionMetadata),
       });
 

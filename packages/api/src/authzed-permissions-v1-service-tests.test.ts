@@ -1273,6 +1273,68 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
     }
   });
 
+  it("DeleteRelationships failed precondition wins over the transactional limit", async () => {
+    // SpiceDB evaluates optional_preconditions before the limit+1 count, so a request that fails
+    // both is FAILED_PRECONDITION, not CouldNotTransactionallyDelete's INVALID_ARGUMENT.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const request = DeleteRelationshipsRequest.fromPartial({
+        relationshipFilter: readmeFilter(),
+        optionalLimit: 2,
+        optionalPreconditions: [
+          {
+            operation: Precondition_Operation.OPERATION_MUST_MATCH,
+            filter: { resourceType: "document", optionalResourceId: "nonesuch" },
+          },
+        ],
+      });
+
+      const error = await expectRpcError(service(cluster).deleteRelationships(request));
+
+      expect(error.code).toBe(status.FAILED_PRECONDITION);
+      expect(await countStored(cluster, "document")).toBe(3);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DeleteRelationships transactional limit is checked after a passing precondition", async () => {
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      await seed(
+        cluster.datastore,
+        ["readme", "viewer", "alice"],
+        ["readme", "viewer", "bob"],
+        ["readme", "viewer", "carol"],
+      );
+
+      const request = DeleteRelationshipsRequest.fromPartial({
+        relationshipFilter: readmeFilter(),
+        optionalLimit: 2,
+        optionalPreconditions: [
+          { operation: Precondition_Operation.OPERATION_MUST_MATCH, filter: readmeFilter() },
+        ],
+      });
+
+      const error = await expectRpcError(service(cluster).deleteRelationships(request));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe(
+        "found more than 2 relationships to be deleted and partial deletion was not requested",
+      );
+      expect(await countStored(cluster, "document")).toBe(3);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
   it("WriteRelationships transaction metadata over 65000 bytes is invalid argument", async () => {
     // SpiceDB MaximumTransactionMetadataSize: TransactionMetadataTooLargeErr -> INVALID_ARGUMENT.
     const cluster = await MeshTestCluster.create(Schema);

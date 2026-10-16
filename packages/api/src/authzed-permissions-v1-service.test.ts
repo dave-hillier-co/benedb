@@ -1491,7 +1491,7 @@ describe("deleteRelationships", () => {
       DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_PARTIAL,
     );
     expect(h.grain.deleteArgs[0]?.optionalLimit).toBe(10n);
-    expect(h.grain.deleteArgs[0]?.allowPartialDeletions).toBe(true);
+    expect(h.grain.deleteArgs[0]?.rejectOverLimit).toBe(false);
     expect(h.grain.deleteArgs[0]?.filter.resourceIds).toEqual(["readme"]);
   });
 
@@ -1542,9 +1542,9 @@ describe("deleteRelationships", () => {
     expect(response.deletionProgress).toBe(
       DeleteRelationshipsResponse_DeletionProgress.DELETION_PROGRESS_COMPLETE,
     );
-    // optional_limit 0 and optional_allow_partial_deletions default: absent limit, allow-partial false.
+    // optional_limit 0: an absent limit, so there is nothing to reject over.
     expect(h.grain.deleteArgs[0]?.optionalLimit).toBeUndefined();
-    expect(h.grain.deleteArgs[0]?.allowPartialDeletions).toBe(false);
+    expect(h.grain.deleteArgs[0]?.rejectOverLimit).toBe(false);
 
     // More rows matched than optional_limit with partial deletions disallowed: SpiceDB's
     // CouldNotTransactionallyDeleteError -> InvalidArgument.
