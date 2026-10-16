@@ -636,6 +636,35 @@ describe("optional_relationship_filters", () => {
     expect(updates[0]?.relationship?.subject?.object?.objectId).toBe("bob");
   });
 
+  it("places no constraint for a subject filter with an EMPTY subject type, as checkFilterComponent does", async () => {
+    // Upstream's `checkFilterComponent` (ported as the C#'s `CheckFilterComponent`) returns early
+    // for an empty object type, so a subject filter naming no type is not looked up in the schema,
+    // and `RelationshipsFilterFromPublicFilter` maps the empty type to no constraint.
+    const h = harness([
+      changeStep(
+        change({
+          relationshipChanges: [
+            touchUpdate("document", "doc1", "alice"),
+            touchUpdate("document", "doc1", "bob"),
+          ],
+        }),
+      ),
+    ]);
+
+    await h.service.watch(
+      request({
+        optionalRelationshipFilters: [
+          relFilter({ optionalSubjectFilter: { subjectType: "", optionalSubjectId: "bob" } }),
+        ],
+      }),
+      h.writer,
+    );
+
+    const updates = h.writer.collected[0]?.updates ?? [];
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.relationship?.subject?.object?.objectId).toBe("bob");
+  });
+
   it("skips a response whose every update was filtered out", async () => {
     const h = harness([
       changeStep(change({ relationshipChanges: [touchUpdate("document", "doc9", "alice")] })),
