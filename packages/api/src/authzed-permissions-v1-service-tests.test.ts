@@ -512,6 +512,22 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
     }
   });
 
+  it("CheckBulkPermissions more than 10000 items is invalid argument", async () => {
+    // SpiceDB maxBulkCheckCount (internal/services/v1/bulkcheck.go): NewExceedsMaximumChecksErr.
+    const cluster = await MeshTestCluster.create(Schema);
+    try {
+      const req = CheckBulkPermissionsRequest.fromPartial({});
+      for (let i = 0; i < 10_001; i += 1) req.items.push(bulkItem("readme", "view", "alice"));
+
+      const error = await expectRpcError(service(cluster).checkBulkPermissions(req));
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("check count of 10001 is greater than maximum allowed of 10000");
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
   it("CheckBulkPermissions unknown definition is a per-pair error", async () => {
     // An unknown resource definition is a client schema/typo bug for that one pair: SpiceDB
     // surfaces it as ERROR_REASON_UNKNOWN_DEFINITION in the pair's error (FailedPrecondition code),
