@@ -4,12 +4,17 @@ import { zedTokenFromRevision } from "@benedb/core/zed-tokens";
 import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import type { RelationshipUpdateWire } from "@benedb/grains/relationships-dtos";
 import { RelationshipUpdate_Operation } from "@benedb/protos/authzed/api/v1/core";
+import {
+  DeleteRelationshipsRequest,
+  WriteRelationshipsRequest,
+} from "@benedb/protos/authzed/api/v1/permission_service";
 import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
 import { RelationshipFilter as RelationshipFilterMessage } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { WatchRequest, WatchResponse } from "@benedb/protos/authzed/api/v1/watch_service";
 import { WatchKind } from "@benedb/protos/authzed/api/v1/watch_service";
 import { describe, expect, it } from "vitest";
 
+import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
 import { AuthzedWatchV1Service } from "./authzed-watch-v1-service";
 import { CollectingStreamWriter } from "./collecting-stream-writer";
 import { RpcError } from "./rpc-error";
@@ -212,6 +217,34 @@ const invalidFilters: ReadonlyArray<readonly [string, RelationshipFilter, status
     "relation/permission `nope` not found under definition `group`",
   ],
 ];
+
+function permissions(cluster: MeshTestCluster): AuthzedPermissionsV1Service {
+  return new AuthzedPermissionsV1Service(
+    cluster.checker,
+    cluster.grainFactory,
+    cluster.reverseOps,
+    cluster.relationshipReads,
+    cluster.schemaProvider,
+  );
+}
+
+/** A v1 touch of `type:id#viewer@user:user`. */
+function touchViewer(
+  type: string,
+  id: string,
+  ...users: string[]
+): ReturnType<typeof WriteRelationshipsRequest.fromPartial> {
+  return WriteRelationshipsRequest.fromPartial({
+    updates: users.map((user) => ({
+      operation: RelationshipUpdate_Operation.OPERATION_TOUCH,
+      relationship: {
+        resource: { objectType: type, objectId: id },
+        relation: "viewer",
+        subject: { object: { objectType: "user", objectId: user } },
+      },
+    })),
+  });
+}
 
 describe("AuthzedWatchV1ServiceTests", () => {
   it("Watch_from_head_sees_subsequent_write_with_token", async () => {
@@ -680,6 +713,128 @@ describe("AuthzedWatchV1ServiceTests", () => {
 
       expect(first.isCheckpoint).toBe(true);
       expect(first.updates).toEqual([]);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+  /**
+   * SpiceDB (internal/services/v1/watch.go): every response for a revision carries the transaction
+   * metadata the write supplied as `optional_transaction_metadata` (set when the revision has exactly
+   * one) and the revision's whole list as `full_revision_metadata`.
+   */
+  it("Watch_returns_the_writes_transaction_metadata_on_its_response", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+      const watchTask = svc.watch(watchRequest(), writer, controller.signal);
+
+      const metadata = { source: "importer", attempt: 2, tags: ["a", "b"], nested: { ok: true } };
+      await permissions(cluster).writeRelationships({
+        ...touchViewer("document", "doc1", "alice"),
+        optionalTransactionMetadata: metadata,
+      });
+
+      const response = await writer.waitForNext(10_000, watchTask);
+      controller.abort();
+      await watchTask;
+
+      expect(response.updates).toHaveLength(1);
+      expect(response.optionalTransactionMetadata).toEqual(metadata);
+      expect(response.fullRevisionMetadata).toEqual([metadata]);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  it("Watch_returns_the_deletes_transaction_metadata_with_its_deletions", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+      const perms = permissions(cluster);
+      await perms.writeRelationships(touchViewer("document", "doc1", "alice", "bob"));
+
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+      const watchTask = svc.watch(watchRequest(), writer, controller.signal);
+
+      const metadata = { reason: "offboarding" };
+      await perms.deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document", optionalResourceId: "doc1" },
+          optionalTransactionMetadata: metadata,
+        }),
+      );
+
+      const response = await writer.waitForNext(10_000, watchTask);
+      controller.abort();
+      await watchTask;
+
+      expect(response.updates).toHaveLength(2);
+      for (const update of response.updates)
+        expect(update.operation).toBe(RelationshipUpdate_Operation.OPERATION_DELETE);
+      expect(response.optionalTransactionMetadata).toEqual(metadata);
+      expect(response.fullRevisionMetadata).toEqual([metadata]);
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  /**
+   * No metadata, and an empty struct (SpiceDB stores none for it), leave both fields unset; a
+   * checkpoint never carries metadata, because SpiceDB's datastores emit checkpoints as their own
+   * metadata-free changes.
+   */
+  it("Watch_leaves_metadata_unset_without_metadata_for_an_empty_struct_and_on_checkpoints", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+      const perms = permissions(cluster);
+      const controller = new AbortController();
+      const writer = new CollectingStreamWriter<WatchResponse>();
+      const request = watchRequest({
+        optionalUpdateKinds: [
+          WatchKind.WATCH_KIND_INCLUDE_RELATIONSHIP_UPDATES,
+          WatchKind.WATCH_KIND_INCLUDE_CHECKPOINTS,
+        ],
+      });
+      const watchTask = svc.watch(request, writer, controller.signal);
+
+      await perms.writeRelationships({
+        ...touchViewer("document", "doc1", "alice"),
+        optionalTransactionMetadata: { k: "v" },
+      });
+      await perms.writeRelationships(touchViewer("document", "doc2", "bob"));
+      await perms.writeRelationships({
+        ...touchViewer("document", "doc3", "carol"),
+        optionalTransactionMetadata: {},
+      });
+
+      // Every change is followed by a checkpoint, so read through the checkpoint after the third.
+      const responses: WatchResponse[] = [];
+      while (
+        responses.filter((r) => !r.isCheckpoint).length < 3 ||
+        !responses[responses.length - 1]!.isCheckpoint
+      ) {
+        responses.push(await writer.waitForNext(10_000, watchTask));
+      }
+      controller.abort();
+      await watchTask;
+
+      const content = responses.filter((r) => !r.isCheckpoint);
+      expect(content[0]!.optionalTransactionMetadata).toEqual({ k: "v" });
+      expect(content[1]!.optionalTransactionMetadata).toBeUndefined();
+      expect(content[1]!.fullRevisionMetadata).toEqual([]);
+      expect(content[2]!.optionalTransactionMetadata).toBeUndefined();
+      expect(content[2]!.fullRevisionMetadata).toEqual([]);
+
+      const checkpoints = responses.filter((r) => r.isCheckpoint);
+      expect(checkpoints.length).toBeGreaterThan(0);
+      for (const checkpoint of checkpoints) {
+        expect(checkpoint.optionalTransactionMetadata).toBeUndefined();
+        expect(checkpoint.fullRevisionMetadata).toEqual([]);
+      }
     } finally {
       await cluster.dispose();
     }

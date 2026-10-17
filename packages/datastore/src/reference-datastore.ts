@@ -110,11 +110,18 @@ function toNanos(revision: IRevision): bigint {
   throw new InvalidRevisionException(`unsupported revision type: ${revisionTypeName(revision)}`);
 }
 
+/** A committed revision in the changefeed, with the metadata its transaction was given. */
+interface CommittedRevision {
+  readonly revision: bigint;
+  readonly transactionMetadata: Uint8Array | undefined;
+}
+
 function buildChange(
   state: DatastoreState,
-  revision: bigint,
+  committed: CommittedRevision,
   options: WatchOptions,
 ): RevisionChange | undefined {
+  const revision = committed.revision;
   const rev = new TimestampRevision(revision);
   const content = watchOptionsContent(options);
   const includeRels = (content & WatchContent.relationships) !== 0;
@@ -124,9 +131,16 @@ function buildChange(
   const schemaChanged = includeSchema && schemaChangedAt(state, revision);
 
   // Suppress empty checkpoints: only emit a revision that actually carries requested content.
+  // Metadata alone is not content: SpiceDB's Watch sends nothing for a revision carrying only
+  // metadata.
   if (relChanges.length === 0 && !schemaChanged) return undefined;
 
-  return { revision: rev, relationshipChanges: relChanges, schemaChanged };
+  return {
+    revision: rev,
+    relationshipChanges: relChanges,
+    schemaChanged,
+    transactionMetadata: committed.transactionMetadata,
+  };
 }
 
 /**
@@ -172,7 +186,9 @@ export class ReferenceDatastore implements IDatastore {
   // on each commit: a revision older than (head - gcWindow) can no longer be a valid watch cursor
   // (`isRevisionValid` rejects it), so retaining it only grows the list unbounded and slows the
   // per-poll re-scan.
-  private committedRevisions: readonly bigint[] = [];
+  // Each entry carries the metadata its transaction was given (absent for none), returned on its
+  // change.
+  private committedRevisions: readonly CommittedRevision[] = [];
 
   // A signal resolved whenever a new revision commits, so live watch tailers wake without polling.
   // Swapped on every commit; waiters capture the current instance before re-checking.
@@ -254,6 +270,7 @@ export class ReferenceDatastore implements IDatastore {
   /** @inheritdoc */
   async readWriteTx(
     transaction: (tx: IReadWriteTransaction) => Promise<void>,
+    transactionMetadata?: Uint8Array | undefined,
     _signal?: AbortSignal | undefined,
   ): Promise<IRevision> {
     const baseState = this.current;
@@ -265,8 +282,13 @@ export class ReferenceDatastore implements IDatastore {
     // REFERENCE comparison, never a deep equal - see the class remarks.
     if (this.current !== baseState) throw new SerializationException();
     this.current = tx.commit();
+    // SpiceDB stores no metadata for an empty one (common.Changes.AddRevisionMetadata).
+    const metadata =
+      transactionMetadata !== undefined && transactionMetadata.length > 0
+        ? transactionMetadata
+        : undefined;
     this.committedRevisions = this.pruneExpiredRevisions(
-      [...this.committedRevisions, newRevision],
+      [...this.committedRevisions, { revision: newRevision, transactionMetadata: metadata }],
       newRevision,
     );
     // Wake any live watch tailers, then arm a fresh signal for the next commit.
@@ -313,16 +335,16 @@ export class ReferenceDatastore implements IDatastore {
       // either is in our list, or will resolve the signal we captured.
       const state = this.current;
       const commitSignal = this.commitSignal;
-      const pending: bigint[] = [];
-      for (const rev of this.committedRevisions) {
-        if (rev > cursor) pending.push(rev);
+      const pending: CommittedRevision[] = [];
+      for (const committed of this.committedRevisions) {
+        if (committed.revision > cursor) pending.push(committed);
       }
 
       // pending is already in ascending order (revisions are appended monotonically).
-      for (const rev of pending) {
-        const change = buildChange(state, rev, options);
+      for (const committed of pending) {
+        const change = buildChange(state, committed, options);
         if (change !== undefined) yield change;
-        cursor = rev;
+        cursor = committed.revision;
       }
 
       // When checkpoints are requested, emit one after the batch so a consumer watching only a
@@ -375,10 +397,13 @@ export class ReferenceDatastore implements IDatastore {
    * information for any future tailer and is safe to discard. The list stays in ascending order,
    * so the survivors are a contiguous suffix.
    */
-  private pruneExpiredRevisions(revisions: readonly bigint[], head: bigint): readonly bigint[] {
+  private pruneExpiredRevisions(
+    revisions: readonly CommittedRevision[],
+    head: bigint,
+  ): readonly CommittedRevision[] {
     const floor = head - this.gcWindowNanos;
     let firstKept = 0;
-    while (firstKept < revisions.length && revisions[firstKept]! < floor) firstKept++;
+    while (firstKept < revisions.length && revisions[firstKept]!.revision < floor) firstKept++;
     return firstKept === 0 ? revisions : revisions.slice(firstKept);
   }
 

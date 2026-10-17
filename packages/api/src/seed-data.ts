@@ -79,18 +79,22 @@ export async function seedAsync(
   }
 
   try {
-    await datastore.readWriteTx(async (tx) => {
-      // The SAME check, now serialized by the transaction's CAS - see the deviation note above.
-      for await (const _ of tx.queryRelationships({}, signal)) {
-        throw ALREADY_SEEDED;
-      }
+    await datastore.readWriteTx(
+      async (tx) => {
+        // The SAME check, now serialized by the transaction's CAS - see the deviation note above.
+        for await (const _ of tx.queryRelationships({}, signal)) {
+          throw ALREADY_SEEDED;
+        }
 
-      const rel = createRelationship(
-        { objectType: "document", objectId: "readme", relation: "viewer" },
-        { objectType: "user", objectId: "alice", relation: ELLIPSIS },
-      );
-      await tx.writeRelationships([{ relationship: rel, operation: "touch" }], signal);
-    }, signal);
+        const rel = createRelationship(
+          { objectType: "document", objectId: "readme", relation: "viewer" },
+          { objectType: "user", objectId: "alice", relation: ELLIPSIS },
+        );
+        await tx.writeRelationships([{ relationship: rel, operation: "touch" }], signal);
+      },
+      undefined,
+      signal,
+    );
   } catch (error) {
     if (error === ALREADY_SEEDED) return false;
     throw error;

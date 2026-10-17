@@ -354,9 +354,13 @@ describe("interface shape", () => {
     expectTypeOf<ReturnType<IDatastore["snapshotReader"]>>().toEqualTypeOf<IDatastoreReader>();
   });
 
-  it("takes the transaction body as a function returning Promise<void> and resolves with the committed revision", () => {
+  it("takes the transaction body as a function returning Promise<void>, then optional transaction metadata, and resolves with the committed revision", () => {
     expectTypeOf<Parameters<IDatastore["readWriteTx"]>>().toEqualTypeOf<
-      [transaction: (tx: IReadWriteTransaction) => Promise<void>, signal?: AbortSignal | undefined]
+      [
+        transaction: (tx: IReadWriteTransaction) => Promise<void>,
+        transactionMetadata?: Uint8Array | undefined,
+        signal?: AbortSignal | undefined,
+      ]
     >();
     expectTypeOf<ReturnType<IDatastore["readWriteTx"]>>().toEqualTypeOf<Promise<IRevision>>();
   });

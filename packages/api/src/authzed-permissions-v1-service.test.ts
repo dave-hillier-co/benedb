@@ -80,6 +80,7 @@ import {
   type ReadRelationshipsResponse,
   WriteRelationshipsRequest,
 } from "@benedb/protos/authzed/api/v1/permission_service";
+import { Struct } from "@benedb/protos/google/protobuf/struct";
 import { GrainTaskCanceledError } from "@thresh/core/errors";
 import type { GrainInterface } from "@thresh/core/grain-interface";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
@@ -967,7 +968,7 @@ describe("writeRelationships", () => {
     );
   });
 
-  it("converts optional_transaction_metadata to a wire map and passes it through", async () => {
+  it("serializes optional_transaction_metadata to opaque struct bytes and passes them through", async () => {
     const h = harness();
 
     await h.service.writeRelationships(
@@ -977,7 +978,9 @@ describe("writeRelationships", () => {
       }),
     );
 
-    expect(h.grain.writeArgs[0]?.transactionMetadata).toEqual(new Map([["requestId", "abc-123"]]));
+    expect(h.grain.writeArgs[0]?.transactionMetadata).toEqual(
+      Struct.encode(Struct.wrap({ requestId: "abc-123" })).finish(),
+    );
   });
 
   it("leaves the transaction metadata undefined when none is supplied", async () => {
@@ -1503,7 +1506,7 @@ describe("deleteRelationships", () => {
     expect(h.grain.deleteArgs[0]?.filter.resourceIds).toEqual(["readme"]);
   });
 
-  it("converts optional_transaction_metadata to a wire map and passes it through", async () => {
+  it("serializes optional_transaction_metadata to opaque struct bytes and passes them through", async () => {
     const h = harness();
 
     await h.service.deleteRelationships(
@@ -1513,7 +1516,9 @@ describe("deleteRelationships", () => {
       }),
     );
 
-    expect(h.grain.deleteArgs[0]?.transactionMetadata).toEqual(new Map([["requestId", "abc-123"]]));
+    expect(h.grain.deleteArgs[0]?.transactionMetadata).toEqual(
+      Struct.encode(Struct.wrap({ requestId: "abc-123" })).finish(),
+    );
   });
 
   it("rejects transaction metadata over the 65,000-byte limit before reaching the grain", async () => {
