@@ -152,6 +152,59 @@ definition document {
     }
   });
 
+  it("WriteSchema with ill typed caveat is invalid argument", async () => {
+    const cluster = await MeshTestCluster.create(EmptySchema);
+    try {
+      const svc = service(cluster);
+
+      // SpiceDB's schema compiler type-checks caveat bodies (pkg/caveats/compile.go): a
+      // non-boolean operand of `||` is a compile error, surfaced by WriteSchema as INVALID_ARGUMENT.
+      const bad = `definition user {}
+definition document {
+    relation viewer: user with c
+}
+caveat c(x int, y int) { x == 1 || y }`;
+
+      const error = await svc.writeSchema({ schema: bad }).then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      expect(error).toBeInstanceOf(RpcError);
+      expect((error as RpcError).code).toBe(status.INVALID_ARGUMENT);
+      expect((error as RpcError).details).toBe(
+        "schema error at line 5, column 26: invalid expression for caveat `c`: " +
+          "ERROR: c:5:36: expected type 'bool' but found 'int'",
+      );
+
+      // Nothing was written.
+      await expectRpcStatus(svc.readSchema({}), status.NOT_FOUND);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("WriteSchema with non boolean caveat is invalid argument", async () => {
+    const cluster = await MeshTestCluster.create(EmptySchema);
+    try {
+      const svc = service(cluster);
+
+      const bad = `definition user {}
+caveat c(somemap map<any>) { somemap.foo }`;
+
+      const error = await svc.writeSchema({ schema: bad }).then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      expect(error).toBeInstanceOf(RpcError);
+      expect((error as RpcError).code).toBe(status.INVALID_ARGUMENT);
+      expect((error as RpcError).details).toMatch(
+        /invalid expression for caveat `c`: caveat expression must result in a boolean value: found `dyn`$/,
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
   it("WriteSchema removing caveat parameter is failed precondition", async () => {
     const cluster = await MeshTestCluster.create(EmptySchema);
     try {

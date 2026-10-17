@@ -1,4 +1,3 @@
-import { CelError } from "@bufbuild/cel";
 import {
   isAllowedRelationPublicWildcard,
   type AllowedRelation,
@@ -12,7 +11,6 @@ import { isPermission, type Relation } from "@benedb/core/relation";
 import type { SetOperation, SetOperationChild } from "@benedb/core/userset-rewrite";
 import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 
-import { parseCaveatExpression } from "./caveat-compiler";
 import { referencesIdentifier } from "./references-identifier";
 import { SchemaTypeException } from "./schema-type-exception";
 
@@ -28,8 +26,9 @@ import { SchemaTypeException } from "./schema-type-exception";
  * for the gRPC boundary, where it maps to `FailedPrecondition`), and every message is transcribed
  * character-for-character, backticks included, because the suite asserts them verbatim.
  *
- * What is checked: duplicate/reused definition + caveat names; per-caveat (>= 1 parameter,
- * parseable CEL, every declared parameter referenced); per-relation arrow targets (relation exists,
+ * What is checked: duplicate/reused definition + caveat names; per-caveat (>= 1 parameter, every
+ * declared parameter referenced - the CEL body itself is compiled and type-checked earlier, by
+ * `compileSchema`); per-relation arrow targets (relation exists,
  * is not a permission, does not import a wildcard); per-permission computed-userset targets exist;
  * per-base-relation allowed-type list is non-empty, every allowed type's namespace/subrelation
  * exists, none is self-referential, none is duplicated, and every `with <caveat>` names a defined
@@ -50,7 +49,7 @@ export function validateSchemaTypes(schema: CompiledSchema): void {
   // 0) No name may be reused between two definitions, two caveats, or a definition and a caveat.
   validateUniqueNames(schema);
 
-  // 1) Validate every caveat definition (CEL parse, >= 1 param, all params referenced).
+  // 1) Validate every caveat definition (>= 1 param, all params referenced).
   for (const caveat of schema.caveats) validateCaveat(caveat);
 
   // 2) Validate every object definition against the full type system.
@@ -83,47 +82,17 @@ function validateUniqueNames(schema: CompiledSchema): void {
   }
 }
 
-/**
- * The C#'s `catch (Exception ex) when (ex is CelException or InvalidOperationException or
- * ArgumentException)` is a real exception filter, so only those three become a
- * `SchemaTypeException` and anything else propagates.
- *
- * DEVIATION, recorded here because there is no exact counterpart: the ported `parseCaveatExpression`
- * documents its thrown type as deliberately unpinned and raises a plain `Error` where .NET's
- * `Parse` raised `InvalidOperationException`. So the filter accepts `CelError` (CelException),
- * `InvalidArgumentError` (ArgumentException) and a plain `Error` (the compiler's own signal), while
- * genuine programming faults - `TypeError`, `RangeError`, `EvalError` - and non-`Error` throws are
- * rethrown untouched, as in the C#.
- */
-function isCaveatCompileFailure(error: unknown): error is Error {
-  if (error instanceof CelError) return true;
-  if (error instanceof InvalidArgumentError) return true;
-  if (error instanceof TypeError || error instanceof RangeError || error instanceof EvalError) {
-    return false;
-  }
-  return error instanceof Error;
-}
-
 function validateCaveat(caveat: CaveatDefinition): void {
   const expression = new TextDecoder().decode(caveat.serializedExpression);
 
-  // (a) Parse/compile the CEL against the declared environment. A syntactically invalid expression
-  //     is rejected here rather than deferred to a later Check at evaluation time.
-  try {
-    parseCaveatExpression(expression);
-  } catch (error) {
-    if (!isCaveatCompileFailure(error)) throw error;
-    throw new SchemaTypeException(`could not compile caveat \`${caveat.name}\`: ${error.message}`);
-  }
-
-  // (b) A caveat must declare at least one parameter.
+  // (a) A caveat must declare at least one parameter.
   if (caveat.parameterTypes.size === 0) {
     throw new SchemaTypeException(
       `caveat \`${caveat.name}\` must have at least one parameter defined`,
     );
   }
 
-  // (c) Every declared parameter must be referenced by the expression.
+  // (b) Every declared parameter must be referenced by the expression.
   for (const param of caveat.parameterTypes.keys()) {
     if (!referencesIdentifier(expression, param)) {
       throw new SchemaTypeException(

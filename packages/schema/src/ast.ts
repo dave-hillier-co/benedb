@@ -59,13 +59,30 @@ export interface PermissionNode {
 export interface CaveatNode {
   readonly name: string;
   readonly parameters: readonly CaveatParameterNode[];
+  /** The body between the braces, trimmed: the text the schema stores. */
   readonly expression: string;
+  /** The 1-based line of the `caveat` keyword. */
+  readonly line: number;
+  /** The 1-based column of the `caveat` keyword. */
+  readonly column: number;
+  /**
+   * The body exactly as SpiceDB's schema parser slices it for CEL: from its first token to the end
+   * of its last token, where a newline that SpiceDB's lexer turns into a synthetic semicolon counts
+   * as a token. Caveat compile errors are positioned and quoted against this text, as upstream's are.
+   */
+  readonly celSource: string;
+  /** The 0-based line of `celSource`'s start in the schema. */
+  readonly celStartLine: number;
+  /** The 0-based column, in code points, of `celSource`'s start. */
+  readonly celStartColumn: number;
 }
 
-/** One `name type` parameter inside a caveat parameter list. */
+/** One `name type` parameter inside a caveat parameter list, with its name's 1-based position. */
 export interface CaveatParameterNode {
   readonly name: string;
   readonly type: CaveatTypeRefNode;
+  readonly line: number;
+  readonly column: number;
 }
 
 /** A caveat parameter type reference, possibly with generic child types (e.g. `list<int>`). */

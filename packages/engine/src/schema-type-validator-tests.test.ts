@@ -2,6 +2,7 @@ import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import { baseRelation } from "@benedb/core/relation";
 import { allowedRelationDirect } from "@benedb/core/allowed-relation";
 import { createNamespaceDefinition } from "@benedb/core/namespace-definition";
+import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
 import { compileSchema } from "@benedb/schema/schema-compiler";
 import { describe, expect, it } from "vitest";
 
@@ -13,8 +14,8 @@ import { validateSchemaTypes } from "./schema-type-validator";
 // The C# mirrors SpiceDB's `TypeSystem.Validate` (`pkg/schema/typesystem_validation.go`) and
 // `ValidateCaveatDefinition` (`internal/namespace/caveats.go`): undefined references,
 // permission-on-left-of-arrow, wildcard in arrow, missing allowed types, undefined caveat,
-// duplicate/reused names, and the caveat-definition rules (>= 1 parameter, parseable CEL, every
-// declared parameter referenced).
+// duplicate/reused names, and the caveat-definition rules (>= 1 parameter, every declared parameter
+// referenced).
 //
 // The C# asserts with `Assert.Contains(fragment, ex.Message)`; those assertions are carried over
 // unchanged rather than tightened to whole-message equality, so this file stays a faithful port
@@ -282,12 +283,21 @@ describe("validateSchemaTypes", () => {
     expect(ex.message).toContain("unused");
   });
 
-  it("rejects a caveat with unparseable CEL", () => {
-    const ex = validateThrows(`
+  it("rejects a caveat with unparseable CEL in the compiler, before validation", () => {
+    // The CEL body is compiled (parsed and type-checked) by `compileSchema`, as SpiceDB's schema
+    // compiler does, so it never reaches the validator.
+    expect(() =>
+      validate(`
       definition user {}
       caveat c(x int) { x > > 0 }
-    `);
-    expect(ex.message).toContain("c");
+    `),
+    ).toThrow(SchemaCompileException);
+    expect(() =>
+      validate(`
+      definition user {}
+      caveat c(x int) { x > > 0 }
+    `),
+    ).toThrow("invalid expression for caveat `c`: ERROR: c:");
   });
 
   it("accepts a caveat whose parameters are all referenced", () => {

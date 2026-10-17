@@ -12,6 +12,10 @@ import type {
   SetOp,
   TypeRefNode,
 } from "./ast";
+import {
+  caveatExpressionLineAndColumn,
+  findCaveatExpressionExtent,
+} from "./caveat-expression-extent";
 import { tokenize, type Token, type TokenType } from "./lexer";
 import { SchemaCompileException } from "./schema-compile-exception";
 
@@ -328,7 +332,7 @@ class Parser {
   }
 
   private parseCaveat(): CaveatNode {
-    this.advance(); // 'caveat'
+    const keyword = this.advance(); // 'caveat'
     const name = this.parseTypePath();
 
     // Parameter list: ( name type, name type, ... )
@@ -353,13 +357,25 @@ class Parser {
     const bodyEnd = close.offset;
     const expression = dotNetTrim(this.source.slice(bodyStart, bodyEnd));
 
-    return { name, parameters, expression };
+    const cel = findCaveatExpressionExtent(this.source, bodyStart, bodyEnd);
+    const celStart = caveatExpressionLineAndColumn(this.source, cel.start);
+
+    return {
+      name,
+      parameters,
+      expression,
+      line: keyword.line,
+      column: keyword.column,
+      celSource: this.source.slice(cel.start, cel.end),
+      celStartLine: celStart.line,
+      celStartColumn: celStart.column,
+    };
   }
 
   private parseCaveatParameter(): CaveatParameterNode {
-    const paramName = this.expect("identifier", "caveat parameter name").text;
+    const paramName = this.expect("identifier", "caveat parameter name");
     const type = this.parseCaveatTypeRef();
-    return { name: paramName, type };
+    return { name: paramName.text, type, line: paramName.line, column: paramName.column };
   }
 
   private parseCaveatTypeRef(): CaveatTypeRefNode {

@@ -32,6 +32,9 @@ import type {
   SetOp,
   TypeRefNode,
 } from "./ast";
+import { CaveatCompileException } from "./caveat-compile-exception";
+import { compileCaveat } from "./caveat-compiler";
+import { validateCaveatParameterType } from "./caveat-parameter-types";
 import type { CompiledSchema } from "./compiled-schema";
 import { parse } from "./parser";
 import { SchemaCompileException } from "./schema-compile-exception";
@@ -45,8 +48,8 @@ import { SchemaCompileException } from "./schema-compile-exception";
  * Supported: definitions, relations (type refs with `#subrelation` and `:*` wildcards), and
  * permissions (union `+`, intersection `&`, exclusion `-`, arrows `->` / `.any()` / `.all()`, and
  * `nil`). Caveat blocks and `with` / `expiration` traits are parsed; caveat names and expiration
- * requirements are attached to allowed relations, but caveat bodies are not modelled (their CEL is
- * ignored by `compile`, and captured verbatim by `compileSchema`).
+ * requirements are attached to allowed relations. `compile` ignores caveat bodies; `compileSchema`
+ * compiles them (see there), and `compileStoredSchema` captures them without compiling.
  *
  * Port decisions:
  *   * BOTH public entry points survive: `compile` returns namespaces only, `compileSchema` returns
@@ -57,10 +60,8 @@ import { SchemaCompileException } from "./schema-compile-exception";
  *   * `ArgumentNullException` on a null argument has no TypeScript equivalent under a `string`
  *     parameter type, but the guard is kept for untyped callers and throws `InvalidArgumentError`,
  *     this port's `ArgumentException` stand-in.
- *   * `caveat.Parameters.ToImmutableDictionary(...)` throws a plain `ArgumentException` on a
- *     duplicate parameter name - NOT a `SchemaCompileException`. A `Map` would silently keep the
- *     last one instead, so the throw is reproduced explicitly, with the same (unmapped) error
- *     class rather than being promoted to a schema error.
+ *   * A duplicate caveat parameter is a `SchemaCompileException` with SpiceDB's message and the
+ *     parameter's position, as in the C#.
  *   * `CaveatDefinition.parameterTypes` is a `Map`, whose enumeration order is insertion order
  *     where the C# `ImmutableDictionary` enumerates in hash order. Nothing here may depend on
  *     either.
@@ -84,13 +85,31 @@ export function compile(schemaText: string): readonly NamespaceDefinition[] {
  * Compiles the given schema DSL text into a {@link CompiledSchema} exposing both namespace
  * definitions and caveat definitions, each in source order.
  *
- * Caveat bodies are captured verbatim as CEL text and stored UTF-8 encoded in
- * `CaveatDefinition.serializedExpression`; they are not type-checked or evaluated here. Parameter
- * types are modelled, including generic `list<T>` / `map<K,V>` forms.
+ * Caveats are compiled as SpiceDB's schema compiler compiles them
+ * (`pkg/schemadsl/compiler/translator.go` `translateCaveatDefinition`): every parameter type must
+ * be a known caveat type, and the CEL body must parse, type-check against the parameters and
+ * produce a boolean (`compileCaveat`). A failure is a `SchemaCompileException` carrying upstream's
+ * message. The body is still stored verbatim (UTF-8) in `CaveatDefinition.serializedExpression`;
+ * the compiled form is not kept.
  *
  * @throws {SchemaCompileException} If the schema cannot be parsed or compiled.
  */
 export function compileSchema(schemaText: string): CompiledSchema {
+  return compileWith(schemaText, true);
+}
+
+/**
+ * Compiles schema DSL text that was already compiled when it was written (a stored schema),
+ * without compiling its caveat bodies again. A stored schema must keep loading even if this
+ * compiler's caveat checks grow stricter than the ones it was written under.
+ *
+ * @throws {SchemaCompileException} If the schema cannot be parsed or compiled.
+ */
+export function compileStoredSchema(schemaText: string): CompiledSchema {
+  return compileWith(schemaText, false);
+}
+
+function compileWith(schemaText: string, compileCaveats: boolean): CompiledSchema {
   if (schemaText === null || schemaText === undefined) {
     throw new InvalidArgumentError("schemaText must not be null");
   }
@@ -98,27 +117,71 @@ export function compileSchema(schemaText: string): CompiledSchema {
   const file: SchemaFileNode = parse(schemaText);
   return {
     namespaces: file.definitions.map(compileDefinition),
-    caveats: file.caveats.map(compileCaveat),
+    caveats: file.caveats.map((c) => compileCaveatDefinition(c, compileCaveats)),
   };
 }
 
-function compileCaveat(caveat: CaveatNode): CaveatDefinition {
+function compileCaveatDefinition(caveat: CaveatNode, compileBody: boolean): CaveatDefinition {
   const parameterTypes = new Map<string, CaveatTypeReference>();
   for (const p of caveat.parameters) {
-    // `ToImmutableDictionary` throws on a duplicate key; a Map would overwrite silently.
     if (parameterTypes.has(p.name)) {
-      throw new InvalidArgumentError(
-        `An item with the same key has already been added. Key: ${p.name}`,
+      throw new SchemaCompileException(
+        `duplicate parameter \`${p.name}\` defined on caveat \`${caveat.name}\``,
+        p.line,
+        p.column,
       );
     }
 
-    parameterTypes.set(p.name, compileCaveatType(p.type));
+    const type = compileCaveatType(p.type);
+    if (compileBody) {
+      try {
+        validateCaveatParameterType(type);
+      } catch (ex) {
+        if (ex instanceof CaveatCompileException) {
+          throw new SchemaCompileException(
+            `invalid type for caveat parameter \`${p.name}\` on caveat \`${caveat.name}\`: ${ex.message}`,
+            p.line,
+            p.column,
+          );
+        }
+        throw ex;
+      }
+    }
+
+    parameterTypes.set(p.name, type);
   }
+
+  // A parameterless caveat is left to the schema type validator, which rejects it by name.
+  if (compileBody && parameterTypes.size > 0) compileCaveatExpression(caveat, parameterTypes);
 
   // The CEL expression is stored verbatim (UTF-8) rather than evaluated here.
   const serialized = new TextEncoder().encode(caveat.expression);
 
   return { name: caveat.name, serializedExpression: serialized, parameterTypes };
+}
+
+function compileCaveatExpression(
+  caveat: CaveatNode,
+  parameterTypes: ReadonlyMap<string, CaveatTypeReference>,
+): void {
+  try {
+    compileCaveat(
+      caveat.name,
+      caveat.celSource,
+      parameterTypes,
+      caveat.celStartLine,
+      caveat.celStartColumn,
+    );
+  } catch (ex) {
+    if (ex instanceof CaveatCompileException) {
+      throw new SchemaCompileException(
+        `invalid expression for caveat \`${caveat.name}\`: ${ex.message}`,
+        caveat.celStartLine + 1,
+        caveat.celStartColumn + 1,
+      );
+    }
+    throw ex;
+  }
 }
 
 function compileCaveatType(type: CaveatTypeRefNode): CaveatTypeReference {

@@ -55,7 +55,10 @@ Four things in the source have no mechanical translation and must be built delib
 
 - **CEL evaluation for caveats.** Spiceport uses the .NET `Cel` package; SpiceDB uses `cel-go`.
   BeneDB uses `@bufbuild/cel`, which runs the official cel-spec conformance suite. The caveat
-  conformance cases are the check on this.
+  conformance cases are the check on this. Schema-write compilation (parse and static type check
+  of a caveat body) is a separate path: the port drives the ANTLR parser generated from cel-go's
+  own `CEL.g4` (`packages/schema/src/cel-gen`), and the checker over it is transliterated from
+  Spiceport's, so syntax and type errors carry cel-go's wording.
 - **The gRPC surface.** `@grpc/grpc-js` with `ts-proto` bindings generated from the vendored
   `authzed.api.v1` protos. Spiceport's `Authzed*V1Service` classes are pure translation over
   the grains, so what carries across is the mapping — including the deliberate error-code

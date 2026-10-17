@@ -9,7 +9,7 @@ import {
 import { buildReachabilityGraph, type ReachabilityGraph } from "@benedb/engine/reachability-graph";
 import { computeSchemaHash } from "@benedb/engine/schema-hash";
 import type { CompiledSchema } from "@benedb/schema/compiled-schema";
-import { compileSchema } from "@benedb/schema/schema-compiler";
+import { compileStoredSchema } from "@benedb/schema/schema-compiler";
 
 /**
  * Ported from Spiceport `Grains/ISchemaProvider.cs`, which declares THREE types in one file:
@@ -193,7 +193,7 @@ export class MutableSchemaProvider implements ISchemaProvider, ISchemaHashSource
 }
 
 function compile(schemaText: string, version: number): SchemaSnapshot {
-  const compiled = compileSchema(schemaText);
+  const compiled = compileStoredSchema(schemaText);
   const hash = computeSchemaHash(compiled.namespaces, compiled.caveats);
   return new SchemaSnapshot(compiled, hash, schemaText, version);
 }

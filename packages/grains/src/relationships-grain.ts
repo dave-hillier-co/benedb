@@ -24,7 +24,10 @@ import { SchemaTypeException } from "@benedb/engine/schema-type-exception";
 import { validateSchemaTypes } from "@benedb/engine/schema-type-validator";
 import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
-import { compileSchema } from "@benedb/schema/schema-compiler";
+import {
+  compileSchema,
+  compileStoredSchema as compileStoredSchemaText,
+} from "@benedb/schema/schema-compiler";
 import { grain } from "@thresh/core/decorators";
 import { Grain } from "@thresh/core/grain";
 
@@ -179,9 +182,9 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
     }
     const { datastore, schemaProvider, schemaSource, scanner, hub } = this.#require;
 
-    // Compile the proposed schema FIRST, but do NOT swap yet. A compile failure is surfaced as an
-    // InvalidArgumentError carrying the original message, so the gRPC layer maps it to
-    // InvalidArgument.
+    // Compile the proposed schema FIRST, but do NOT swap yet. A compile failure (including a caveat
+    // body that does not parse or type-check) is surfaced as an InvalidArgumentError carrying the
+    // original message, so the gRPC layer maps it to InvalidArgument.
     let nextCompiled: CompiledSchema;
     try {
       nextCompiled = compileSchema(args.schemaText);
@@ -561,7 +564,7 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
  */
 function compileStoredSchema(storedBytes: Uint8Array): CompiledSchema {
   try {
-    return compileSchema(new TextDecoder().decode(storedBytes));
+    return compileStoredSchemaText(new TextDecoder().decode(storedBytes));
   } catch (ex) {
     const message = ex instanceof Error ? ex.message : String(ex);
     throw new Error(

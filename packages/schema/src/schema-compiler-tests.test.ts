@@ -13,7 +13,7 @@ import type {
   TupleToUsersetChild,
 } from "@benedb/core/userset-rewrite";
 
-import { compile, compileSchema } from "./schema-compiler";
+import { compile, compileSchema, compileStoredSchema } from "./schema-compiler";
 import { SchemaCompileException } from "./schema-compile-exception";
 
 // Ported from `tests/Spiceport.Schema.Tests/SchemaCompilerTests.cs`, case for case. The schema text
@@ -122,9 +122,12 @@ function parameterType(
   return type;
 }
 
-function compileError(source: string): SchemaCompileException {
+function compileError(
+  source: string,
+  compiler: (text: string) => unknown = compile,
+): SchemaCompileException {
   try {
-    compile(source);
+    compiler(source);
   } catch (error) {
     if (error instanceof SchemaCompileException) {
       return error;
@@ -275,7 +278,7 @@ describe("SchemaCompiler", () => {
   it("compiles a caveat block into a caveat definition", () => {
     const schema = [
       "caveat ip_allowlist(user_ip ipaddress, allowed_ips list<string>) {",
-      "  user_ip in allowed_ips",
+      "  allowed_ips.exists(cidr, user_ip.in_cidr(cidr))",
       "}",
       "",
       "definition resource {",
@@ -291,7 +294,9 @@ describe("SchemaCompiler", () => {
     expect(caveat.name).toBe("ip_allowlist");
 
     // The raw CEL expression is captured verbatim (UTF-8), not evaluated.
-    expect(new TextDecoder().decode(caveat.serializedExpression)).toBe("user_ip in allowed_ips");
+    expect(new TextDecoder().decode(caveat.serializedExpression)).toBe(
+      "allowed_ips.exists(cidr, user_ip.in_cidr(cidr))",
+    );
 
     expect(caveat.parameterTypes.size).toBe(2);
     expect(parameterType(caveat.parameterTypes, "user_ip").typeName).toBe("ipaddress");
@@ -411,5 +416,75 @@ describe("SchemaCompiler", () => {
 
   it("rejects an unknown use flag", () => {
     expect(() => compile("use bogus\ndefinition user {}")).toThrow(SchemaCompileException);
+  });
+
+  it("rejects a caveat whose expression does not type-check", () => {
+    // SpiceDB's checker rejects a non-boolean operand of `||` at WriteSchema. The CEL part of the
+    // message is upstream's verbatim, positioned in the schema as upstream positions it.
+    expect(compileError("caveat c(x int, y int) { x == 1 || y }", compileSchema).message).toBe(
+      "schema error at line 1, column 26: invalid expression for caveat `c`: " +
+        "ERROR: c:1:36: expected type 'bool' but found 'int'\n | x == 1 || y\n | ...........^",
+    );
+  });
+
+  it("rejects a caveat with a non-boolean expression", () => {
+    expect(compileError("caveat c(x int) {\n  x == 1 ? 'a' : 'b'\n}", compileSchema).message).toBe(
+      "schema error at line 2, column 3: invalid expression for caveat `c`: " +
+        "caveat expression must result in a boolean value: found `string`",
+    );
+  });
+
+  // SpiceDB slices the body from its first token to its last; a newline after an identifier, `)`,
+  // `}` or `*` is a token (a synthetic semicolon), so the CEL source then has a second, empty line
+  // and the relocated error quotes that empty line.
+  it.each([
+    [
+      "caveat c(x int) {\n  x.y == 1\n}",
+      "schema error at line 2, column 3: invalid expression for caveat `c`: " +
+        "ERROR: c:2:4: type 'int' does not support field selection\n | \n | ^",
+    ],
+    [
+      'caveat c(x int) {\n  x.y == "a"\n}',
+      "schema error at line 2, column 3: invalid expression for caveat `c`: " +
+        "ERROR: c:2:4: type 'int' does not support field selection",
+    ],
+    [
+      "caveat c(x int) { /* lead */ x.y == 1 /* trail */ }",
+      "schema error at line 1, column 30: invalid expression for caveat `c`: " +
+        "ERROR: c:1:31: type 'int' does not support field selection\n | x.y == 1\n | ........^",
+    ],
+    [
+      "caveat c(x int) {\n  x.y\n  == 1\n}",
+      "schema error at line 2, column 3: invalid expression for caveat `c`: " +
+        "ERROR: c:2:4: type 'int' does not support field selection\n |   == 1\n | ...^",
+    ],
+  ])("positions caveat errors as SpiceDB does: %j", (schema, expected) => {
+    expect(compileError(schema, compileSchema).message).toBe(expected);
+  });
+
+  it.each([
+    [
+      "caveat c(x foo) { x }",
+      "schema error at line 1, column 10: invalid type for caveat parameter `x` on caveat `c`: unknown type `foo`",
+    ],
+    [
+      "caveat c(x int, y list) { x == 1 }",
+      "schema error at line 1, column 17: invalid type for caveat parameter `y` on caveat `c`: type `list` requires 1 generic types; found 0",
+    ],
+    [
+      "caveat c(x int, x int) { x == 1 }",
+      "schema error at line 1, column 17: duplicate parameter `x` defined on caveat `c`",
+    ],
+  ])("rejects invalid caveat parameters: %j", (schema, expected) => {
+    expect(compileError(schema, compileSchema).message).toBe(expected);
+  });
+
+  it("compiles a stored schema without recompiling its caveats", () => {
+    // A stored schema was compiled when it was written; reloading it must not fail because the
+    // caveat checks have since grown stricter.
+    const compiled = compileStoredSchema("caveat c(x int, y int) { x == 1 || y }");
+
+    const caveat = single(compiled.caveats);
+    expect(new TextDecoder().decode(caveat.serializedExpression)).toBe("x == 1 || y");
   });
 });
