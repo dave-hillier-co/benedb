@@ -27,6 +27,12 @@ export interface Relation {
    * can populate it.
    */
   readonly canonicalCacheKey?: string | undefined;
+  /**
+   * The doc comments that preceded the declaration, each verbatim with its `//` or block-comment
+   * markers and every line trimmed (SpiceDB's `DocComment` metadata). Metadata, not semantics: the
+   * engine's structural schema hash does not read it. Absent means none.
+   */
+  readonly comments?: readonly string[] | undefined;
 }
 
 /**

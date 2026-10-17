@@ -309,4 +309,30 @@ describe("lexer", () => {
       expect(() => tokenize("use {")).toThrow("expected a feature name after 'use'");
     });
   });
+
+  it("carries the comments since the previous token, verbatim, on the next token", () => {
+    const tokens = tokenize("// one\n/* two\n three */\ndefinition");
+
+    expect(kinds(tokens)).toEqual(["keyword", "eof"]);
+    expect(tokenAt(tokens, 0).comments).toEqual(["// one", "/* two\n three */"]);
+    expect(tokenAt(tokens, 1).comments).toBeUndefined();
+  });
+
+  it("drops pending comments at a newline that SpiceDB lexes as a synthetic semicolon", () => {
+    // After an identifier, keyword, `}`, `)` or `*` a newline is SpiceDB's synthetic semicolon,
+    // and the comments before it go with it.
+    for (const source of ["a // c\nb", "nil // c\nb", "} // c\nb", ") // c\nb", "* // c\nb"]) {
+      expect(tokenAt(tokenize(source), 1).comments).toBeUndefined();
+    }
+  });
+
+  it("keeps pending comments across a newline after any other token, and across blank lines", () => {
+    expect(tokenAt(tokenize("{ // c\nb"), 1).comments).toEqual(["// c"]);
+    expect(tokenAt(tokenize("; // c\nb"), 1).comments).toEqual(["// c"]);
+    expect(tokenAt(tokenize("a\n\n// c\n\nb"), 1).comments).toEqual(["// c"]);
+  });
+
+  it("ends a line comment before a carriage return", () => {
+    expect(tokenAt(tokenize("// c \r\nb"), 0).comments).toEqual(["// c "]);
+  });
 });
