@@ -5,6 +5,10 @@
 # `buf export`; protos/authzed is the proto root, so the google/api, buf/validate
 # and protoc-gen-openapiv2 import dependencies resolve without extra include paths.
 #
+# protos/google/rpc/error_info.proto is google.rpc.ErrorInfo alone, copied from googleapis'
+# error_details.proto (as Spiceport does): the detail SpiceDB attaches to a reasoned error, which
+# the authzed buf export does not carry. It imports nothing, so it shares the second invocation.
+#
 # protos/permissions.proto is Spiceport's OWN earlier surface (`package spiceport.v0`),
 # not a vendored one, and its header says so: "Minimal, NOT authzed v1 byte-compatible
 # yet." It is generated because Spiceport still serves it alongside authzed v1
@@ -39,7 +43,8 @@ protoc \
   --ts_proto_out="$out" \
   --ts_proto_opt="$opts" \
   -I "$here/protos" \
-  "$here/protos/permissions.proto"
+  "$here/protos/permissions.proto" \
+  "$here/protos/google/rpc/error_info.proto"
 
 # The authzed.api.v1 descriptors WITH their options, which the ts-proto bindings drop. The
 # protoc-gen-validate request contract (`(validate.rules)`, `(validate.required)`) lives only in

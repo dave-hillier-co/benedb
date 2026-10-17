@@ -499,7 +499,7 @@ export class RelationshipsGrain extends Grain implements IRelationshipsGrain {
         );
       } catch (error) {
         if (error instanceof RelationshipTypeException) {
-          throw new RelationshipSchemaViolationException(error.reason, error.message);
+          throw new RelationshipSchemaViolationException(error.reason, error.message, error.facts);
         }
         throw error;
       }
@@ -592,6 +592,7 @@ function relationshipWriteFailure(failure: CommitFailureWire): Error {
       return new WriteConflictException(
         "createExisting",
         new CreateRelationshipExistsException(failure.detail ?? "").message,
+        failure.detail,
       );
     case "deleteLimitExceeded":
       return new DeleteLimitExceededException(parseLimitDetail(failure.detail));

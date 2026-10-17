@@ -24,19 +24,34 @@ export class WriteConflictException extends Error {
   /** Which conflict condition occurred. */
   readonly kind: WriteConflictKind;
 
+  /**
+   * For `createExisting`, the relationship the CREATE collided on, as its tuple string without
+   * caveat or expiration; otherwise `undefined`.
+   */
+  readonly relationship: string | undefined;
+
   /** Creates the exception for the given conflict kind and message. */
-  constructor(kind: WriteConflictKind, message: string) {
+  constructor(kind: WriteConflictKind, message: string, relationship?: string) {
     super(message);
     Object.setPrototypeOf(this, new.target.prototype);
     this.name = "WriteConflictException";
     this.kind = kind;
+    this.relationship = relationship;
   }
 }
 
 registerSurrogate<WriteConflictException>({
   tag: "benedb.writeConflictException",
   test: (value) => value instanceof WriteConflictException,
-  encode: (error) => ({ kind: error.kind, message: error.message }),
+  encode: (error) => ({
+    kind: error.kind,
+    message: error.message,
+    relationship: error.relationship,
+  }),
   decode: (fields) =>
-    new WriteConflictException(fields.kind as WriteConflictKind, fields.message as string),
+    new WriteConflictException(
+      fields.kind as WriteConflictKind,
+      fields.message as string,
+      fields.relationship as string | undefined,
+    ),
 });

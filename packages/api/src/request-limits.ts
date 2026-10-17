@@ -2,12 +2,15 @@ import { status } from "@grpc/grpc-js";
 import {
   ContextualizedCaveat,
   type ObjectReference,
-  type Relationship,
+  Relationship,
 } from "@benedb/protos/authzed/api/v1/core";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
 import type { WriteRelationshipsRequest } from "@benedb/protos/authzed/api/v1/permission_service";
 import { Struct } from "@benedb/protos/google/protobuf/struct";
 
+import { full, withoutCaveatOrExpiration } from "./go-relationship-strings";
 import { RpcError } from "./rpc-error";
+import { rpcErrorWithReason } from "./rpc-errors";
 
 /**
  * Ported from Spiceport `src/Spiceport.Api/RequestLimits.cs`.
@@ -67,17 +70,28 @@ export function validateWriteRelationships(request: WriteRelationshipsRequest): 
   validateTransactionMetadataSize(request.optionalTransactionMetadata);
 
   if (request.updates.length > MAX_UPDATES_PER_WRITE)
-    throw new RpcError(
+    throw rpcErrorWithReason(
       status.INVALID_ARGUMENT,
       `too many updates (${request.updates.length}) for WriteRelationships call ` +
         `(maximum: ${MAX_UPDATES_PER_WRITE}); consider using ImportBulkRelationships API instead`,
+      ErrorReason.ERROR_REASON_TOO_MANY_UPDATES_IN_REQUEST,
+      [
+        ["update_count", String(request.updates.length)],
+        ["maximum_updates_allowed", String(MAX_UPDATES_PER_WRITE)],
+      ],
     );
 
   if (request.optionalPreconditions.length > MAX_PRECONDITIONS_COUNT)
-    throw new RpcError(
+    throw rpcErrorWithReason(
       status.INVALID_ARGUMENT,
       `precondition count of ${request.optionalPreconditions.length} is greater than ` +
         `maximum allowed of ${MAX_PRECONDITIONS_COUNT}`,
+      ErrorReason.ERROR_REASON_TOO_MANY_PRECONDITIONS_IN_REQUEST,
+      [
+        ["precondition_count", String(request.optionalPreconditions.length)],
+        // SpiceDB's ExceedsMaximumPreconditionsError reuses the updates key for its maximum.
+        ["maximum_updates_allowed", String(MAX_PRECONDITIONS_COUNT)],
+      ],
     );
 
   // A relationship can be specified in an update only once per overall request. The key ignores the
@@ -85,13 +99,18 @@ export function validateWriteRelationships(request: WriteRelationshipsRequest): 
   // DELETE of the same tuple in one request is also a duplicate.
   const seen = new Set<string>();
   for (const relationship of relationships) {
-    const key = relationshipKeyWithoutCaveatOrExpiration(relationship);
+    const key = withoutCaveatOrExpiration(relationship);
     if (seen.has(key))
-      throw new RpcError(
+      throw rpcErrorWithReason(
         status.INVALID_ARGUMENT,
         `found more than one update with relationship \`${key}\` in this request; ` +
           "a relationship can only be specified in an update once per overall " +
           "WriteRelationships request",
+        ErrorReason.ERROR_REASON_UPDATES_ON_SAME_RELATIONSHIP,
+        [
+          ["definition_name", relationship.resource.objectType],
+          ["relationship", full(relationship)],
+        ],
       );
     seen.add(key);
 
@@ -100,10 +119,17 @@ export function validateWriteRelationships(request: WriteRelationshipsRequest): 
     const contextSize =
       caveat === undefined ? 0 : ContextualizedCaveat.encode(caveat).finish().length;
     if (contextSize > MAX_RELATIONSHIP_CONTEXT_SIZE)
-      throw new RpcError(
+      throw rpcErrorWithReason(
         status.INVALID_ARGUMENT,
         `provided relationship \`${key}\` exceeded maximum allowed caveat size of ` +
           `${MAX_RELATIONSHIP_CONTEXT_SIZE}`,
+        ErrorReason.ERROR_REASON_MAX_RELATIONSHIP_CONTEXT_SIZE,
+        [
+          ["relationship", key],
+          ["max_allowed_size", String(MAX_RELATIONSHIP_CONTEXT_SIZE)],
+          // SpiceDB reports proto.Size of the whole relationship here, not of its caveat.
+          ["context_size", String(Relationship.encode(relationship).finish().length)],
+        ],
       );
   }
 }
@@ -146,17 +172,13 @@ export function validateTransactionMetadataSize(
 
   const size = new TextEncoder().encode(JSON.stringify(metadata)).length;
   if (size > MAX_TRANSACTION_METADATA_SIZE)
-    throw new RpcError(
+    throw rpcErrorWithReason(
       status.INVALID_ARGUMENT,
       `metadata size of ${size} is greater than maximum allowed of ${MAX_TRANSACTION_METADATA_SIZE}`,
+      ErrorReason.ERROR_REASON_TRANSACTION_METADATA_TOO_LARGE,
+      [
+        ["metadata_byte_size", String(size)],
+        ["maximum_allowed_metadata_byte_size", String(MAX_TRANSACTION_METADATA_SIZE)],
+      ],
     );
-}
-
-function relationshipKeyWithoutCaveatOrExpiration(rel: ShapedRelationship): string {
-  const subject = rel.subject;
-  const subjectRelation = !subject.optionalRelation ? "" : "#" + subject.optionalRelation;
-  return (
-    `${rel.resource.objectType}:${rel.resource.objectId}#${rel.relation}@` +
-    `${subject.object.objectType}:${subject.object.objectId}${subjectRelation}`
-  );
 }

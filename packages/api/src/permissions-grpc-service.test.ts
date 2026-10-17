@@ -1096,11 +1096,15 @@ describe("writeRelationships", () => {
       ],
       [new SequencerOverloadedException("shed"), status.RESOURCE_EXHAUSTED],
       [
-        new RelationshipSchemaViolationException("unknownDefinition", "object definition"),
+        new RelationshipSchemaViolationException("unknownDefinition", "object definition", {
+          definitionName: "document",
+        }),
         status.FAILED_PRECONDITION,
       ],
       [
-        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type"),
+        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type", {
+          definitionName: "document",
+        }),
         status.INVALID_ARGUMENT,
       ],
     ];

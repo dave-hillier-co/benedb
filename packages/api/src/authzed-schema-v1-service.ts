@@ -37,6 +37,7 @@ import type {
   WriteSchemaRequest,
   WriteSchemaResponse,
 } from "@benedb/protos/authzed/api/v1/schema_service";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
 import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
 import { compileSchema } from "@benedb/schema/schema-compiler";
@@ -53,6 +54,7 @@ import {
 } from "./reflection-mapper";
 import { validateRequest } from "./request-validation";
 import { RpcError } from "./rpc-error";
+import { rpcErrorWithReason } from "./rpc-errors";
 import { schemaFiltersFromRequest } from "./schema-filters";
 
 /**
@@ -249,7 +251,8 @@ export class AuthzedSchemaV1Service {
           : request.optionalDefinitionNameFilter,
       );
     } catch (error) {
-      if (error instanceof SchemaIntrospectionException) throw toRpc(error);
+      if (error instanceof SchemaIntrospectionException)
+        throw toRpc(error, request.definitionName, request.relationName);
       throw error;
     }
 
@@ -276,7 +279,8 @@ export class AuthzedSchemaV1Service {
         request.permissionName,
       );
     } catch (error) {
-      if (error instanceof SchemaIntrospectionException) throw toRpc(error);
+      if (error instanceof SchemaIntrospectionException)
+        throw toRpc(error, request.definitionName, request.permissionName);
       throw error;
     }
 
@@ -310,14 +314,31 @@ function relationReferenceProto(
 }
 
 /** The THREE-WAY split, each arm of which the covering suite asserts. */
-function toRpc(ex: SchemaIntrospectionException): RpcError {
+function toRpc(
+  ex: SchemaIntrospectionException,
+  definitionName: string,
+  relationName: string,
+): RpcError {
   switch (ex.kind) {
     case "definitionNotFound":
       return new RpcError(status.NOT_FOUND, ex.message);
     case "relationNotFound":
-      return new RpcError(status.FAILED_PRECONDITION, ex.message);
+      return rpcErrorWithReason(
+        status.FAILED_PRECONDITION,
+        ex.message,
+        ErrorReason.ERROR_REASON_UNKNOWN_RELATION_OR_PERMISSION,
+        [
+          ["definition_name", definitionName],
+          ["relation_or_permission_name", relationName],
+        ],
+      );
     case "notAPermission":
-      return new RpcError(status.INVALID_ARGUMENT, ex.message);
+      return rpcErrorWithReason(
+        status.INVALID_ARGUMENT,
+        ex.message,
+        ErrorReason.ERROR_REASON_UNKNOWN_RELATION_OR_PERMISSION,
+        [["relationName", relationName]],
+      );
     default:
       return new RpcError(status.INTERNAL, ex.message);
   }

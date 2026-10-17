@@ -1187,19 +1187,27 @@ describe("writeRelationships", () => {
       // (NamespaceNotFoundError / RelationNotFoundError); a write to a permission or a disallowed
       // subject type is INVALID_ARGUMENT (CannotWriteToPermissionError / InvalidSubjectTypeError).
       [
-        new RelationshipSchemaViolationException("unknownDefinition", "object definition"),
+        new RelationshipSchemaViolationException("unknownDefinition", "object definition", {
+          definitionName: "document",
+        }),
         status.FAILED_PRECONDITION,
       ],
       [
-        new RelationshipSchemaViolationException("unknownRelation", "relation/permission"),
+        new RelationshipSchemaViolationException("unknownRelation", "relation/permission", {
+          definitionName: "document",
+        }),
         status.FAILED_PRECONDITION,
       ],
       [
-        new RelationshipSchemaViolationException("cannotWriteToPermission", "permission"),
+        new RelationshipSchemaViolationException("cannotWriteToPermission", "permission", {
+          definitionName: "document",
+        }),
         status.INVALID_ARGUMENT,
       ],
       [
-        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type"),
+        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type", {
+          definitionName: "document",
+        }),
         status.INVALID_ARGUMENT,
       ],
     ];
@@ -2573,11 +2581,15 @@ describe("importBulkRelationships", () => {
       [new WriteConflictException("serialization", "conflict"), status.ABORTED],
       [new SequencerOverloadedException("shed"), status.RESOURCE_EXHAUSTED],
       [
-        new RelationshipSchemaViolationException("unknownDefinition", "object definition"),
+        new RelationshipSchemaViolationException("unknownDefinition", "object definition", {
+          definitionName: "document",
+        }),
         status.FAILED_PRECONDITION,
       ],
       [
-        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type"),
+        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type", {
+          definitionName: "document",
+        }),
         status.INVALID_ARGUMENT,
       ],
     ];

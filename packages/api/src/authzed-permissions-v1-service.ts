@@ -6,6 +6,7 @@ import { FormatError } from "@benedb/core/format-error";
 import { InvalidConsistencyTokenException } from "@benedb/core/invalid-consistency-token-exception";
 import { MaxDepthExceededException } from "@benedb/core/max-depth-exceeded-exception";
 import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
+import { tryParseRelationship } from "@benedb/core/tuple-strings";
 import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
 import type { ConsistencyWire } from "@benedb/grains/consistency-wire";
 import {
@@ -95,7 +96,9 @@ import {
   LookupPermissionship,
   LookupSubjectsRequest_WildcardOption,
   Precondition_Operation,
+  precondition_OperationToJSON,
 } from "@benedb/protos/authzed/api/v1/permission_service";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
 import type { Status as RpcStatus } from "@benedb/protos/google/rpc/status";
 import { isCancellationError } from "@thresh/core/errors";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
@@ -127,6 +130,7 @@ import {
   wildcardSubjectError,
 } from "./schema-validation";
 import { validateRequest } from "./request-validation";
+import { rpcErrorWithReason } from "./rpc-errors";
 import type { ServerStreamWriter } from "./server-stream-writer";
 
 /**
@@ -272,8 +276,13 @@ export class AuthzedPermissionsV1Service {
       if (error instanceof MaxDepthExceededException) {
         // The check exhausted its recursion budget (deep schema/data or a cycle). SpiceDB surfaces
         // this as FailedPrecondition, NOT a NoPermission verdict, so the client can tell "the
-        // server gave up" apart from "not authorized".
-        throw new RpcError(status.FAILED_PRECONDITION, error.message);
+        // server gave up" apart from "not authorized". It carries dispatch.MaxDepthExceededError's
+        // ErrorInfo.
+        throw rpcErrorWithReason(
+          status.FAILED_PRECONDITION,
+          error.message,
+          ErrorReason.ERROR_REASON_MAXIMUM_DEPTH_EXCEEDED,
+        );
       }
       if (error instanceof CaveatEvaluationException) {
         throw toRpcCaveat(error);
@@ -320,7 +329,7 @@ export class AuthzedPermissionsV1Service {
       return { writtenAt: { token: reply.writtenAtToken } };
     } catch (error) {
       if (error instanceof PreconditionFailedException) {
-        throw new RpcError(status.FAILED_PRECONDITION, error.message);
+        throw toRpcPrecondition(error, request.optionalPreconditions);
       }
       if (error instanceof RelationshipSchemaViolationException) {
         throw relationshipSchemaViolationRpcError(error);
@@ -330,7 +339,7 @@ export class AuthzedPermissionsV1Service {
         // duplicate-create the client must NOT retry as transient. Serialization -> Aborted
         // (SpiceDB SerializationError): a genuine write-write conflict the client retries as a
         // whole tx.
-        throw new RpcError(toStatusCode(error.kind), error.message);
+        throw toRpcWriteConflict(error);
       }
       if (error instanceof SequencerOverloadedException) {
         // The per-silo admission gate shed this commit - the sequencer is saturated. A deliberate,
@@ -431,12 +440,12 @@ export class AuthzedPermissionsV1Service {
       };
     } catch (error) {
       if (error instanceof PreconditionFailedException) {
-        throw new RpcError(status.FAILED_PRECONDITION, error.message);
+        throw toRpcPrecondition(error, request.optionalPreconditions);
       }
       if (error instanceof DeleteLimitExceededException) {
         // More rows matched than optional_limit with partial deletions disallowed: SpiceDB's
         // CouldNotTransactionallyDeleteError -> InvalidArgument, nothing deleted.
-        throw new RpcError(status.INVALID_ARGUMENT, error.message);
+        throw toRpcDeleteLimit(error, request.relationshipFilter ?? EMPTY_RELATIONSHIP_FILTER);
       }
       if (error instanceof SequencerOverloadedException) {
         // Sequencer overload shed by the admission gate: retryable RESOURCE_EXHAUSTED.
@@ -915,7 +924,7 @@ export class AuthzedPermissionsV1Service {
         throw relationshipSchemaViolationRpcError(error);
       }
       if (error instanceof WriteConflictException) {
-        throw new RpcError(toStatusCode(error.kind), error.message);
+        throw toRpcWriteConflict(error);
       }
       if (error instanceof SequencerOverloadedException) {
         // Sequencer overload shed by the admission gate: retryable RESOURCE_EXHAUSTED.
@@ -1311,6 +1320,115 @@ function toRpcDispatch(ex: DispatchFailedException): RpcError {
 }
 
 /** `ToStatusCode(WriteConflictKind)`: a duplicate CREATE is permanent, a serialization race is not. */
+/**
+ * Maps a failed precondition onto SpiceDB's `PreconditionFailedError`: FAILED_PRECONDITION with
+ * WRITE_OR_DELETE_PRECONDITION_FAILURE and metadata describing the failing precondition's filter
+ * (each field only when set; the subject fields when the filter has a subject filter).
+ */
+function toRpcPrecondition(
+  ex: PreconditionFailedException,
+  preconditions: readonly Precondition[],
+): RpcError {
+  const precondition = preconditions[ex.preconditionIndex];
+  if (precondition === undefined) return new RpcError(status.FAILED_PRECONDITION, ex.message);
+
+  const filter = precondition.filter ?? EMPTY_RELATIONSHIP_FILTER;
+  const metadata: [string, string][] = [
+    ["precondition_operation", precondition_OperationToJSON(precondition.operation)],
+  ];
+  addIfSet(metadata, "precondition_resource_type", filter.resourceType);
+  addIfSet(metadata, "precondition_resource_id", filter.optionalResourceId);
+  addIfSet(metadata, "precondition_resource_id_prefix", filter.optionalResourceIdPrefix);
+  addIfSet(metadata, "precondition_relation", filter.optionalRelation);
+  const subjectFilter = filter.optionalSubjectFilter;
+  if (subjectFilter !== undefined) {
+    metadata.push(["precondition_subject_type", subjectFilter.subjectType]);
+    addIfSet(metadata, "precondition_subject_id", subjectFilter.optionalSubjectId);
+    if (subjectFilter.optionalRelation !== undefined)
+      metadata.push(["precondition_subject_relation", subjectFilter.optionalRelation.relation]);
+  }
+
+  return rpcErrorWithReason(
+    status.FAILED_PRECONDITION,
+    ex.message,
+    ErrorReason.ERROR_REASON_WRITE_OR_DELETE_PRECONDITION_FAILURE,
+    metadata,
+  );
+}
+
+/**
+ * Maps a write conflict onto SpiceDB's status: a CREATE of an existing relationship is
+ * `CreateRelationshipExistsError` (ALREADY_EXISTS, ATTEMPT_TO_RECREATE_RELATIONSHIP, naming the
+ * relationship and its parts); a serialization failure is `SerializationError` (ABORTED,
+ * SERIALIZATION_FAILURE).
+ */
+function toRpcWriteConflict(ex: WriteConflictException): RpcError {
+  if (ex.kind !== "createExisting")
+    return rpcErrorWithReason(
+      toStatusCode(ex.kind),
+      ex.message,
+      ErrorReason.ERROR_REASON_SERIALIZATION_FAILURE,
+    );
+
+  const metadata: [string, string][] = [];
+  const rel = ex.relationship === undefined ? undefined : tryParseRelationship(ex.relationship);
+  if (ex.relationship !== undefined && rel !== undefined) {
+    const resource = rel.reference.resource;
+    const subject = rel.reference.subject;
+    metadata.push(
+      ["relationship", ex.relationship],
+      ["resource_type", resource.objectType],
+      ["resource_object_id", resource.objectId],
+      ["resource_relation", resource.relation],
+      ["subject_type", subject.objectType],
+      ["subject_object_id", subject.objectId],
+      ["subject_relation", subject.relation === ELLIPSIS ? "" : subject.relation],
+    );
+  }
+
+  return rpcErrorWithReason(
+    status.ALREADY_EXISTS,
+    ex.message,
+    ErrorReason.ERROR_REASON_ATTEMPT_TO_RECREATE_RELATIONSHIP,
+    metadata,
+  );
+}
+
+/**
+ * Maps a transactional delete over its limit onto SpiceDB's `CouldNotTransactionallyDeleteError`:
+ * INVALID_ARGUMENT, TOO_MANY_RELATIONSHIPS_FOR_TRANSACTIONAL_DELETE, with the limit and the
+ * request's filter.
+ */
+function toRpcDeleteLimit(
+  ex: DeleteLimitExceededException,
+  filter: ProtoRelationshipFilter,
+): RpcError {
+  const metadata: [string, string][] = [
+    ["limit", String(ex.limit)],
+    ["filter_resource_type", filter.resourceType],
+  ];
+  addIfSet(metadata, "filter_resource_id", filter.optionalResourceId);
+  addIfSet(metadata, "filter_relation", filter.optionalRelation);
+  const subjectFilter = filter.optionalSubjectFilter;
+  if (subjectFilter !== undefined) {
+    metadata.push(["filter_subject_type", subjectFilter.subjectType]);
+    addIfSet(metadata, "filter_subject_id", subjectFilter.optionalSubjectId);
+    if (subjectFilter.optionalRelation !== undefined)
+      metadata.push(["filter_subject_relation", subjectFilter.optionalRelation.relation]);
+  }
+
+  return rpcErrorWithReason(
+    status.INVALID_ARGUMENT,
+    ex.message,
+    ErrorReason.ERROR_REASON_TOO_MANY_RELATIONSHIPS_FOR_TRANSACTIONAL_DELETE,
+    metadata,
+  );
+}
+
+function addIfSet(metadata: [string, string][], key: string, value: string): void {
+  if (value !== "") metadata.push([key, value]);
+}
+
 function toStatusCode(kind: WriteConflictKind): status {
   return kind === "createExisting" ? status.ALREADY_EXISTS : status.ABORTED;
 }

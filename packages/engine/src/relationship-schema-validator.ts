@@ -38,17 +38,34 @@ import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 export type RelationshipTypeReason =
   "unknownDefinition" | "unknownRelation" | "cannotWriteToPermission" | "invalidSubjectType";
 
+/**
+ * The names a {@link RelationshipTypeException}'s structured details report (Spiceport
+ * `RelationshipValidationException`'s `DefinitionName` .. `AllowedCaveats`): the definition and
+ * relation the violation concerns and, for an invalid subject type, the written subject's
+ * allowed-relation source and (when it lacked a required caveat) the comma-joined caveats it needed.
+ */
+export interface RelationshipTypeFacts {
+  readonly definitionName: string;
+  readonly relationName?: string | undefined;
+  readonly subjectType?: string | undefined;
+  readonly allowedCaveats?: string | undefined;
+}
+
 /** Raised when a written relationship is not permitted by the schema. */
 export class RelationshipTypeException extends Error {
   /** Which SpiceDB validation error this is. */
   readonly reason: RelationshipTypeReason;
 
-  constructor(reason: RelationshipTypeReason, message: string) {
+  /** The names the error's structured details report. */
+  readonly facts: RelationshipTypeFacts;
+
+  constructor(reason: RelationshipTypeReason, message: string, facts: RelationshipTypeFacts) {
     super(message);
     // Re-pins the prototype so `instanceof` survives downlevelling; C# needs no equivalent.
     Object.setPrototypeOf(this, new.target.prototype);
     this.name = "RelationshipTypeException";
     this.reason = reason;
+    this.facts = facts;
   }
 }
 
@@ -115,6 +132,9 @@ function namespaceNotFound(name: string): RelationshipTypeException {
   return new RelationshipTypeException(
     "unknownDefinition",
     `object definition \`${name}\` not found`,
+    {
+      definitionName: name,
+    },
   );
 }
 
@@ -122,6 +142,7 @@ function relationNotFound(namespace: string, relation: string): RelationshipType
   return new RelationshipTypeException(
     "unknownRelation",
     `relation/permission \`${relation}\` not found under definition \`${namespace}\``,
+    { definitionName: namespace, relationName: relation },
   );
 }
 
@@ -156,6 +177,7 @@ function validateOne(
       "cannotWriteToPermission",
       `cannot write a relationship to permission \`${resource.relation}\` under definition ` +
         `\`${resource.objectType}\``,
+      { definitionName: resource.objectType, relationName: resource.relation },
     );
   }
 
@@ -230,6 +252,11 @@ function invalidSubjectType(
   const prefix =
     `subjects of type \`${source}\` are not allowed on relation ` +
     `\`${resource.objectType}#${resource.relation}\``;
+  const facts: RelationshipTypeFacts = {
+    definitionName: resource.objectType,
+    relationName: resource.relation,
+    subjectType: source,
+  };
 
   // An uncaveated subject where only caveated forms of the same subject type are allowed.
   // Deliberately NOT transliterated from Spiceport's `InvalidSubjectType`, which compares
@@ -258,6 +285,7 @@ function invalidSubjectType(
       return new RelationshipTypeException(
         "invalidSubjectType",
         `${prefix} without one of the following caveats: ${caveats.join(",")}`,
+        { ...facts, allowedCaveats: caveats.join(",") },
       );
     }
   }
@@ -270,10 +298,11 @@ function invalidSubjectType(
     return new RelationshipTypeException(
       "invalidSubjectType",
       `${prefix}; did you mean \`${suggestion}\`?`,
+      facts,
     );
   }
 
-  return new RelationshipTypeException("invalidSubjectType", prefix);
+  return new RelationshipTypeException("invalidSubjectType", prefix, facts);
 }
 
 /**

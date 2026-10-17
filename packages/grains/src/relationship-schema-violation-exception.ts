@@ -1,4 +1,7 @@
-import type { RelationshipTypeReason } from "@benedb/engine/relationship-schema-validator";
+import type {
+  RelationshipTypeFacts,
+  RelationshipTypeReason,
+} from "@benedb/engine/relationship-schema-validator";
 import { registerSurrogate } from "@thresh/core/value-codec";
 
 /**
@@ -19,22 +22,27 @@ export class RelationshipSchemaViolationException extends Error {
   /** Which SpiceDB validation error this is. */
   readonly reason: RelationshipTypeReason;
 
-  /** Creates the exception carrying the schema-validator's reason and message, verbatim. */
-  constructor(reason: RelationshipTypeReason, message: string) {
+  /** The names the error's structured details report (definition, relation, subject type, caveats). */
+  readonly facts: RelationshipTypeFacts;
+
+  /** Creates the exception carrying the schema-validator's reason, message and facts, verbatim. */
+  constructor(reason: RelationshipTypeReason, message: string, facts: RelationshipTypeFacts) {
     super(message);
     Object.setPrototypeOf(this, new.target.prototype);
     this.name = "RelationshipSchemaViolationException";
     this.reason = reason;
+    this.facts = facts;
   }
 }
 
 registerSurrogate<RelationshipSchemaViolationException>({
   tag: "benedb.relationshipSchemaViolationException",
   test: (value) => value instanceof RelationshipSchemaViolationException,
-  encode: (error) => ({ reason: error.reason, message: error.message }),
+  encode: (error) => ({ reason: error.reason, message: error.message, facts: error.facts }),
   decode: (fields) =>
     new RelationshipSchemaViolationException(
       fields.reason as RelationshipTypeReason,
       fields.message as string,
+      fields.facts as RelationshipTypeFacts,
     ),
 });

@@ -423,11 +423,15 @@ describe("importBulkRelationships", () => {
   it("maps a schema violation to SpiceDB's code for its reason", async () => {
     const cases: readonly [RelationshipSchemaViolationException, status][] = [
       [
-        new RelationshipSchemaViolationException("unknownRelation", "relation/permission"),
+        new RelationshipSchemaViolationException("unknownRelation", "relation/permission", {
+          definitionName: "document",
+        }),
         status.FAILED_PRECONDITION,
       ],
       [
-        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type"),
+        new RelationshipSchemaViolationException("invalidSubjectType", "subjects of type", {
+          definitionName: "document",
+        }),
         status.INVALID_ARGUMENT,
       ],
     ];

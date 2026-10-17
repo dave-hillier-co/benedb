@@ -1,9 +1,11 @@
 import { status } from "@grpc/grpc-js";
 import { ELLIPSIS, PUBLIC_WILDCARD } from "@benedb/core/core-constants";
 import type { SchemaSnapshot } from "@benedb/grains/i-schema-provider";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
 import type { Status as RpcStatus } from "@benedb/protos/google/rpc/status";
 
-import { RpcError } from "./rpc-error";
+import type { RpcError } from "./rpc-error";
+import { rpcErrorWithReason, toRpcStatus as rpcStatusOf } from "./rpc-errors";
 
 /**
  * Ported from Spiceport `src/Spiceport.Api/SchemaValidation.cs`.
@@ -101,9 +103,11 @@ export function rejectWildcardSubject(subjectObjectId: string): void {
  */
 export function wildcardSubjectError(subjectObjectId: string): RpcError | undefined {
   return subjectObjectId === PUBLIC_WILDCARD
-    ? new RpcError(
+    ? rpcErrorWithReason(
         status.INVALID_ARGUMENT,
         "invalid argument: cannot perform check on wildcard subject",
+        ErrorReason.ERROR_REASON_WILDCARD_NOT_ALLOWED,
+        [["field", "subject.object_id"]],
       )
     : undefined;
 }
@@ -111,20 +115,32 @@ export function wildcardSubjectError(subjectObjectId: string): RpcError | undefi
 /**
  * Converts an {@link RpcError} into a `google.rpc.Status` proto for embedding in a per-pair
  * bulk-check result, mirroring SpiceDB's `status.FromError(...).Proto()`: the numeric `code` is
- * the gRPC status code (whose values coincide with `google.rpc.Code`) and the `message` is the
- * status detail. ts-proto emits `details` as a required field, so an empty list is supplied.
+ * the gRPC status code (whose values coincide with `google.rpc.Code`), the `message` is the status
+ * detail, and the details (the `ErrorInfo`) come along.
  */
 export function toRpcStatus(ex: RpcError): RpcStatus {
-  return { code: ex.code, message: ex.details, details: [] };
+  return rpcStatusOf(ex);
 }
 
-function namespaceNotFound(definition: string): RpcError {
-  return new RpcError(status.FAILED_PRECONDITION, `object definition \`${definition}\` not found`);
+/** SpiceDB's `NamespaceNotFoundError`, which `rewriteError` reasons UNKNOWN_DEFINITION. */
+export function namespaceNotFound(definition: string): RpcError {
+  return rpcErrorWithReason(
+    status.FAILED_PRECONDITION,
+    `object definition \`${definition}\` not found`,
+    ErrorReason.ERROR_REASON_UNKNOWN_DEFINITION,
+    [["definition_name", definition]],
+  );
 }
 
-function relationNotFound(definition: string, relation: string): RpcError {
-  return new RpcError(
+/** SpiceDB's `RelationNotFoundError`, which `rewriteError` reasons UNKNOWN_RELATION_OR_PERMISSION. */
+export function relationNotFound(definition: string, relation: string): RpcError {
+  return rpcErrorWithReason(
     status.FAILED_PRECONDITION,
     `relation/permission \`${relation}\` not found under definition \`${definition}\``,
+    ErrorReason.ERROR_REASON_UNKNOWN_RELATION_OR_PERMISSION,
+    [
+      ["definition_name", definition],
+      ["relation_or_permission_name", relation],
+    ],
   );
 }

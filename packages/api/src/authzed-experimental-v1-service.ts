@@ -16,11 +16,13 @@ import type {
   ExperimentalUnregisterRelationshipCounterRequest,
   ExperimentalUnregisterRelationshipCounterResponse,
 } from "@benedb/protos/authzed/api/v1/experimental_service";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
 import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
 import { validateRequest } from "./request-validation";
 import { RpcError } from "./rpc-error";
+import { rpcErrorWithReason } from "./rpc-errors";
 
 /**
  * Port of Spiceport `src/Spiceport.Api/AuthzedExperimentalV1Service.cs`: the gRPC front door for
@@ -81,6 +83,7 @@ export class AuthzedExperimentalV1Service {
     _signal?: AbortSignal | undefined,
   ): Promise<ExperimentalRegisterRelationshipCounterResponse> {
     validateRequest("ExperimentalRegisterRelationshipCounterRequest", request);
+    requireName(request.name);
 
     // The validation above rejects a request without its required relationship_filter.
     const relationshipFilter = request.relationshipFilter as RelationshipFilter;
@@ -92,7 +95,7 @@ export class AuthzedExperimentalV1Service {
       });
     } catch (error) {
       if (error instanceof CounterOperationException) {
-        throw toRpc(error);
+        throw toRpc(error, request.name, relationshipFilter);
       }
       if (error instanceof SequencerOverloadedException) {
         // The per-silo admission gate shed this commit - the sequencer is saturated. A deliberate,
@@ -111,12 +114,13 @@ export class AuthzedExperimentalV1Service {
     _signal?: AbortSignal | undefined,
   ): Promise<ExperimentalUnregisterRelationshipCounterResponse> {
     validateRequest("ExperimentalUnregisterRelationshipCounterRequest", request);
+    requireName(request.name);
 
     try {
       await this.#relationships.unregisterRelationshipCounter({ name: request.name });
     } catch (error) {
       if (error instanceof CounterOperationException) {
-        throw toRpc(error);
+        throw toRpc(error, request.name, undefined);
       }
       if (error instanceof SequencerOverloadedException) {
         // Sequencer overload shed by the admission gate: retryable RESOURCE_EXHAUSTED.
@@ -139,13 +143,14 @@ export class AuthzedExperimentalV1Service {
     _signal?: AbortSignal | undefined,
   ): Promise<ExperimentalCountRelationshipsResponse> {
     validateRequest("ExperimentalCountRelationshipsRequest", request);
+    requireName(request.name);
 
     let reply;
     try {
       reply = await this.#relationships.countRelationships({ name: request.name });
     } catch (error) {
       if (error instanceof CounterOperationException) {
-        throw toRpc(error);
+        throw toRpc(error, request.name, undefined);
       }
       throw error;
     }
@@ -200,7 +205,51 @@ function isNullOrEmpty(value: string | undefined): value is undefined | "" {
   return value === undefined || value.length === 0;
 }
 
-/** Both counter failures map to FAILED_PRECONDITION, matching the SpiceDB reference. */
-function toRpc(ex: CounterOperationException): RpcError {
-  return new RpcError(status.FAILED_PRECONDITION, ex.message);
+/**
+ * Both counter failures map to FAILED_PRECONDITION, matching the SpiceDB reference, with the
+ * `ErrorInfo` `rewriteError` gives `CounterAlreadyRegisteredError` (the counter name and the NEW
+ * filter, every field present) and `CounterNotRegisteredError` (the counter name).
+ */
+function toRpc(
+  ex: CounterOperationException,
+  name: string,
+  filter: RelationshipFilter | undefined,
+): RpcError {
+  if (ex.kind !== "alreadyRegistered" || filter === undefined)
+    return rpcErrorWithReason(
+      status.FAILED_PRECONDITION,
+      ex.message,
+      ErrorReason.ERROR_REASON_COUNTER_NOT_REGISTERED,
+      [["counter_name", name]],
+    );
+
+  const subjectFilter = filter.optionalSubjectFilter;
+  return rpcErrorWithReason(
+    status.FAILED_PRECONDITION,
+    ex.message,
+    ErrorReason.ERROR_REASON_COUNTER_ALREADY_REGISTERED,
+    [
+      ["counter_name", name],
+      ["new_filter_resource_type", filter.resourceType],
+      ["new_filter_resource_id", filter.optionalResourceId],
+      ["new_filter_resource_id_prefix", filter.optionalResourceIdPrefix],
+      ["new_filter_relation", filter.optionalRelation],
+      ["new_filter_subject_type", subjectFilter?.subjectType ?? ""],
+      ["new_filter_subject_id", subjectFilter?.optionalSubjectId ?? ""],
+      ["new_filter_subject_relation", subjectFilter?.optionalRelation?.relation ?? ""],
+    ],
+  );
+}
+
+/**
+ * SpiceDB's counter handlers reject an empty name themselves (the name pattern admits the empty
+ * string): INVALID_ARGUMENT, "name must be provided", reason UNSPECIFIED.
+ */
+function requireName(name: string): void {
+  if (name === "")
+    throw rpcErrorWithReason(
+      status.INVALID_ARGUMENT,
+      "name must be provided",
+      ErrorReason.ERROR_REASON_UNSPECIFIED,
+    );
 }

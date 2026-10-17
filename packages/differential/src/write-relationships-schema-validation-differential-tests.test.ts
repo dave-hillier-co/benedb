@@ -1,4 +1,4 @@
-import { status } from "@grpc/grpc-js";
+import { Metadata, status } from "@grpc/grpc-js";
 import { describe, expect, it } from "vitest";
 import { AuthzedPermissionsV1Service } from "@benedb/api/authzed-permissions-v1-service";
 import { RpcError } from "@benedb/api/rpc-error";
@@ -12,6 +12,8 @@ import {
   WriteRelationshipsRequest,
 } from "@benedb/protos/authzed/api/v1/permission_service";
 import { WriteSchemaRequest } from "@benedb/protos/authzed/api/v1/schema_service";
+import { ErrorInfo } from "@benedb/protos/google/rpc/error_info";
+import { Status } from "@benedb/protos/google/rpc/status";
 
 import {
   spiceDbAvailable,
@@ -28,6 +30,7 @@ import { resetSpiceDb } from "./spice-db-reset";
  * in-process `AuthzedPermissionsV1Service`, and asserts both give the same outcome: the same gRPC
  * status code and the same detail text, or success on both. Issue #4: a missing required
  * submessage is INVALID_ARGUMENT with SpiceDB's own protoc-gen-validate text, never an UNKNOWN fault.
+ * Both sides' `google.rpc.ErrorInfo` details are compared too (spiceport#46).
  */
 
 const fixture = useSpiceDbContainer();
@@ -307,16 +310,33 @@ const Ungrammatical: readonly (readonly [
 interface Outcome {
   readonly code: number;
   readonly details: string;
+  /** The `google.rpc.ErrorInfo` in the status details (spiceport#46), when the error carries one. */
+  readonly errorInfo: ErrorInfo | undefined;
 }
 
 async function outcome(promise: Promise<unknown>): Promise<Outcome> {
   return promise.then(
-    () => ({ code: status.OK, details: "" }),
+    () => ({ code: status.OK, details: "", errorInfo: undefined }),
     (reason: unknown) => {
-      const error = reason as { code?: unknown; details?: unknown };
-      return { code: Number(error.code), details: String(error.details) };
+      const error = reason as { code?: unknown; details?: unknown; metadata?: unknown };
+      return {
+        code: Number(error.code),
+        details: String(error.details),
+        errorInfo: errorInfoIn(error.metadata),
+      };
     },
   );
+}
+
+/** Decodes the `ErrorInfo` from a `grpc-status-details-bin` trailer, as a client reads it. */
+function errorInfoIn(metadata: unknown): ErrorInfo | undefined {
+  if (!(metadata instanceof Metadata)) return undefined;
+  const trailer = metadata.get("grpc-status-details-bin")[0];
+  if (!(trailer instanceof Buffer)) return undefined;
+  const detail = Status.decode(trailer).details.find(
+    (d) => d.typeUrl === "type.googleapis.com/google.rpc.ErrorInfo",
+  );
+  return detail === undefined ? undefined : ErrorInfo.decode(detail.value);
 }
 
 describe.sequential("WriteRelationshipsSchemaValidationDifferentialTests", () => {

@@ -1,6 +1,7 @@
 import { status } from "@grpc/grpc-js";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
 
-import { RpcError } from "./rpc-error";
+import { rpcErrorWithReason } from "./rpc-errors";
 
 /**
  * Ported from Spiceport `src/Spiceport.Api/RequestCeilings.cs`.
@@ -38,9 +39,14 @@ export const MAX_BULK_EXPORT_RELATIONSHIPS_LIMIT = 10_000;
  */
 export function validateLimit(providedLimit: number, maxLimit: number): void {
   if (providedLimit > 0 && providedLimit > maxLimit) {
-    throw new RpcError(
+    throw rpcErrorWithReason(
       status.INVALID_ARGUMENT,
       `provided limit ${providedLimit} is greater than maximum allowed of ${maxLimit}`,
+      ErrorReason.ERROR_REASON_EXCEEDS_MAXIMUM_ALLOWABLE_LIMIT,
+      [
+        ["limit_provided", String(providedLimit)],
+        ["maximum_limit_allowed", String(maxLimit)],
+      ],
     );
   }
 }
