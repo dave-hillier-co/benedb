@@ -235,7 +235,10 @@ export function applyClustering(builder: SiloBuilder, options: ClusteringOptions
             `was created with ("${builder.local.toString()}")`,
         );
       }
-      builder.useStaticMembership(options.silos);
+      // A static view has no liveness: a silo that exits stays `active` in its peers' views and
+      // calls routed to it hang. Thresh refuses a multi-silo static view at build unless that is
+      // acknowledged (dave-hillier-co/thresh#85); this cluster is static by design (decision 4).
+      builder.useStaticMembership(options.silos, undefined, { allowWithoutLiveness: true });
       builder.useWebSocketTransport();
       return builder;
     }
