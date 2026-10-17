@@ -470,7 +470,7 @@ describe("tryParseRelationship", () => {
     });
 
     // A negative numeric offset is honoured and normalized to UTC. This is wire-visible —
-    // SpiceDB parses expirations with `time.Parse(time.RFC3339, ...)`, whose `Z07:00` layout
+    // SpiceDB parses expirations with `time.Parse(time.RFC3339Nano, ...)`, whose `Z07:00` layout
     // element accepts a numeric offset as well as "Z" — even though neither implementation ever
     // emits the offset form itself.
     it.each([

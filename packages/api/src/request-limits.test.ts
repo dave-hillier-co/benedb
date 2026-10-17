@@ -294,9 +294,13 @@ describe("validateWriteRelationships", () => {
 
       const error = expectRpcError(() => validateWriteRelationships(request(updates)));
 
-      expect(error.details).toBe(
-        UPDATE_0 + "invalid RelationshipUpdate.Relationship: value is required",
+      // protoc-gen-validate's ValidateAll reports every malformed update, joined with "; ".
+      const violations = updates.map(
+        (_, index) =>
+          `invalid WriteRelationshipsRequest.Updates[${index}]: ${EMBEDDED}` +
+          "invalid RelationshipUpdate.Relationship: value is required",
       );
+      expect(error.details).toBe(violations.join("; "));
     });
   });
 
