@@ -19,6 +19,7 @@ import type {
 import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
+import { validateRequest } from "./request-validation";
 import { RpcError } from "./rpc-error";
 
 /**
@@ -45,8 +46,8 @@ import { RpcError } from "./rpc-error";
  *   * `RpcException(new Status(code, detail))` becomes {@link RpcError}.
  *   * `ServerCallContext` becomes a trailing `signal?: AbortSignal`; the C# reads nothing off it
  *     here, so nothing is passed on.
- *   * `request.RelationshipFilter is null` is `=== undefined`: ts-proto renders an absent
- *     submessage as `undefined`.
+ *   * The C# reads `request.RelationshipFilter` knowing request validation has rejected an absent
+ *     one; ts-proto still types it optional, so it is asserted present once, after validation.
  *   * `RelationshipCount` is uint64. The grains DTO carries a `bigint` and ts-proto renders the
  *     field as a STRING (`forceLong=string`), so it is `String(reply.count)` - never a JS
  *     `number`, which would round past 2^53.
@@ -79,14 +80,15 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalRegisterRelationshipCounterRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ExperimentalRegisterRelationshipCounterResponse> {
-    if (request.relationshipFilter === undefined) {
-      throw new RpcError(status.INVALID_ARGUMENT, "relationship_filter is required");
-    }
+    validateRequest("ExperimentalRegisterRelationshipCounterRequest", request);
+
+    // The validation above rejects a request without its required relationship_filter.
+    const relationshipFilter = request.relationshipFilter as RelationshipFilter;
 
     try {
       await this.#relationships.registerRelationshipCounter({
         name: request.name,
-        filter: toWire(request.relationshipFilter),
+        filter: toWire(relationshipFilter),
       });
     } catch (error) {
       if (error instanceof CounterOperationException) {
@@ -108,6 +110,8 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalUnregisterRelationshipCounterRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ExperimentalUnregisterRelationshipCounterResponse> {
+    validateRequest("ExperimentalUnregisterRelationshipCounterRequest", request);
+
     try {
       await this.#relationships.unregisterRelationshipCounter({ name: request.name });
     } catch (error) {
@@ -134,6 +138,8 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalCountRelationshipsRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ExperimentalCountRelationshipsResponse> {
+    validateRequest("ExperimentalCountRelationshipsRequest", request);
+
     let reply;
     try {
       reply = await this.#relationships.countRelationships({ name: request.name });

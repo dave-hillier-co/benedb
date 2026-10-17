@@ -10,7 +10,6 @@
     "start": "vite-node --config ../../vitest.config.ts --root . src/start.ts"
   },
   "dependencies": {
-    "@grpc/grpc-js": "^1.14.1",
     "@benedb/core": "workspace:*",
     "@benedb/datastore": "workspace:*",
     "@benedb/engine": "workspace:*",
@@ -18,6 +17,8 @@
     "@benedb/protos": "workspace:*",
     "@benedb/schema": "workspace:*",
     "@benedb/silo": "workspace:*",
+    "@bufbuild/protobuf": "^2.14.0",
+    "@grpc/grpc-js": "^1.14.1",
     "@thresh/client": "link:../../../thresh/packages/client",
     "@thresh/core": "link:../../../thresh/packages/core",
     "@thresh/hosting": "link:../../../thresh/packages/hosting",

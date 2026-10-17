@@ -883,7 +883,8 @@ describe("writeRelationships", () => {
 
   it("rejects an UNSPECIFIED update operation with INVALID_ARGUMENT (unlike the v0 surface)", async () => {
     // ts-proto decodes an absent enum as 0 = UNSPECIFIED, so this fires for any client that omits
-    // the field. `PermissionsGrpcService` silently defaults instead; the v1 surface does not.
+    // the field. `PermissionsGrpcService` silently defaults instead; the v1 surface rejects it in
+    // request validation, with SpiceDB's protoc-gen-validate text.
     const h = harness();
 
     const error = await rpcErrorFrom(
@@ -895,7 +896,10 @@ describe("writeRelationships", () => {
     );
 
     expect(error.code).toBe(status.INVALID_ARGUMENT);
-    expect(error.details).toBe("relationship update operation is unspecified");
+    expect(error.details).toBe(
+      "invalid WriteRelationshipsRequest.Updates[0]: embedded message failed validation | " +
+        "caused by: invalid RelationshipUpdate.Operation: value must not be in list [OPERATION_UNSPECIFIED]",
+    );
     expect(h.grain.writeArgs).toHaveLength(0);
   });
 
@@ -927,24 +931,28 @@ describe("writeRelationships", () => {
     expect(written[1]?.relationship.caveatContext).toEqual(new Map([["limit", 10]]));
   });
 
-  it("discards the CONTEXT of an empty-named caveat along with its name", async () => {
-    // Name and context come off the SAME `caveatName.length > 0` guard: an empty caveat name is
-    // not a valid caveat reference, so its context must not survive as an orphan (issue #42).
+  it("rejects an empty-named caveat, so its context can never survive as an orphan", async () => {
+    // An empty caveat name is not a valid caveat reference (issue #42). Request validation rejects
+    // it with SpiceDB's text before the mapping's `caveatName.length > 0` guard is reached.
     const h = harness();
 
-    await h.service.writeRelationships(
-      WriteRelationshipsRequest.fromPartial({
-        updates: [
-          update(RelationshipUpdate_Operation.OPERATION_TOUCH, {
-            optionalCaveat: { caveatName: "", context: { limit: 10 } },
-          }),
-        ],
-      }),
+    const error = await rpcErrorFrom(
+      h.service.writeRelationships(
+        WriteRelationshipsRequest.fromPartial({
+          updates: [
+            update(RelationshipUpdate_Operation.OPERATION_TOUCH, {
+              optionalCaveat: { caveatName: "", context: { limit: 10 } },
+            }),
+          ],
+        }),
+      ),
     );
 
-    const relationship = h.grain.writeArgs[0]?.updates[0]?.relationship;
-    expect(relationship?.caveatName).toBeUndefined();
-    expect(relationship?.caveatContext).toBeUndefined();
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toContain(
+      "invalid ContextualizedCaveat.CaveatName: value does not match regex pattern",
+    );
+    expect(h.grain.writeArgs).toHaveLength(0);
   });
 
   it("maps optional_expires_at onto the wire expiration (issue #39)", async () => {
@@ -1126,13 +1134,18 @@ describe("writeRelationships", () => {
     );
 
     expect(error.code).toBe(status.INVALID_ARGUMENT);
-    expect(error.details).toBe("precondition operation is unspecified");
+    expect(error.details).toBe(
+      "invalid WriteRelationshipsRequest.OptionalPreconditions[0]: embedded message failed " +
+        "validation | caused by: invalid Precondition.Operation: value must not be in list " +
+        "[OPERATION_UNSPECIFIED]",
+    );
     expect(h.grain.writeArgs).toHaveLength(0);
   });
 
   it("validates the request SHAPE before mapping any update", async () => {
-    // `RequestLimits.ValidateWriteRelationships` runs first, so a request that is BOTH a duplicate
-    // and carries an unspecified operation reports the DUPLICATE.
+    // Request validation runs first and reports every violation it finds, so a request that is
+    // BOTH a duplicate and carries unspecified operations reports the operations, not the
+    // duplicate the handler's own checks would find next.
     const h = harness();
 
     const error = await rpcErrorFrom(
@@ -1147,7 +1160,16 @@ describe("writeRelationships", () => {
     );
 
     expect(error.code).toBe(status.INVALID_ARGUMENT);
-    expect(error.details).toContain("more than one update with relationship");
+    expect(error.details).toBe(
+      [0, 1]
+        .map(
+          (index) =>
+            `invalid WriteRelationshipsRequest.Updates[${index}]: embedded message failed ` +
+            "validation | caused by: invalid RelationshipUpdate.Operation: value must not be in " +
+            "list [OPERATION_UNSPECIFIED]",
+        )
+        .join("; "),
+    );
   });
 
   it("maps a failed precondition, both write conflicts and a shed commit", async () => {
@@ -1354,8 +1376,9 @@ describe("readRelationships", () => {
           optionalResourceId: "",
           optionalResourceIdPrefix: "",
           optionalRelation: "",
+          // A subject filter's type is required (request validation rejects an empty one).
           optionalSubjectFilter: {
-            subjectType: "",
+            subjectType: "user",
             optionalSubjectId: "",
             optionalRelation: { relation: "" },
           },
@@ -1379,7 +1402,7 @@ describe("readRelationships", () => {
       subjectIds: undefined,
       subjectRelation: undefined,
     };
-    expect(h.reads.readArgs[0]?.filter).toEqual(allAbsent);
+    expect(h.reads.readArgs[0]?.filter).toEqual({ ...allAbsent, subjectType: "user" });
     expect(h.reads.readArgs[1]?.filter).toEqual({ ...allAbsent, resourceType: "document" });
   });
 
@@ -1874,17 +1897,24 @@ describe("lookupResources", () => {
     expect(writer.collected[0]?.afterResultCursor).toBeUndefined();
   });
 
-  it("forwards a non-empty request cursor and drops an empty one", async () => {
+  it("forwards a non-empty request cursor and rejects an empty one", async () => {
     const h = harness();
     const writer = new CollectingWriter<LookupResourcesResponse>();
 
     await h.service.lookupResources(lookupRequest({ optionalCursor: { token: "resume" } }), writer);
-    await h.service.lookupResources(lookupRequest({ optionalCursor: { token: "" } }), writer);
+    const error = await rpcErrorFrom(
+      h.service.lookupResources(lookupRequest({ optionalCursor: { token: "" } }), writer),
+    );
     await h.service.lookupResources(lookupRequest(), writer);
 
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.details).toBe(
+      "invalid LookupResourcesRequest.OptionalCursor: embedded message failed validation | " +
+        "caused by: invalid Cursor.Token: value length must be between 1 and 102400 bytes, inclusive",
+    );
+    expect(h.reverseOps.lookupResourcesArgs).toHaveLength(2);
     expect(h.reverseOps.lookupResourcesArgs[0]?.cursor).toBe("resume");
     expect(h.reverseOps.lookupResourcesArgs[1]?.cursor).toBeUndefined();
-    expect(h.reverseOps.lookupResourcesArgs[2]?.cursor).toBeUndefined();
   });
 
   it("defaults the subject relation and passes the whole lookup down", async () => {
@@ -2676,7 +2706,7 @@ describe("exportBulkRelationships", () => {
     });
   });
 
-  it("forwards a non-empty cursor, drops an empty one, and converts the consistency", async () => {
+  it("forwards a non-empty cursor, rejects an empty one, and converts the consistency", async () => {
     const h = harness();
     const writer = new CollectingWriter<ExportBulkRelationshipsResponse>();
 
@@ -2688,17 +2718,20 @@ describe("exportBulkRelationships", () => {
       }),
       writer,
     );
-    await h.service.exportBulkRelationships(
-      ExportBulkRelationshipsRequest.fromPartial({
-        optionalLimit: 2,
-        optionalCursor: { token: "" },
-      }),
-      writer,
+    const error = await rpcErrorFrom(
+      h.service.exportBulkRelationships(
+        ExportBulkRelationshipsRequest.fromPartial({
+          optionalLimit: 2,
+          optionalCursor: { token: "" },
+        }),
+        writer,
+      ),
     );
 
     expect(h.reads.exportArgs[0]?.cursor).toBe("resume");
     expect(h.reads.exportArgs[0]?.consistency).toEqual({ mode: "fullyConsistent" });
-    expect(h.reads.exportArgs[1]?.cursor).toBeUndefined();
+    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(h.reads.exportArgs).toHaveLength(1);
   });
 
   it("writes the trailing partial batch accumulated BEFORE a cancellation was observed", async () => {

@@ -51,6 +51,7 @@ import {
   reflectionRelation,
   reflectionTypeReference,
 } from "./reflection-mapper";
+import { validateRequest } from "./request-validation";
 import { RpcError } from "./rpc-error";
 import { schemaFiltersFromRequest } from "./schema-filters";
 
@@ -102,9 +103,11 @@ export class AuthzedSchemaV1Service {
 
   /** Reads the live schema text; an empty (or whitespace-only) schema is NOT_FOUND. */
   async readSchema(
-    _request: ReadSchemaRequest,
+    request: ReadSchemaRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ReadSchemaResponse> {
+    validateRequest("ReadSchemaRequest", request);
+
     const reply = await this.#relationships.readSchema();
     if (isNullOrWhiteSpace(reply.schemaText)) {
       // SpiceDB's schema handler returns NOT_FOUND (ErrNoSchema) when nothing has been written.
@@ -124,6 +127,8 @@ export class AuthzedSchemaV1Service {
     request: WriteSchemaRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<WriteSchemaResponse> {
+    validateRequest("WriteSchemaRequest", request);
+
     try {
       const reply = await this.#relationships.writeSchema({ schemaText: request.schema });
       return { writtenAt: { token: reply.writtenAtToken } };
@@ -153,6 +158,8 @@ export class AuthzedSchemaV1Service {
     request: ReflectSchemaRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ReflectSchemaResponse> {
+    validateRequest("ReflectSchemaRequest", request);
+
     const snapshot = this.#schema.current;
     const filters = schemaFiltersFromRequest(request.optionalFilters);
 
@@ -192,6 +199,8 @@ export class AuthzedSchemaV1Service {
     request: DiffSchemaRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<DiffSchemaResponse> {
+    validateRequest("DiffSchemaRequest", request);
+
     let comparison: CompiledSchema;
     try {
       comparison = compileSchema(request.comparisonSchema);
@@ -223,6 +232,8 @@ export class AuthzedSchemaV1Service {
     request: ComputablePermissionsRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ComputablePermissionsResponse> {
+    validateRequest("ComputablePermissionsRequest", request);
+
     const snapshot = this.#schema.current;
     const namespaces = namespacesByName(snapshot.namespaces);
 
@@ -253,6 +264,8 @@ export class AuthzedSchemaV1Service {
     request: DependentRelationsRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<DependentRelationsResponse> {
+    validateRequest("DependentRelationsRequest", request);
+
     const namespaces = namespacesByName(this.#schema.current.namespaces);
 
     let dependents: readonly RelationReference[];

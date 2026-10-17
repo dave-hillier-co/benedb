@@ -102,7 +102,6 @@ import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
 import {
   validateCaveatContextSize,
-  validateDeleteRelationships,
   validateTransactionMetadataSize,
   validateWriteRelationships,
 } from "./request-limits";
@@ -127,6 +126,7 @@ import {
   tryCheckNamespaceAndRelations,
   wildcardSubjectError,
 } from "./schema-validation";
+import { validateRequest } from "./request-validation";
 import type { ServerStreamWriter } from "./server-stream-writer";
 
 /**
@@ -208,6 +208,8 @@ export class AuthzedPermissionsV1Service {
     request: CheckPermissionRequest,
     signal?: AbortSignal | undefined,
   ): Promise<CheckPermissionResponse> {
+    validateRequest("CheckPermissionRequest", request);
+
     const requestSubject = request.subject ?? EMPTY_SUBJECT_REFERENCE;
     const subjectRelation = isNullOrEmpty(requestSubject.optionalRelation)
       ? ELLIPSIS
@@ -300,9 +302,10 @@ export class AuthzedPermissionsV1Service {
   async writeRelationships(
     request: WriteRelationshipsRequest,
   ): Promise<WriteRelationshipsResponse> {
-    // Reject malformed/over-limit/duplicate/oversized requests up front, in SpiceDB's order: the
-    // required-submessage shape, then the metadata size, then the update/precondition limits. All
-    // of these are InvalidArgument, not FailedPrecondition.
+    validateRequest("WriteRelationshipsRequest", request);
+
+    // Reject over-limit/duplicate/oversized requests up front (SpiceDB's handler checks the
+    // transaction metadata first, then the counts). All of these are InvalidArgument.
     validateWriteRelationships(request);
 
     const updates = request.updates.map(toWireRelationshipUpdate);
@@ -344,6 +347,8 @@ export class AuthzedPermissionsV1Service {
     responseStream: ServerStreamWriter<ReadRelationshipsResponse>,
     signal?: AbortSignal | undefined,
   ): Promise<void> {
+    validateRequest("ReadRelationshipsRequest", request);
+
     validateLimit(request.optionalLimit, MAX_READ_RELATIONSHIPS_LIMIT);
 
     const filter = toWireFilter(request.relationshipFilter ?? EMPTY_RELATIONSHIP_FILTER);
@@ -395,8 +400,7 @@ export class AuthzedPermissionsV1Service {
   async deleteRelationships(
     request: DeleteRelationshipsRequest,
   ): Promise<DeleteRelationshipsResponse> {
-    // Reject a missing required filter as InvalidArgument before the wire mapping reads it.
-    validateDeleteRelationships(request);
+    validateRequest("DeleteRelationshipsRequest", request);
 
     validateTransactionMetadataSize(request.optionalTransactionMetadata);
     validateLimit(request.optionalLimit, MAX_DELETE_RELATIONSHIPS_LIMIT);
@@ -446,6 +450,8 @@ export class AuthzedPermissionsV1Service {
   async expandPermissionTree(
     request: ExpandPermissionTreeRequest,
   ): Promise<ExpandPermissionTreeResponse> {
+    validateRequest("ExpandPermissionTreeRequest", request);
+
     const resource = request.resource ?? EMPTY_OBJECT_REFERENCE;
 
     // Validate the resource definition+permission up front (SpiceDB: CheckNamespaceAndRelation).
@@ -492,6 +498,8 @@ export class AuthzedPermissionsV1Service {
     responseStream: ServerStreamWriter<LookupResourcesResponse>,
     signal?: AbortSignal | undefined,
   ): Promise<void> {
+    validateRequest("LookupResourcesRequest", request);
+
     const requestSubject = request.subject ?? EMPTY_SUBJECT_REFERENCE;
     const subjectRelation = isNullOrEmpty(requestSubject.optionalRelation)
       ? ELLIPSIS
@@ -603,6 +611,8 @@ export class AuthzedPermissionsV1Service {
     responseStream: ServerStreamWriter<LookupSubjectsResponse>,
     signal?: AbortSignal | undefined,
   ): Promise<void> {
+    validateRequest("LookupSubjectsRequest", request);
+
     const subjectRelation = isNullOrEmpty(request.optionalSubjectRelation)
       ? ELLIPSIS
       : request.optionalSubjectRelation;
@@ -734,6 +744,8 @@ export class AuthzedPermissionsV1Service {
     request: CheckBulkPermissionsRequest,
     signal?: AbortSignal | undefined,
   ): Promise<CheckBulkPermissionsResponse> {
+    validateRequest("CheckBulkPermissionsRequest", request);
+
     const snapshot = this.#schema.current;
 
     // Validate each pair against the schema UP FRONT and PER PAIR. An unknown resource definition,
@@ -881,6 +893,8 @@ export class AuthzedPermissionsV1Service {
     signal?.throwIfAborted();
     for await (const message of requestStream) {
       signal?.throwIfAborted();
+      // SpiceDB's stream interceptors validate each message as the handler receives it.
+      validateRequest("ImportBulkRelationshipsRequest", message);
       for (const relationship of message.relationships) {
         relationships.push(toWireRelationship(relationship));
       }
@@ -917,6 +931,8 @@ export class AuthzedPermissionsV1Service {
     responseStream: ServerStreamWriter<ExportBulkRelationshipsResponse>,
     signal?: AbortSignal | undefined,
   ): Promise<void> {
+    validateRequest("ExportBulkRelationshipsRequest", request);
+
     validateLimit(request.optionalLimit, MAX_BULK_EXPORT_RELATIONSHIPS_LIMIT);
 
     const filter =

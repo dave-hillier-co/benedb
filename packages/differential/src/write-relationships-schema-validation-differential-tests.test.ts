@@ -6,6 +6,7 @@ import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import type { Relationship } from "@benedb/protos/authzed/api/v1/core";
 import { RelationshipUpdate_Operation } from "@benedb/protos/authzed/api/v1/core";
 import {
+  CheckPermissionRequest,
   DeleteRelationshipsRequest,
   Precondition_Operation,
   WriteRelationshipsRequest,
@@ -229,6 +230,80 @@ const MissingFilter: readonly (readonly [
   ],
 ];
 
+/**
+ * Requests that break the `authzed.api.v1` id, type and name grammar (spiceport#46): SpiceDB rejects
+ * each in its protoc-gen-validate or handwritten validation interceptor, before any handler runs.
+ */
+const Ungrammatical: readonly (readonly [
+  name: string,
+  send: (target: {
+    writeRelationships(request: WriteRelationshipsRequest): Promise<unknown>;
+    deleteRelationships(request: DeleteRelationshipsRequest): Promise<unknown>;
+    checkPermission(request: CheckPermissionRequest): Promise<unknown>;
+  }) => Promise<unknown>,
+])[] = [
+  [
+    "write_uppercase_resource_type",
+    (target) =>
+      target.writeRelationships(req(TOUCH, { resourceType: "Document", relation: "viewer" })),
+  ],
+  [
+    "write_malformed_relation_and_subject_id",
+    (target) => target.writeRelationships(req(TOUCH, { relation: "Viewer", subjectId: "a b" })),
+  ],
+  [
+    "write_wildcard_subject_with_relation",
+    (target) =>
+      target.writeRelationships(
+        req(TOUCH, {
+          relation: "viewer",
+          subjectType: "group",
+          subjectId: "*",
+          subjectRelation: "member",
+        }),
+      ),
+  ],
+  [
+    "write_unspecified_operation",
+    (target) =>
+      target.writeRelationships(
+        req(RelationshipUpdate_Operation.OPERATION_UNSPECIFIED, { relation: "viewer" }),
+      ),
+  ],
+  [
+    "delete_wildcard_resource_id",
+    (target) =>
+      target.deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document", optionalResourceId: "*" },
+        }),
+      ),
+  ],
+  [
+    "check_wildcard_resource",
+    (target) =>
+      target.checkPermission(
+        CheckPermissionRequest.fromPartial({
+          resource: { objectType: "document", objectId: "*" },
+          permission: "view",
+          subject: { object: { objectType: "user", objectId: "alice" } },
+        }),
+      ),
+  ],
+  [
+    "check_overlong_object_id_and_empty_consistency",
+    (target) =>
+      target.checkPermission(
+        CheckPermissionRequest.fromPartial({
+          consistency: {},
+          resource: { objectType: "document", objectId: "a".repeat(1025) },
+          permission: "view",
+          subject: { object: { objectType: "user", objectId: "alice" } },
+        }),
+      ),
+  ],
+];
+
 interface Outcome {
   readonly code: number;
   readonly details: string;
@@ -317,6 +392,37 @@ describe.sequential("WriteRelationshipsSchemaValidationDifferentialTests", () =>
 
   for (const [name, send] of MissingFilter) {
     it(`Missing required filter agrees with SpiceDB [${name}]`, async (ctx) => {
+      ctx.skip(!spiceDbAvailable, spiceDbSkipReason);
+
+      let spiceDb: Outcome;
+      const spiceDbClient = new SpiceDbGrpcClient(fixture().address, fixture().preSharedKey);
+      try {
+        await resetSpiceDb(spiceDbClient);
+        await spiceDbClient.writeSchema(WriteSchemaRequest.fromPartial({ schema: Schema }));
+        spiceDb = await outcome(send(spiceDbClient));
+        expect(spiceDb.code).toBe(status.INVALID_ARGUMENT);
+      } finally {
+        spiceDbClient.close();
+      }
+
+      const cluster = await MeshTestCluster.create(Schema);
+      try {
+        const service = new AuthzedPermissionsV1Service(
+          cluster.checker,
+          cluster.grainFactory,
+          cluster.reverseOps,
+          cluster.relationshipReads,
+          cluster.schemaProvider,
+        );
+        expect(await outcome(send(service))).toEqual(spiceDb);
+      } finally {
+        await cluster.dispose();
+      }
+    });
+  }
+
+  for (const [name, send] of Ungrammatical) {
+    it(`Ungrammatical request agrees with SpiceDB [${name}]`, async (ctx) => {
       ctx.skip(!spiceDbAvailable, spiceDbSkipReason);
 
       let spiceDb: Outcome;

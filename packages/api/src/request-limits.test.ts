@@ -23,6 +23,7 @@ import {
   validateTransactionMetadataSize,
   validateWriteRelationships,
 } from "./request-limits";
+import { validateRequest } from "./request-validation";
 import { RpcError } from "./rpc-error";
 
 /**
@@ -195,12 +196,19 @@ describe("validateWriteRelationships", () => {
     const RELATIONSHIP = "invalid RelationshipUpdate.Relationship: ";
     const EMBEDDED = "embedded message failed validation | caused by: ";
 
+    // A missing submessage is request validation's to report (`request-validation.ts`), which the
+    // handler runs ahead of these limits; the pair is exercised in the handler's order.
+    const validateAsTheHandlerDoes = (write: WriteRelationshipsRequest): void => {
+      validateRequest("WriteRelationshipsRequest", write);
+      validateWriteRelationships(write);
+    };
+
     it("rejects an update with no relationship at all", () => {
       const malformed = RelationshipUpdate.fromPartial({
         operation: RelationshipUpdate_Operation.OPERATION_CREATE,
       });
 
-      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+      const error = expectRpcError(() => validateAsTheHandlerDoes(request([malformed])));
 
       expect(error.code).toBe(status.INVALID_ARGUMENT);
       expect(error.details).toBe(
@@ -216,7 +224,7 @@ describe("validateWriteRelationships", () => {
         }),
       );
 
-      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+      const error = expectRpcError(() => validateAsTheHandlerDoes(request([malformed])));
 
       expect(error.code).toBe(status.INVALID_ARGUMENT);
       expect(error.details).toBe(
@@ -232,7 +240,7 @@ describe("validateWriteRelationships", () => {
         }),
       );
 
-      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+      const error = expectRpcError(() => validateAsTheHandlerDoes(request([malformed])));
 
       expect(error.code).toBe(status.INVALID_ARGUMENT);
       expect(error.details).toBe(
@@ -249,7 +257,7 @@ describe("validateWriteRelationships", () => {
         }),
       );
 
-      const error = expectRpcError(() => validateWriteRelationships(request([malformed])));
+      const error = expectRpcError(() => validateAsTheHandlerDoes(request([malformed])));
 
       expect(error.code).toBe(status.INVALID_ARGUMENT);
       expect(error.details).toBe(
@@ -275,7 +283,7 @@ describe("validateWriteRelationships", () => {
       });
 
       const error = expectRpcError(() =>
-        validateWriteRelationships(request([wellFormed, malformed])),
+        validateAsTheHandlerDoes(request([wellFormed, malformed])),
       );
 
       expect(error.code).toBe(status.INVALID_ARGUMENT);
@@ -292,7 +300,7 @@ describe("validateWriteRelationships", () => {
         RelationshipUpdate.fromPartial({ operation: RelationshipUpdate_Operation.OPERATION_TOUCH }),
       );
 
-      const error = expectRpcError(() => validateWriteRelationships(request(updates)));
+      const error = expectRpcError(() => validateAsTheHandlerDoes(request(updates)));
 
       // protoc-gen-validate's ValidateAll reports every malformed update, joined with "; ".
       const violations = updates.map(
