@@ -172,6 +172,12 @@ const HAS_OPTIONAL_CURSOR: ReadonlySet<RequestTypeName> = new Set<RequestTypeNam
  * ZedToken must decode; and anything else falls to the middleware's default case, INTERNAL
  * `missing handling of consistency case in %v`.
  *
+ * Each code and message here is observed from a running SpiceDB v1.49.2 server (`spicedb serve`
+ * over memdb, called with an authzed-go v1.7.0 client); none carries status details. The
+ * empty-consistency message ends in a space (Go's `%v` of an empty message is empty): a Go client
+ * such as `zed` receives it whole, while a grpc-js client receives an empty detail, because Node's
+ * HTTP/2 layer drops a header value with leading or trailing whitespace (RFC 9113 section 8.2.1).
+ *
  * Only what can be decided without the datastore is reproduced here: the default case, an empty
  * ZedToken (which never decodes: INVALID_ARGUMENT `invalid revision requested`), and an empty cursor
  * token (which decodes to a cursor with no version: INTERNAL `unexpected consistency middleware

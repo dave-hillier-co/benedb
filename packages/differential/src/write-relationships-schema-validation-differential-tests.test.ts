@@ -302,6 +302,7 @@ const Ungrammatical: readonly (readonly [
   ],
   // SpiceDB's consistency middleware runs before field validation, so an empty Consistency is its
   // INTERNAL "missing handling of consistency case in " even though the object id is also too long.
+  // The message ends in a space, so a grpc-js client receives it as "" (see asReceivedOverGrpcJs).
   [
     "check_overlong_object_id_and_empty_consistency",
     status.INTERNAL,
@@ -343,11 +344,23 @@ async function outcome(promise: Promise<unknown>): Promise<Outcome> {
       const error = reason as { code?: unknown; details?: unknown; metadata?: unknown };
       return {
         code: Number(error.code),
-        details: String(error.details),
+        details: asReceivedOverGrpcJs(String(error.details)),
         errorInfo: errorInfoIn(error.metadata),
       };
     },
   );
+}
+
+/**
+ * A status message as a grpc-js client receives it. Node's HTTP/2 layer drops a header field whose
+ * value starts or ends with whitespace (RFC 9113 section 8.2.1), so such a `grpc-message` trailer
+ * never arrives and grpc-js reports an empty detail. Observed against a running SpiceDB v1.49.2:
+ * its INTERNAL "missing handling of consistency case in " (trailing space) reaches a Go client
+ * whole and a grpc-js client as "". BeneDB's in-process error is the server's status, so it is
+ * compared as it would arrive over the same transport.
+ */
+function asReceivedOverGrpcJs(details: string): string {
+  return /^\s|\s$/u.test(details) ? "" : details;
 }
 
 /** Decodes the `ErrorInfo` from a `grpc-status-details-bin` trailer, as a client reads it. */
