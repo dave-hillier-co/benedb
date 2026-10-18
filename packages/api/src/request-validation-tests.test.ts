@@ -27,7 +27,7 @@ import {
 } from "@benedb/protos/authzed/api/v1/schema_service";
 import { describe, expect, it } from "vitest";
 
-import { ensureSupported, goName, goRegex } from "./proto-validation";
+import { ensureSupported, goName, goRegex, validateAll } from "./proto-validation";
 import { validateRequest, type RequestTypeName } from "./request-validation";
 import { RpcError } from "./rpc-error";
 
@@ -94,7 +94,12 @@ function rel(resource: string, relation = "viewer", subject = ALICE, extra = "")
   return `{"resource":${resource},"relation":"${relation}","subject":${subject}${extra}}`;
 }
 
-function assertRejected(typeName: RequestTypeName, request: object, detail: string): void {
+function assertRejected(
+  typeName: RequestTypeName,
+  request: object,
+  detail: string,
+  code: status = status.INVALID_ARGUMENT,
+): void {
   let caught: unknown;
   try {
     validateRequest(typeName, request);
@@ -102,8 +107,16 @@ function assertRejected(typeName: RequestTypeName, request: object, detail: stri
     caught = error;
   }
   expect(caught).toBeInstanceOf(RpcError);
-  expect((caught as RpcError).code).toBe(status.INVALID_ARGUMENT);
+  expect((caught as RpcError).code).toBe(code);
   expect((caught as RpcError).details).toBe(detail);
+}
+
+/**
+ * The protoc-gen-validate layer alone. SpiceDB's consistency middleware runs ahead of it and rejects
+ * some of these requests first, so what the RPC returns is asserted separately.
+ */
+function assertPgv(typeName: RequestTypeName, request: object, detail: string): void {
+  expect(validateAll(`authzed.api.v1.${typeName}`, request)).toBe(detail);
 }
 
 describe("RequestValidationTests", () => {
@@ -205,16 +218,62 @@ describe("RequestValidationTests", () => {
     );
   });
 
-  it("An_empty_consistency_needs_a_requirement", () => {
+  // SpiceDB's consistency middleware (pkg/middleware/consistency) runs before the
+  // protoc-gen-validate interceptor: a Consistency with no usable requirement falls to its default
+  // case, INTERNAL "missing handling of consistency case in %v", where %v is the message's compact
+  // text form.
+  it("An_empty_consistency_is_an_internal_error_before_field_validation", () => {
     assertRejected(
+      "CheckPermissionRequest",
+      parse(CheckPermissionRequest, check(doc("Bad"), "view", ALICE, `"consistency":{},`)),
+      "missing handling of consistency case in ",
+      status.INTERNAL,
+    );
+  });
+
+  it("Minimize_latency_false_is_an_unhandled_consistency_case", () => {
+    assertRejected(
+      "CheckPermissionRequest",
+      parse(
+        CheckPermissionRequest,
+        check(doc("doc1"), "view", ALICE, `"consistency":{"minimizeLatency":false},`),
+      ),
+      "missing handling of consistency case in minimize_latency:false",
+      status.INTERNAL,
+    );
+  });
+
+  it("Fully_consistent_false_is_an_unhandled_consistency_case", () => {
+    assertRejected(
+      "ExpandPermissionTreeRequest",
+      parse(
+        ExpandPermissionTreeRequest,
+        `{"consistency":{"fullyConsistent":false},"resource":{"objectType":"document","objectId":"doc1"},"permission":"view"}`,
+      ),
+      "missing handling of consistency case in fully_consistent:false",
+      status.INTERNAL,
+    );
+  });
+
+  // The middleware decodes a ZedToken before field validation; an empty one never decodes.
+  it("An_empty_zed_token_is_an_invalid_revision", () => {
+    assertRejected(
+      "CheckPermissionRequest",
+      parse(
+        CheckPermissionRequest,
+        check(doc("doc 1"), "view", ALICE, `"consistency":{"atLeastAsFresh":{}},`),
+      ),
+      "invalid revision requested",
+    );
+  });
+
+  it("The_consistency_rules_still_hold_at_the_protoc_gen_validate_layer", () => {
+    assertPgv(
       "CheckPermissionRequest",
       parse(CheckPermissionRequest, check(doc("doc1"), "view", ALICE, `"consistency":{},`)),
       `invalid CheckPermissionRequest.Consistency: ${EMBEDDED}invalid Consistency.Requirement: value is required`,
     );
-  });
-
-  it("Minimize_latency_false_is_rejected", () => {
-    assertRejected(
+    assertPgv(
       "CheckPermissionRequest",
       parse(
         CheckPermissionRequest,
@@ -222,10 +281,7 @@ describe("RequestValidationTests", () => {
       ),
       `invalid CheckPermissionRequest.Consistency: ${EMBEDDED}invalid Consistency.MinimizeLatency: value must equal true`,
     );
-  });
-
-  it("Fully_consistent_false_is_rejected", () => {
-    assertRejected(
+    assertPgv(
       "ExpandPermissionTreeRequest",
       parse(
         ExpandPermissionTreeRequest,
@@ -233,10 +289,7 @@ describe("RequestValidationTests", () => {
       ),
       `invalid ExpandPermissionTreeRequest.Consistency: ${EMBEDDED}invalid Consistency.FullyConsistent: value must equal true`,
     );
-  });
-
-  it("An_empty_zed_token_is_rejected", () => {
-    assertRejected(
+    assertPgv(
       "CheckPermissionRequest",
       parse(
         CheckPermissionRequest,
@@ -392,7 +445,7 @@ describe("RequestValidationTests", () => {
 
   it("A_cursor_token_must_be_between_1_and_102400_bytes", () => {
     const reason = "value length must be between 1 and 102400 bytes, inclusive";
-    assertRejected(
+    assertPgv(
       "ReadRelationshipsRequest",
       parse(
         ReadRelationshipsRequest,
@@ -400,13 +453,38 @@ describe("RequestValidationTests", () => {
       ),
       `invalid ReadRelationshipsRequest.OptionalCursor: ${EMBEDDED}invalid Cursor.Token: ${reason}`,
     );
-    assertRejected(
+    assertPgv(
       "ReadRelationshipsRequest",
       parse(
         ReadRelationshipsRequest,
         `{"relationshipFilter":{"resourceType":"document"},"optionalCursor":{"token":"${"x".repeat(102401)}"}}`,
       ),
       `invalid ReadRelationshipsRequest.OptionalCursor: ${EMBEDDED}invalid Cursor.Token: ${reason}`,
+    );
+  });
+
+  // With a cursor present the middleware takes the revision from it, ahead of field validation. An
+  // empty token decodes to a cursor with no version, which it reports as an unexpected (INTERNAL)
+  // error.
+  it("An_empty_cursor_is_an_internal_error_before_field_validation", () => {
+    const detail = "unexpected consistency middleware error: cursor pointer was nil";
+    assertRejected(
+      "ReadRelationshipsRequest",
+      parse(
+        ReadRelationshipsRequest,
+        `{"relationshipFilter":{"resourceType":"Document"},"optionalCursor":{},"consistency":{}}`,
+      ),
+      detail,
+      status.INTERNAL,
+    );
+    assertRejected(
+      "ExportBulkRelationshipsRequest",
+      parse(
+        ExportBulkRelationshipsRequest,
+        `{"optionalRelationshipFilter":{"resourceType":"Document"},"optionalCursor":{}}`,
+      ),
+      detail,
+      status.INTERNAL,
     );
   });
 
@@ -476,7 +554,7 @@ describe("RequestValidationTests", () => {
   });
 
   it("Export_bulk_checks_fields_in_declaration_order", () => {
-    assertRejected(
+    assertPgv(
       "ExportBulkRelationshipsRequest",
       parse(
         ExportBulkRelationshipsRequest,
@@ -512,12 +590,14 @@ describe("RequestValidationTests", () => {
     assertRejected(
       "ReflectSchemaRequest",
       parse(ReflectSchemaRequest, `{"consistency":{}}`),
-      `invalid ReflectSchemaRequest.Consistency: ${EMBEDDED}invalid Consistency.Requirement: value is required`,
+      "missing handling of consistency case in ",
+      status.INTERNAL,
     );
     assertRejected(
       "DiffSchemaRequest",
       parse(DiffSchemaRequest, `{"comparisonSchema":"x","consistency":{}}`),
-      `invalid DiffSchemaRequest.Consistency: ${EMBEDDED}invalid Consistency.Requirement: value is required`,
+      "missing handling of consistency case in ",
+      status.INTERNAL,
     );
     assertRejected(
       "WriteSchemaRequest",

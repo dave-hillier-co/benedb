@@ -1915,11 +1915,10 @@ describe("lookupResources", () => {
     );
     await h.service.lookupResources(lookupRequest(), writer);
 
-    expect(error.code).toBe(status.INVALID_ARGUMENT);
-    expect(error.details).toBe(
-      "invalid LookupResourcesRequest.OptionalCursor: embedded message failed validation | " +
-        "caused by: invalid Cursor.Token: value length must be between 1 and 102400 bytes, inclusive",
-    );
+    // SpiceDB's consistency middleware decodes the cursor ahead of field validation; an empty token
+    // is a cursor with no version, an unexpected (INTERNAL) middleware error.
+    expect(error.code).toBe(status.INTERNAL);
+    expect(error.details).toBe("unexpected consistency middleware error: cursor pointer was nil");
     expect(h.reverseOps.lookupResourcesArgs).toHaveLength(2);
     expect(h.reverseOps.lookupResourcesArgs[0]?.cursor).toBe("resume");
     expect(h.reverseOps.lookupResourcesArgs[1]?.cursor).toBeUndefined();
@@ -2742,7 +2741,7 @@ describe("exportBulkRelationships", () => {
 
     expect(h.reads.exportArgs[0]?.cursor).toBe("resume");
     expect(h.reads.exportArgs[0]?.consistency).toEqual({ mode: "fullyConsistent" });
-    expect(error.code).toBe(status.INVALID_ARGUMENT);
+    expect(error.code).toBe(status.INTERNAL);
     expect(h.reads.exportArgs).toHaveLength(1);
   });
 

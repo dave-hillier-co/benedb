@@ -1,7 +1,8 @@
 import { status } from "@grpc/grpc-js";
-import type { ObjectReference, SubjectReference } from "@benedb/protos/authzed/api/v1/core";
+import type { Cursor, ObjectReference, SubjectReference } from "@benedb/protos/authzed/api/v1/core";
 import type {
   CheckPermissionRequest,
+  Consistency,
   DeleteRelationshipsRequest,
   ExpandPermissionTreeRequest,
   Precondition,
@@ -15,8 +16,9 @@ import { RpcError } from "./rpc-error";
 /**
  * Ported from Spiceport `src/Spiceport.Api/RequestValidation.cs`.
  *
- * The request-message validation SpiceDB's service interceptors run before any handler:
- * go-grpc-middleware's `validator` (protoc-gen-validate's `ValidateAll`, see `proto-validation.ts`)
+ * The request-message validation SpiceDB's interceptors run before any handler, in their order: the
+ * consistency middleware's checks (`pkg/middleware/consistency`, in the default chain ahead of the
+ * service-specific interceptors), then go-grpc-middleware's `validator` (protoc-gen-validate's `ValidateAll`, see `proto-validation.ts`)
  * and then SpiceDB's `handwrittenvalidation` interceptor, which calls the `HandwrittenValidate`
  * methods authzed-go adds to a few messages (`proto/authzed/api/v1/00_handwritten_validation.go`).
  * Either failure is INVALID_ARGUMENT with the error text as the detail.
@@ -25,6 +27,9 @@ import { RpcError } from "./rpc-error";
  * does; a client-streaming handler calls it on each message it receives.
  *
  * Port decisions:
+ *   * The C# finds the `consistency` and `optional_cursor` fields from the message descriptor; here
+ *     the request types carrying them are listed (they are the types authzed-go gives a
+ *     `GetConsistency` / `GetOptionalCursor`).
  *   * A ts-proto message carries no type, so the caller names it: `typeName` is the message's name
  *     within `authzed.api.v1` (`"CheckPermissionRequest"`). The C# switches on the CLR type for the
  *     handwritten rules; here they switch on the same name.
@@ -58,6 +63,8 @@ export type RequestTypeName =
  * authzed-go's handwritten rules.
  */
 export function validateRequest(typeName: RequestTypeName, request: object): void {
+  checkConsistency(typeName, request);
+
   const violation =
     validateAll(`authzed.api.v1.${typeName}`, request) ?? handwritten(typeName, request);
   if (violation !== undefined) throw new RpcError(status.INVALID_ARGUMENT, violation);
@@ -132,4 +139,87 @@ function filter(relationshipFilter: RelationshipFilter | undefined): string | un
     (subjectFilter.optionalRelation?.relation ?? "") !== ""
     ? `invalid SubjectFilter.OptionalRelation: ${WILDCARD_RELATION}`
     : undefined;
+}
+
+/** The request types SpiceDB's consistency middleware reads a revision for. */
+const HAS_CONSISTENCY: ReadonlySet<RequestTypeName> = new Set<RequestTypeName>([
+  "CheckPermissionRequest",
+  "CheckBulkPermissionsRequest",
+  "ExpandPermissionTreeRequest",
+  "ReadRelationshipsRequest",
+  "LookupResourcesRequest",
+  "LookupSubjectsRequest",
+  "ExportBulkRelationshipsRequest",
+  "ReflectSchemaRequest",
+  "DiffSchemaRequest",
+  "ComputablePermissionsRequest",
+  "DependentRelationsRequest",
+]);
+
+/** Of those, the types whose `optional_cursor` supplies the revision when present. */
+const HAS_OPTIONAL_CURSOR: ReadonlySet<RequestTypeName> = new Set<RequestTypeName>([
+  "ReadRelationshipsRequest",
+  "LookupResourcesRequest",
+  "LookupSubjectsRequest",
+  "ExportBulkRelationshipsRequest",
+]);
+
+/**
+ * The request checks of SpiceDB's consistency middleware (`addRevisionToContextFromConsistency`),
+ * which picks the revision a request with a `consistency` field reads at before the
+ * protoc-gen-validate interceptor runs. A present `optional_cursor` supplies the revision and wins;
+ * otherwise an absent consistency or `minimize_latency` or `fully_consistent` needs nothing; a
+ * ZedToken must decode; and anything else falls to the middleware's default case, INTERNAL
+ * `missing handling of consistency case in %v`.
+ *
+ * Only what can be decided without the datastore is reproduced here: the default case, an empty
+ * ZedToken (which never decodes: INVALID_ARGUMENT `invalid revision requested`), and an empty cursor
+ * token (which decodes to a cursor with no version: INTERNAL `unexpected consistency middleware
+ * error: cursor pointer was nil`). A non-empty token or cursor is still resolved in the handler,
+ * after field validation, so an undecodable one on an otherwise malformed request reports the field
+ * violation where SpiceDB would report the token. Spiceport's cursors are its own format, so
+ * SpiceDB's cursor decoding cannot be reproduced at all.
+ */
+function checkConsistency(typeName: RequestTypeName, request: object): void {
+  if (!HAS_CONSISTENCY.has(typeName)) return;
+
+  if (HAS_OPTIONAL_CURSOR.has(typeName)) {
+    const cursor = (request as { optionalCursor?: Cursor | undefined }).optionalCursor;
+    if (cursor !== undefined) {
+      if (cursor.token === "")
+        throw new RpcError(
+          status.INTERNAL,
+          "unexpected consistency middleware error: cursor pointer was nil",
+        );
+      return;
+    }
+  }
+
+  const consistency = (request as { consistency?: Consistency | undefined }).consistency;
+  if (consistency === undefined) return;
+  if (consistency.minimizeLatency === true || consistency.fullyConsistent === true) return;
+
+  const token = consistency.atLeastAsFresh ?? consistency.atExactSnapshot;
+  if (token !== undefined) {
+    if (token.token === "")
+      throw new RpcError(status.INVALID_ARGUMENT, "invalid revision requested");
+    return;
+  }
+
+  throw new RpcError(
+    status.INTERNAL,
+    `missing handling of consistency case in ${goText(consistency)}`,
+  );
+}
+
+/**
+ * Go's `%v` of a `*v1.Consistency` that reaches the middleware's default case: the compact text
+ * form, which is empty for no requirement and the one boolean field otherwise.
+ */
+function goText(consistency: Consistency): string {
+  if (consistency.minimizeLatency !== undefined)
+    return `minimize_latency:${String(consistency.minimizeLatency)}`;
+  if (consistency.fullyConsistent !== undefined)
+    return `fully_consistent:${String(consistency.fullyConsistent)}`;
+  return "";
 }

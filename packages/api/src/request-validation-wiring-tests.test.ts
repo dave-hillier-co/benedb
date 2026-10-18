@@ -91,17 +91,22 @@ async function* stream<T>(...messages: T[]): AsyncIterable<T> {
   for (const message of messages) yield await Promise.resolve(message);
 }
 
-async function assertRejected(call: () => Promise<unknown>, detail: string): Promise<void> {
+async function assertRejected(
+  call: () => Promise<unknown>,
+  detail: string,
+  code: status = status.INVALID_ARGUMENT,
+): Promise<void> {
   const caught = await call().then(
     () => undefined,
     (error: unknown) => error,
   );
   expect(caught).toBeInstanceOf(RpcError);
-  expect((caught as RpcError).code).toBe(status.INVALID_ARGUMENT);
+  expect((caught as RpcError).code).toBe(code);
   expect((caught as RpcError).details).toBe(detail);
 }
 
-const MISSING_REQUIREMENT = "invalid Consistency.Requirement: value is required";
+/** SpiceDB's consistency middleware, which runs ahead of field validation, on an empty Consistency. */
+const UNHANDLED_CONSISTENCY = "missing handling of consistency case in ";
 
 describe("RequestValidationWiringTests", () => {
   it("CheckPermission", () =>
@@ -235,26 +240,30 @@ describe("RequestValidationWiringTests", () => {
   it("ReflectSchema", () =>
     assertRejected(
       () => schema.reflectSchema(ReflectSchemaRequest.fromPartial({ consistency: {} })),
-      `invalid ReflectSchemaRequest.Consistency: ${EMBEDDED}${MISSING_REQUIREMENT}`,
+      UNHANDLED_CONSISTENCY,
+      status.INTERNAL,
     ));
 
   it("DiffSchema", () =>
     assertRejected(
       () => schema.diffSchema(DiffSchemaRequest.fromPartial({ consistency: {} })),
-      `invalid DiffSchemaRequest.Consistency: ${EMBEDDED}${MISSING_REQUIREMENT}`,
+      UNHANDLED_CONSISTENCY,
+      status.INTERNAL,
     ));
 
   it("ComputablePermissions", () =>
     assertRejected(
       () =>
         schema.computablePermissions(ComputablePermissionsRequest.fromPartial({ consistency: {} })),
-      `invalid ComputablePermissionsRequest.Consistency: ${EMBEDDED}${MISSING_REQUIREMENT}`,
+      UNHANDLED_CONSISTENCY,
+      status.INTERNAL,
     ));
 
   it("DependentRelations", () =>
     assertRejected(
       () => schema.dependentRelations(DependentRelationsRequest.fromPartial({ consistency: {} })),
-      `invalid DependentRelationsRequest.Consistency: ${EMBEDDED}${MISSING_REQUIREMENT}`,
+      UNHANDLED_CONSISTENCY,
+      status.INTERNAL,
     ));
 
   it("RegisterRelationshipCounter", () =>

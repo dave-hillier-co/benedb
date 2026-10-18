@@ -239,6 +239,7 @@ const MissingFilter: readonly (readonly [
  */
 const Ungrammatical: readonly (readonly [
   name: string,
+  expected: status,
   send: (target: {
     writeRelationships(request: WriteRelationshipsRequest): Promise<unknown>;
     deleteRelationships(request: DeleteRelationshipsRequest): Promise<unknown>;
@@ -247,15 +248,18 @@ const Ungrammatical: readonly (readonly [
 ])[] = [
   [
     "write_uppercase_resource_type",
+    status.INVALID_ARGUMENT,
     (target) =>
       target.writeRelationships(req(TOUCH, { resourceType: "Document", relation: "viewer" })),
   ],
   [
     "write_malformed_relation_and_subject_id",
+    status.INVALID_ARGUMENT,
     (target) => target.writeRelationships(req(TOUCH, { relation: "Viewer", subjectId: "a b" })),
   ],
   [
     "write_wildcard_subject_with_relation",
+    status.INVALID_ARGUMENT,
     (target) =>
       target.writeRelationships(
         req(TOUCH, {
@@ -268,6 +272,7 @@ const Ungrammatical: readonly (readonly [
   ],
   [
     "write_unspecified_operation",
+    status.INVALID_ARGUMENT,
     (target) =>
       target.writeRelationships(
         req(RelationshipUpdate_Operation.OPERATION_UNSPECIFIED, { relation: "viewer" }),
@@ -275,6 +280,7 @@ const Ungrammatical: readonly (readonly [
   ],
   [
     "delete_wildcard_resource_id",
+    status.INVALID_ARGUMENT,
     (target) =>
       target.deleteRelationships(
         DeleteRelationshipsRequest.fromPartial({
@@ -284,6 +290,7 @@ const Ungrammatical: readonly (readonly [
   ],
   [
     "check_wildcard_resource",
+    status.INVALID_ARGUMENT,
     (target) =>
       target.checkPermission(
         CheckPermissionRequest.fromPartial({
@@ -293,12 +300,27 @@ const Ungrammatical: readonly (readonly [
         }),
       ),
   ],
+  // SpiceDB's consistency middleware runs before field validation, so an empty Consistency is its
+  // INTERNAL "missing handling of consistency case in " even though the object id is also too long.
   [
     "check_overlong_object_id_and_empty_consistency",
+    status.INTERNAL,
     (target) =>
       target.checkPermission(
         CheckPermissionRequest.fromPartial({
           consistency: {},
+          resource: { objectType: "document", objectId: "a".repeat(1025) },
+          permission: "view",
+          subject: { object: { objectType: "user", objectId: "alice" } },
+        }),
+      ),
+  ],
+  [
+    "check_overlong_object_id",
+    status.INVALID_ARGUMENT,
+    (target) =>
+      target.checkPermission(
+        CheckPermissionRequest.fromPartial({
           resource: { objectType: "document", objectId: "a".repeat(1025) },
           permission: "view",
           subject: { object: { objectType: "user", objectId: "alice" } },
@@ -441,7 +463,7 @@ describe.sequential("WriteRelationshipsSchemaValidationDifferentialTests", () =>
     });
   }
 
-  for (const [name, send] of Ungrammatical) {
+  for (const [name, expected, send] of Ungrammatical) {
     it(`Ungrammatical request agrees with SpiceDB [${name}]`, async (ctx) => {
       ctx.skip(!spiceDbAvailable, spiceDbSkipReason);
 
@@ -451,7 +473,7 @@ describe.sequential("WriteRelationshipsSchemaValidationDifferentialTests", () =>
         await resetSpiceDb(spiceDbClient);
         await spiceDbClient.writeSchema(WriteSchemaRequest.fromPartial({ schema: Schema }));
         spiceDb = await outcome(send(spiceDbClient));
-        expect(spiceDb.code).toBe(status.INVALID_ARGUMENT);
+        expect(spiceDb.code).toBe(expected);
       } finally {
         spiceDbClient.close();
       }
