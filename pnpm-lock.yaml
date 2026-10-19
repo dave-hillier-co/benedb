@@ -235,9 +235,12 @@ importers:
       '@benedb/core':
         specifier: workspace:*
         version: link:../core
-      antlr4:
-        specifier: ^4.13.2
-        version: 4.13.2
+      '@bufbuild/cel':
+        specifier: ^0.2.0
+        version: 0.2.0(@bufbuild/protobuf@2.14.0)
+      '@bufbuild/protobuf':
+        specifier: ^2.14.0
+        version: 2.14.0
 
   packages/silo:
     dependencies:
@@ -780,10 +783,6 @@ packages:
   ansi-styles@6.2.3:
     resolution: {integrity: sha512-4Dj6M28JB+oAH8kFkTLUo+a2jwOFkuqb3yucU0CANcRRUbxS0cP0nZYCGjcc3BNXwRIsUVmDGgzawme7zvJHvg==}
     engines: {node: '>=12'}
-
-  antlr4@4.13.2:
-    resolution: {integrity: sha512-QiVbZhyy4xAZ17UPEuG3YTOt8ZaoeOR1CvEAqrEsDBsOqINslaB147i9xqljZqoyf5S+EUlGStaj+t22LT9MOg==}
-    engines: {node: '>=16'}
 
   archiver-utils@5.0.2:
     resolution: {integrity: sha512-wuLJMmIBQYCsGZgYLTy5FIB2pF6Lfb6cXMSF8Qywwk3t20zWnAi7zLcQFdKQmIB8wyZpY5ER38x08GbwtR2cLA==}
@@ -2256,8 +2255,6 @@ snapshots:
       color-convert: 2.0.1
 
   ansi-styles@6.2.3: {}
-
-  antlr4@4.13.2: {}
 
   archiver-utils@5.0.2:
     dependencies:

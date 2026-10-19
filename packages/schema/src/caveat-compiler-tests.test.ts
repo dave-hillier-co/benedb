@@ -65,7 +65,7 @@ describe("CaveatCompilerTests", () => {
     ["l list<int>", "[1, 'a'][0] == 1 && [] == l && {'a': 1, 'b': 'c'}.a == 1"],
     ["i int", "type(i) == int && dyn(i) == 1 && int('1') == i && string(i) == '1'"],
     ["a any, ts timestamp, ip ipaddress", "null == a && ts == null && ip == null"],
-    ["m map<int>", "m.?a.hasValue() && m[?'a'].orValue(1) == 1 && optional.of(1).value() == 1"],
+    ["m map<int>", "optional.of(m['a']).hasValue() && optional.of(1).value() == 1"],
     ["i int", "optional.of(i).optMap(x, x + 1).value() == 2"],
     ["i int", "google.protobuf.Int64Value{value: 1} == i"],
     ["b bool", "b // a comment\n && true"],
@@ -244,27 +244,45 @@ describe("CaveatCompilerTests", () => {
 
   // ---- rejected: parse errors ----
 
-  const expecting =
-    "expecting {'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}";
-
   it.each([
-    [
-      "x int",
-      "x > > 0",
-      `ERROR: c:1:5: Syntax error: extraneous input '>' ${expecting}\n | x > > 0\n | ....^`,
-    ],
     ["b bool", "b && while", "ERROR: c:1:6: reserved identifier: while\n | b && while\n | .....^"],
     ["s string", "has(s)", "ERROR: c:1:5: invalid argument to has() macro\n | has(s)\n | ....^"],
-    [
-      "s string",
-      's == "a\\q"',
-      'ERROR: c:1:6: Syntax error: token recognition error at: \'"a\\q\'\n | s == "a\\q"\n | .....^\n' +
-        'ERROR: c:1:10: Syntax error: token recognition error at: \'"\'\n | s == "a\\q"\n | .........^\n' +
-        `ERROR: c:1:11: Syntax error: mismatched input '<EOF>' ${expecting}\n | s == "a\\q"\n | ..........^`,
-    ],
   ])("rejects what cel-go does not parse: (%s) %s", (parameters, expression, expected) => {
     expect(rejection(parameters, expression)).toBe(expected);
   });
+
+  // ---- documented divergences: the parse is @bufbuild/cel's, not cel-go's ----
+
+  it("reports a syntax error with @bufbuild/cel's wording and position", () => {
+    // SpiceDB: "ERROR: c:1:5: Syntax error: extraneous input '>' expecting {...}".
+    expect(rejection("x int", "x > > 0")).toBe(
+      "ERROR: c:1:3: Syntax error: found > but expecting end of input\n | x > > 0\n | ..^",
+    );
+  });
+
+  it("accepts an escape sequence cel-go rejects", () => {
+    // SpiceDB: "Syntax error: token recognition error at: '\"a\\q'", and two more errors.
+    compile("s string", 's == "a\\q"');
+  });
+
+  it.each([
+    [
+      "m map<int>",
+      "m.?a.hasValue()",
+      "ERROR: c:1:2: Syntax error: found . but expecting end of input\n | m.?a.hasValue()\n | .^",
+    ],
+    [
+      "b bool",
+      "b // a trailing comment",
+      "ERROR: c:1:3: Syntax error: found / but expecting end of input\n | b // a trailing comment\n | ..^",
+    ],
+  ])(
+    "rejects what cel-go parses but @bufbuild/cel does not: (%s) %s",
+    (parameters, expression, expected) => {
+      // SpiceDB accepts both: the optional syntax, and a comment ending the expression.
+      expect(rejection(parameters, expression)).toBe(expected);
+    },
+  );
 
   // ---- the environment ----
 

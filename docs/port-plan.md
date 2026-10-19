@@ -56,9 +56,27 @@ Four things in the source have no mechanical translation and must be built delib
 - **CEL evaluation for caveats.** Spiceport uses the .NET `Cel` package; SpiceDB uses `cel-go`.
   BeneDB uses `@bufbuild/cel`, which runs the official cel-spec conformance suite. The caveat
   conformance cases are the check on this. Schema-write compilation (parse and static type check
-  of a caveat body) is a separate path: the port drives the ANTLR parser generated from cel-go's
-  own `CEL.g4` (`packages/schema/src/cel-gen`), and the checker over it is transliterated from
-  Spiceport's, so syntax and type errors carry cel-go's wording.
+  of a caveat body) parses with the same `@bufbuild/cel` parser and type-checks its canonical
+  `cel.expr.Expr` with a checker transliterated from Spiceport's, so a type error carries
+  cel-go's message, line, column and caret. `packages/schema/src/cel-parsed-expr.ts` converts
+  that parse into the tree cel-go's parser builds: `@bufbuild/cel` keeps no source positions
+  through its public API (they are recovered by walking the tree over the expression's tokens),
+  folds `!(!x)` and `-(-x)` to `x`, parses `&&`/`||` chains as one call, drops a leading dot from
+  a name, and expands macros differently, and each of those is undone. What is not undone is the
+  grammar itself, and these are deliberate divergences from SpiceDB:
+  - A syntax error carries `@bufbuild/cel`'s message and position (for `x > > 0`, "found > but
+    expecting end of input" at the first `>`), not cel-go's ANTLR wording. A reserved
+    identifier, a misused macro and an out-of-range literal are reported with cel-go's message at
+    cel-go's position.
+  - `@bufbuild/cel` is lenient with escape sequences: `"a\q"` is accepted where cel-go rejects
+    it. It also accepts a list of bare commas (`[,]`).
+  - `@bufbuild/cel` rejects some expressions cel-go parses: the optional syntax (`a.?b`,
+    `a[?b]`, `[?a]`, `{?k: v}`, `Msg{?f: v}`), a `0X` hex prefix, an `rb` bytes prefix, a
+    triple-quoted string spanning lines, repeated unary operators separated by a space (`! !a`),
+    and a `//` comment that ends the expression with no newline after it. Each is a syntax error
+    at schema write here, and a type-checked caveat in SpiceDB. The optional functions
+    (`optional.of`, `hasValue`, `orValue`, `optMap`, ...) are unaffected.
+
 - **The gRPC surface.** `@grpc/grpc-js` with `ts-proto` bindings generated from the vendored
   `authzed.api.v1` protos. Spiceport's `Authzed*V1Service` classes are pure translation over
   the grains, so what carries across is the mapping — including the deliberate error-code

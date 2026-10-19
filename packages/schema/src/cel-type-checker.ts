@@ -39,6 +39,9 @@ type Mapping = Map<string, CheckedType>;
  *     function over a module-private class holding the walk's state.
  *   * The type map is a `Map` keyed by node identity, as the C# dictionary uses
  *     `ReferenceEqualityComparer`.
+ *   * The optional-syntax paths (`_?._`, and the optional elements, entries and fields of a list,
+ *     map or message literal) are kept as transliterated but are unreachable: the parse is
+ *     `@bufbuild/cel`'s (`cel-parsed-expr`), which does not accept that syntax.
  */
 export function checkCelExpr(
   expr: CelExpr,

@@ -3,7 +3,7 @@ import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 
 import { CaveatCompileException } from "./caveat-compile-exception";
 import { caveatParameterCelType } from "./caveat-parameter-types";
-import { parseCelExpr } from "./cel-ast-builder";
+import { parseCelExpr } from "./cel-parsed-expr";
 import { CEL_DECLARATIONS } from "./cel-declarations";
 import { NO_LOCATION } from "./cel-expr";
 import { CelIssues } from "./cel-issues";

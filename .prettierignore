@@ -1,6 +1,5 @@
 node_modules
 packages/protos/generated
-packages/schema/src/cel-gen
 packages/conformance/corpus
 packages/conformance/steel-thread
 pnpm-lock.yaml
