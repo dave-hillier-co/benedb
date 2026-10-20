@@ -1,6 +1,7 @@
 import { status } from "@grpc/grpc-js";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
 
-import { RpcError } from "./rpc-error";
+import { rpcErrorWithReason } from "./rpc-errors";
 
 /**
  * Ported from Spiceport `src/Spiceport.Api/RequestCeilings.cs`.
@@ -50,9 +51,14 @@ export const MAX_BULK_CHECK_COUNT = 10_000;
  */
 export function validateLimit(providedLimit: number, maxLimit: number): void {
   if (providedLimit > 0 && providedLimit > maxLimit) {
-    throw new RpcError(
+    throw rpcErrorWithReason(
       status.INVALID_ARGUMENT,
       `provided limit ${providedLimit} is greater than maximum allowed of ${maxLimit}`,
+      ErrorReason.ERROR_REASON_EXCEEDS_MAXIMUM_ALLOWABLE_LIMIT,
+      [
+        ["limit_provided", String(providedLimit)],
+        ["maximum_limit_allowed", String(maxLimit)],
+      ],
     );
   }
 }
@@ -63,9 +69,15 @@ export function validateLimit(providedLimit: number, maxLimit: number): void {
  */
 export function validateCheckCount(checkCount: number): void {
   if (checkCount > MAX_BULK_CHECK_COUNT) {
-    throw new RpcError(
+    // SpiceDB's ExceedsMaximumChecksError: reason UNSPECIFIED with the counts as metadata.
+    throw rpcErrorWithReason(
       status.INVALID_ARGUMENT,
       `check count of ${checkCount} is greater than maximum allowed of ${MAX_BULK_CHECK_COUNT}`,
+      ErrorReason.ERROR_REASON_UNSPECIFIED,
+      [
+        ["check_count", String(checkCount)],
+        ["maximum_checks_allowed", String(MAX_BULK_CHECK_COUNT)],
+      ],
     );
   }
 }

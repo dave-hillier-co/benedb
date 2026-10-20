@@ -5,13 +5,15 @@ import { FormatError } from "@benedb/core/format-error";
 import { tryParseRelationship } from "@benedb/core/tuple-strings";
 import { fromBase64String, toBase64String } from "@benedb/grains/convert-base64";
 import type { Cursor } from "@benedb/protos/authzed/api/v1/core";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
 import {
   Consistency,
   RelationshipFilter,
   type ReadRelationshipsRequest,
 } from "@benedb/protos/authzed/api/v1/permission_service";
 
-import { RpcError } from "./rpc-error";
+import type { RpcError } from "./rpc-error";
+import { rpcErrorWithReason } from "./rpc-errors";
 
 /**
  * Ported from Spiceport `src/Spiceport.Api/ReadRelationshipsCursor.cs`.
@@ -98,7 +100,7 @@ export function decodeReadRelationshipsCursor(
     );
   } catch (error) {
     if (!(error instanceof FormatError) && !(error instanceof TypeError)) throw error;
-    throw new RpcError(status.INVALID_ARGUMENT, `error decoding cursor: ${error.message}`);
+    throw invalidCursor(`error decoding cursor: ${error.message}`);
   }
 
   // `raw.Split(Separator, 3)`: at most three parts, the last keeping any further separators.
@@ -109,16 +111,29 @@ export function decodeReadRelationshipsCursor(
     raw.slice(0, first) !== FORMAT_TAG ||
     raw.slice(first + 1, second) !== requestHash
   ) {
-    throw new RpcError(status.INVALID_ARGUMENT, READ_RELATIONSHIPS_HASH_MISMATCH_MESSAGE);
+    throw invalidCursor(READ_RELATIONSHIPS_HASH_MISMATCH_MESSAGE);
   }
 
   const tuple = raw.slice(second + 1);
   if (tryParseRelationship(tuple) === undefined) {
-    throw new RpcError(
+    // SpiceDB's v1 NewInvalidCursorErr never sets the error's reason field, so the metadata it
+    // reports carries an empty "reason".
+    throw rpcErrorWithReason(
       status.FAILED_PRECONDITION,
       "the cursor provided is not valid: could not parse resume relationship",
+      ErrorReason.ERROR_REASON_INVALID_CURSOR,
+      [["reason", ""]],
     );
   }
 
   return tuple;
+}
+
+/** SpiceDB's `pkg/cursor` `InvalidCursorError`: INVALID_CURSOR with no metadata. */
+function invalidCursor(message: string): RpcError {
+  return rpcErrorWithReason(
+    status.INVALID_ARGUMENT,
+    message,
+    ErrorReason.ERROR_REASON_INVALID_CURSOR,
+  );
 }

@@ -16,6 +16,7 @@ import { AuthzedExperimentalV1Service } from "./authzed-experimental-v1-service"
 import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
 import { AuthzedSchemaV1Service } from "./authzed-schema-v1-service";
 import { CollectingStreamWriter } from "./collecting-stream-writer";
+import { assertErrorInfo } from "./error-info-assertions";
 import { RpcError } from "./rpc-error";
 
 /**
@@ -303,6 +304,14 @@ describe("AuthzedExperimentalV1ServiceTests", () => {
       const error = await rpcErrorFrom(service(cluster).bulkCheckPermission(req));
       expect(error.code).toBe(status.INVALID_ARGUMENT);
       expect(error.details).toBe("check count of 10001 is greater than maximum allowed of 10000");
+      // ExceedsMaximumChecksError attaches ErrorInfo with reason UNSPECIFIED and the counts.
+      assertErrorInfo(
+        error,
+        status.INVALID_ARGUMENT,
+        "ERROR_REASON_UNSPECIFIED",
+        ["check_count", "10001"],
+        ["maximum_checks_allowed", "10000"],
+      );
     } finally {
       await cluster.dispose();
     }

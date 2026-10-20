@@ -2,17 +2,15 @@ import { status } from "@grpc/grpc-js";
 import {
   ContextualizedCaveat,
   type ObjectReference,
-  type Relationship,
-  type RelationshipUpdate,
+  Relationship,
 } from "@benedb/protos/authzed/api/v1/core";
-import type {
-  DeleteRelationshipsRequest,
-  Precondition,
-  WriteRelationshipsRequest,
-} from "@benedb/protos/authzed/api/v1/permission_service";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
+import type { WriteRelationshipsRequest } from "@benedb/protos/authzed/api/v1/permission_service";
 import { Struct } from "@benedb/protos/google/protobuf/struct";
 
+import { full, withoutCaveatOrExpiration } from "./go-relationship-strings";
 import { RpcError } from "./rpc-error";
+import { rpcErrorWithReason } from "./rpc-errors";
 
 /**
  * Ported from Spiceport `src/Spiceport.Api/RequestLimits.cs`.
@@ -56,45 +54,44 @@ export const MAX_TRANSACTION_METADATA_SIZE = 65_000;
 
 /**
  * Validates the shape of a `WriteRelationships` request, throwing an {@link RpcError} with
- * `INVALID_ARGUMENT` for: more than {@link MAX_UPDATES_PER_WRITE} updates
+ * `INVALID_ARGUMENT` for, in SpiceDB's order: transaction metadata over
+ * {@link MAX_TRANSACTION_METADATA_SIZE} bytes, more than {@link MAX_UPDATES_PER_WRITE} updates
  * (ERROR_REASON_TOO_MANY_UPDATES_IN_REQUEST), more than {@link MAX_PRECONDITIONS_COUNT}
- * preconditions, a missing `relationship`/`relationship.resource`/`relationship.subject`/
- * `relationship.subject.object` submessage or precondition `filter`, a relationship appearing in
- * more than one update
- * (NewDuplicateRelationshipErr), or a per-relationship caveat context larger than
- * {@link MAX_RELATIONSHIP_CONTEXT_SIZE} bytes. Mirrors SpiceDB's `WriteRelationships` validation.
+ * preconditions, a relationship appearing in more than one update (NewDuplicateRelationshipErr),
+ * or a per-relationship caveat context larger than {@link MAX_RELATIONSHIP_CONTEXT_SIZE} bytes.
+ * Mirrors SpiceDB's `WriteRelationships` handler. The request must already have passed
+ * `validateRequest` (`request-validation.ts`), as it has in SpiceDB by the time its handler runs,
+ * so every update carries its required submessages.
  */
 export function validateWriteRelationships(request: WriteRelationshipsRequest): void {
-  // SpiceDB validates the request message (protoc-gen-validate) before its handler runs, so a
-  // missing required submessage is reported ahead of the update-count and precondition limits.
-  const violations: string[] = [];
-  request.updates.forEach((update, index) => {
-    addMissingRelationshipShape(update, index, violations);
-  });
-  addMissingPreconditionFilters(
-    request.optionalPreconditions,
-    "WriteRelationshipsRequest",
-    violations,
-  );
-  throwIfViolations(violations);
-  // Every update now carries its required submessages.
   const relationships = request.updates.map((update) => update.relationship as ShapedRelationship);
 
   // The handler then checks the metadata size ahead of the update and precondition limits.
   validateTransactionMetadataSize(request.optionalTransactionMetadata);
 
   if (request.updates.length > MAX_UPDATES_PER_WRITE)
-    throw new RpcError(
+    throw rpcErrorWithReason(
       status.INVALID_ARGUMENT,
       `too many updates (${request.updates.length}) for WriteRelationships call ` +
         `(maximum: ${MAX_UPDATES_PER_WRITE}); consider using ImportBulkRelationships API instead`,
+      ErrorReason.ERROR_REASON_TOO_MANY_UPDATES_IN_REQUEST,
+      [
+        ["update_count", String(request.updates.length)],
+        ["maximum_updates_allowed", String(MAX_UPDATES_PER_WRITE)],
+      ],
     );
 
   if (request.optionalPreconditions.length > MAX_PRECONDITIONS_COUNT)
-    throw new RpcError(
+    throw rpcErrorWithReason(
       status.INVALID_ARGUMENT,
       `precondition count of ${request.optionalPreconditions.length} is greater than ` +
         `maximum allowed of ${MAX_PRECONDITIONS_COUNT}`,
+      ErrorReason.ERROR_REASON_TOO_MANY_PRECONDITIONS_IN_REQUEST,
+      [
+        ["precondition_count", String(request.optionalPreconditions.length)],
+        // SpiceDB's ExceedsMaximumPreconditionsError reuses the updates key for its maximum.
+        ["maximum_updates_allowed", String(MAX_PRECONDITIONS_COUNT)],
+      ],
     );
 
   // A relationship can be specified in an update only once per overall request. The key ignores the
@@ -102,13 +99,18 @@ export function validateWriteRelationships(request: WriteRelationshipsRequest): 
   // DELETE of the same tuple in one request is also a duplicate.
   const seen = new Set<string>();
   for (const relationship of relationships) {
-    const key = relationshipKeyWithoutCaveatOrExpiration(relationship);
+    const key = withoutCaveatOrExpiration(relationship);
     if (seen.has(key))
-      throw new RpcError(
+      throw rpcErrorWithReason(
         status.INVALID_ARGUMENT,
         `found more than one update with relationship \`${key}\` in this request; ` +
           "a relationship can only be specified in an update once per overall " +
           "WriteRelationships request",
+        ErrorReason.ERROR_REASON_UPDATES_ON_SAME_RELATIONSHIP,
+        [
+          ["definition_name", relationship.resource.objectType],
+          ["relationship", full(relationship)],
+        ],
       );
     seen.add(key);
 
@@ -117,10 +119,17 @@ export function validateWriteRelationships(request: WriteRelationshipsRequest): 
     const contextSize =
       caveat === undefined ? 0 : ContextualizedCaveat.encode(caveat).finish().length;
     if (contextSize > MAX_RELATIONSHIP_CONTEXT_SIZE)
-      throw new RpcError(
+      throw rpcErrorWithReason(
         status.INVALID_ARGUMENT,
         `provided relationship \`${key}\` exceeded maximum allowed caveat size of ` +
           `${MAX_RELATIONSHIP_CONTEXT_SIZE}`,
+        ErrorReason.ERROR_REASON_MAX_RELATIONSHIP_CONTEXT_SIZE,
+        [
+          ["relationship", key],
+          ["max_allowed_size", String(MAX_RELATIONSHIP_CONTEXT_SIZE)],
+          // SpiceDB reports proto.Size of the whole relationship here, not of its caveat.
+          ["context_size", String(Relationship.encode(relationship).finish().length)],
+        ],
       );
   }
 }
@@ -150,93 +159,6 @@ export function validateCaveatContextSize(
 type ShapedRelationship = Relationship & { resource: ObjectReference; subject: ShapedSubject };
 type ShapedSubject = { object: ObjectReference; optionalRelation: string };
 
-/** protoc-gen-validate's separator between a failed field and the nested failure it wraps. */
-const EMBEDDED = "embedded message failed validation | caused by: ";
-
-/**
- * Collects the violation for an update whose `relationship`, `relationship.resource`,
- * `relationship.subject`, or `relationship.subject.object` is missing, in SpiceDB's own
- * INVALID_ARGUMENT text: its protoc-gen-validate request validation at the service boundary
- * (verified against a real SpiceDB container). ts-proto leaves an absent required submessage as
- * `undefined` rather than a default instance, so without this guard a malformed request throws a
- * raw `TypeError` - an UNKNOWN server fault - before it can be reported. The `Relationship`'s own
- * `ValidateAll` multi-error is the cause of a single embedded wrapper.
- */
-function addMissingRelationshipShape(
-  update: RelationshipUpdate,
-  index: number,
-  violations: string[],
-): void {
-  const prefix = `invalid WriteRelationshipsRequest.Updates[${index}]: ${EMBEDDED}`;
-  const relationship = update.relationship;
-  if (relationship === undefined) {
-    violations.push(`${prefix}invalid RelationshipUpdate.Relationship: value is required`);
-    return;
-  }
-
-  const causes: string[] = [];
-  if (relationship.resource === undefined)
-    causes.push("invalid Relationship.Resource: value is required");
-  if (relationship.subject === undefined)
-    causes.push("invalid Relationship.Subject: value is required");
-  else if (relationship.subject.object === undefined)
-    causes.push(
-      `invalid Relationship.Subject: ${EMBEDDED}invalid SubjectReference.Object: value is required`,
-    );
-
-  if (causes.length > 0)
-    violations.push(
-      `${prefix}invalid RelationshipUpdate.Relationship: ${EMBEDDED}${causes.join("; ")}`,
-    );
-}
-
-/**
- * Validates the shape of a `DeleteRelationships` request: its `relationship_filter` and every
- * precondition's `filter` are required by the `authzed.api.v1` protos. SpiceDB rejects a missing
- * one with INVALID_ARGUMENT in its request validation before the handler runs; without this guard
- * the wire mapping would read the absent filter as an empty one.
- */
-export function validateDeleteRelationships(request: DeleteRelationshipsRequest): void {
-  const violations: string[] = [];
-  if (request.relationshipFilter === undefined)
-    violations.push("invalid DeleteRelationshipsRequest.RelationshipFilter: value is required");
-  addMissingPreconditionFilters(
-    request.optionalPreconditions,
-    "DeleteRelationshipsRequest",
-    violations,
-  );
-  throwIfViolations(violations);
-}
-
-/**
- * Collects a violation for every precondition with no `filter`, in the protoc-gen-validate text
- * SpiceDB returns for the repeated `optional_preconditions` field of `requestName`. Shared by the
- * write and delete guards, as the C#'s `AddMissingPreconditionFilters` is.
- */
-function addMissingPreconditionFilters(
-  preconditions: readonly Precondition[],
-  requestName: string,
-  violations: string[],
-): void {
-  preconditions.forEach((precondition, index) => {
-    if (precondition.filter === undefined)
-      violations.push(
-        `invalid ${requestName}.OptionalPreconditions[${index}]: ${EMBEDDED}` +
-          "invalid Precondition.Filter: value is required",
-      );
-  });
-}
-
-/**
- * Throws INVALID_ARGUMENT with protoc-gen-validate's `MultiError` text: the violations, in field
- * order, joined with `"; "`.
- */
-function throwIfViolations(violations: readonly string[]): void {
-  if (violations.length === 0) return;
-
-  throw new RpcError(status.INVALID_ARGUMENT, violations.join("; "));
-}
-
 /**
  * Rejects `optional_transaction_metadata` larger than {@link MAX_TRANSACTION_METADATA_SIZE} bytes,
  * mirroring SpiceDB's `validateTransactionMetadata`. The size is the metadata's JSON-serialized byte
@@ -250,17 +172,13 @@ export function validateTransactionMetadataSize(
 
   const size = new TextEncoder().encode(JSON.stringify(metadata)).length;
   if (size > MAX_TRANSACTION_METADATA_SIZE)
-    throw new RpcError(
+    throw rpcErrorWithReason(
       status.INVALID_ARGUMENT,
       `metadata size of ${size} is greater than maximum allowed of ${MAX_TRANSACTION_METADATA_SIZE}`,
+      ErrorReason.ERROR_REASON_TRANSACTION_METADATA_TOO_LARGE,
+      [
+        ["metadata_byte_size", String(size)],
+        ["maximum_allowed_metadata_byte_size", String(MAX_TRANSACTION_METADATA_SIZE)],
+      ],
     );
-}
-
-function relationshipKeyWithoutCaveatOrExpiration(rel: ShapedRelationship): string {
-  const subject = rel.subject;
-  const subjectRelation = !subject.optionalRelation ? "" : "#" + subject.optionalRelation;
-  return (
-    `${rel.resource.objectType}:${rel.resource.objectId}#${rel.relation}@` +
-    `${subject.object.objectType}:${subject.object.objectId}${subjectRelation}`
-  );
 }

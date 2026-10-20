@@ -37,6 +37,7 @@ import type {
   WriteSchemaRequest,
   WriteSchemaResponse,
 } from "@benedb/protos/authzed/api/v1/schema_service";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
 import type { CompiledSchema } from "@benedb/schema/compiled-schema";
 import { SchemaCompileException } from "@benedb/schema/schema-compile-exception";
 import { compileSchema } from "@benedb/schema/schema-compiler";
@@ -52,7 +53,9 @@ import {
   reflectionRelation,
   reflectionTypeReference,
 } from "./reflection-mapper";
+import { validateRequest } from "./request-validation";
 import { RpcError } from "./rpc-error";
+import { rpcErrorWithReason } from "./rpc-errors";
 import { schemaFiltersFromRequest } from "./schema-filters";
 
 /**
@@ -103,9 +106,11 @@ export class AuthzedSchemaV1Service {
 
   /** Reads the live schema text; an empty (or whitespace-only) schema is NOT_FOUND. */
   async readSchema(
-    _request: ReadSchemaRequest,
+    request: ReadSchemaRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ReadSchemaResponse> {
+    validateRequest("ReadSchemaRequest", request);
+
     const reply = await this.#relationships.readSchema();
     if (isNullOrWhiteSpace(reply.schemaText)) {
       // SpiceDB's schema handler returns NOT_FOUND (ErrNoSchema) when nothing has been written.
@@ -125,6 +130,8 @@ export class AuthzedSchemaV1Service {
     request: WriteSchemaRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<WriteSchemaResponse> {
+    validateRequest("WriteSchemaRequest", request);
+
     try {
       const reply = await this.#relationships.writeSchema({ schemaText: request.schema });
       return { writtenAt: { token: reply.writtenAtToken } };
@@ -151,6 +158,19 @@ export class AuthzedSchemaV1Service {
    * per-relation and per-permission filters can apply. The duplication is the C#'s and is kept.
    */
   async reflectSchema(
+    request: ReflectSchemaRequest,
+    signal?: AbortSignal | undefined,
+  ): Promise<ReflectSchemaResponse> {
+    validateRequest("ReflectSchemaRequest", request);
+    return this.reflectSchemaCore(request, signal);
+  }
+
+  /**
+   * The ReflectSchema body without the request validation: the ExperimentalService alias validates its
+   * own request type (as SpiceDB's interceptors do) and then shares this code path, as upstream's
+   * handlers do. `internal` in the C#; it is not a method of the service definition.
+   */
+  async reflectSchemaCore(
     request: ReflectSchemaRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ReflectSchemaResponse> {
@@ -191,6 +211,19 @@ export class AuthzedSchemaV1Service {
   /** Diffs the LIVE schema against a supplied comparison schema. */
   async diffSchema(
     request: DiffSchemaRequest,
+    signal?: AbortSignal | undefined,
+  ): Promise<DiffSchemaResponse> {
+    validateRequest("DiffSchemaRequest", request);
+    return this.diffSchemaCore(request, signal);
+  }
+
+  /**
+   * The DiffSchema body without the request validation: the ExperimentalService alias validates its
+   * own request type (as SpiceDB's interceptors do) and then shares this code path, as upstream's
+   * handlers do. `internal` in the C#; it is not a method of the service definition.
+   */
+  async diffSchemaCore(
+    request: DiffSchemaRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<DiffSchemaResponse> {
     let comparison: CompiledSchema;
@@ -222,6 +255,19 @@ export class AuthzedSchemaV1Service {
   /** The permissions computable from a relation, per the reachability graph. */
   async computablePermissions(
     request: ComputablePermissionsRequest,
+    signal?: AbortSignal | undefined,
+  ): Promise<ComputablePermissionsResponse> {
+    validateRequest("ComputablePermissionsRequest", request);
+    return this.computablePermissionsCore(request, signal);
+  }
+
+  /**
+   * The ComputablePermissions body without the request validation: the ExperimentalService alias validates its
+   * own request type (as SpiceDB's interceptors do) and then shares this code path, as upstream's
+   * handlers do. `internal` in the C#; it is not a method of the service definition.
+   */
+  async computablePermissionsCore(
+    request: ComputablePermissionsRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ComputablePermissionsResponse> {
     const snapshot = this.#schema.current;
@@ -239,7 +285,8 @@ export class AuthzedSchemaV1Service {
           : request.optionalDefinitionNameFilter,
       );
     } catch (error) {
-      if (error instanceof SchemaIntrospectionException) throw toRpc(error);
+      if (error instanceof SchemaIntrospectionException)
+        throw toRpc(error, request.definitionName, request.relationName);
       throw error;
     }
 
@@ -251,6 +298,19 @@ export class AuthzedSchemaV1Service {
 
   /** The relations a permission depends on. */
   async dependentRelations(
+    request: DependentRelationsRequest,
+    signal?: AbortSignal | undefined,
+  ): Promise<DependentRelationsResponse> {
+    validateRequest("DependentRelationsRequest", request);
+    return this.dependentRelationsCore(request, signal);
+  }
+
+  /**
+   * The DependentRelations body without the request validation: the ExperimentalService alias validates its
+   * own request type (as SpiceDB's interceptors do) and then shares this code path, as upstream's
+   * handlers do. `internal` in the C#; it is not a method of the service definition.
+   */
+  async dependentRelationsCore(
     request: DependentRelationsRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<DependentRelationsResponse> {
@@ -264,7 +324,8 @@ export class AuthzedSchemaV1Service {
         request.permissionName,
       );
     } catch (error) {
-      if (error instanceof SchemaIntrospectionException) throw toRpc(error);
+      if (error instanceof SchemaIntrospectionException)
+        throw toRpc(error, request.definitionName, request.permissionName);
       throw error;
     }
 
@@ -298,14 +359,31 @@ function relationReferenceProto(
 }
 
 /** The THREE-WAY split, each arm of which the covering suite asserts. */
-function toRpc(ex: SchemaIntrospectionException): RpcError {
+function toRpc(
+  ex: SchemaIntrospectionException,
+  definitionName: string,
+  relationName: string,
+): RpcError {
   switch (ex.kind) {
     case "definitionNotFound":
       return new RpcError(status.NOT_FOUND, ex.message);
     case "relationNotFound":
-      return new RpcError(status.FAILED_PRECONDITION, ex.message);
+      return rpcErrorWithReason(
+        status.FAILED_PRECONDITION,
+        ex.message,
+        ErrorReason.ERROR_REASON_UNKNOWN_RELATION_OR_PERMISSION,
+        [
+          ["definition_name", definitionName],
+          ["relation_or_permission_name", relationName],
+        ],
+      );
     case "notAPermission":
-      return new RpcError(status.INVALID_ARGUMENT, ex.message);
+      return rpcErrorWithReason(
+        status.INVALID_ARGUMENT,
+        ex.message,
+        ErrorReason.ERROR_REASON_UNKNOWN_RELATION_OR_PERMISSION,
+        [["relationName", relationName]],
+      );
     default:
       return new RpcError(status.INTERNAL, ex.message);
   }

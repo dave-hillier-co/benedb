@@ -1,4 +1,4 @@
-import { status } from "@grpc/grpc-js";
+import { Metadata, status } from "@grpc/grpc-js";
 import { describe, expect, it } from "vitest";
 import { AuthzedPermissionsV1Service } from "@benedb/api/authzed-permissions-v1-service";
 import { RpcError } from "@benedb/api/rpc-error";
@@ -6,11 +6,14 @@ import { MeshTestCluster } from "@benedb/grains/mesh-test-cluster";
 import type { Relationship } from "@benedb/protos/authzed/api/v1/core";
 import { RelationshipUpdate_Operation } from "@benedb/protos/authzed/api/v1/core";
 import {
+  CheckPermissionRequest,
   DeleteRelationshipsRequest,
   Precondition_Operation,
   WriteRelationshipsRequest,
 } from "@benedb/protos/authzed/api/v1/permission_service";
 import { WriteSchemaRequest } from "@benedb/protos/authzed/api/v1/schema_service";
+import { ErrorInfo } from "@benedb/protos/google/rpc/error_info";
+import { Status } from "@benedb/protos/google/rpc/status";
 
 import {
   spiceDbAvailable,
@@ -27,6 +30,7 @@ import { resetSpiceDb } from "./spice-db-reset";
  * in-process `AuthzedPermissionsV1Service`, and asserts both give the same outcome: the same gRPC
  * status code and the same detail text, or success on both. Issue #4: a missing required
  * submessage is INVALID_ARGUMENT with SpiceDB's own protoc-gen-validate text, never an UNKNOWN fault.
+ * Both sides' `google.rpc.ErrorInfo` details are compared too (spiceport#46).
  */
 
 const fixture = useSpiceDbContainer();
@@ -229,19 +233,145 @@ const MissingFilter: readonly (readonly [
   ],
 ];
 
+/**
+ * Requests that break the `authzed.api.v1` id, type and name grammar (spiceport#46): SpiceDB rejects
+ * each in its protoc-gen-validate or handwritten validation interceptor, before any handler runs.
+ */
+const Ungrammatical: readonly (readonly [
+  name: string,
+  expected: status,
+  send: (target: {
+    writeRelationships(request: WriteRelationshipsRequest): Promise<unknown>;
+    deleteRelationships(request: DeleteRelationshipsRequest): Promise<unknown>;
+    checkPermission(request: CheckPermissionRequest): Promise<unknown>;
+  }) => Promise<unknown>,
+])[] = [
+  [
+    "write_uppercase_resource_type",
+    status.INVALID_ARGUMENT,
+    (target) =>
+      target.writeRelationships(req(TOUCH, { resourceType: "Document", relation: "viewer" })),
+  ],
+  [
+    "write_malformed_relation_and_subject_id",
+    status.INVALID_ARGUMENT,
+    (target) => target.writeRelationships(req(TOUCH, { relation: "Viewer", subjectId: "a b" })),
+  ],
+  [
+    "write_wildcard_subject_with_relation",
+    status.INVALID_ARGUMENT,
+    (target) =>
+      target.writeRelationships(
+        req(TOUCH, {
+          relation: "viewer",
+          subjectType: "group",
+          subjectId: "*",
+          subjectRelation: "member",
+        }),
+      ),
+  ],
+  [
+    "write_unspecified_operation",
+    status.INVALID_ARGUMENT,
+    (target) =>
+      target.writeRelationships(
+        req(RelationshipUpdate_Operation.OPERATION_UNSPECIFIED, { relation: "viewer" }),
+      ),
+  ],
+  [
+    "delete_wildcard_resource_id",
+    status.INVALID_ARGUMENT,
+    (target) =>
+      target.deleteRelationships(
+        DeleteRelationshipsRequest.fromPartial({
+          relationshipFilter: { resourceType: "document", optionalResourceId: "*" },
+        }),
+      ),
+  ],
+  [
+    "check_wildcard_resource",
+    status.INVALID_ARGUMENT,
+    (target) =>
+      target.checkPermission(
+        CheckPermissionRequest.fromPartial({
+          resource: { objectType: "document", objectId: "*" },
+          permission: "view",
+          subject: { object: { objectType: "user", objectId: "alice" } },
+        }),
+      ),
+  ],
+  // SpiceDB's consistency middleware runs before field validation, so an empty Consistency is its
+  // INTERNAL "missing handling of consistency case in " even though the object id is also too long.
+  // The message ends in a space, so a grpc-js client receives it as "" (see asReceivedOverGrpcJs).
+  [
+    "check_overlong_object_id_and_empty_consistency",
+    status.INTERNAL,
+    (target) =>
+      target.checkPermission(
+        CheckPermissionRequest.fromPartial({
+          consistency: {},
+          resource: { objectType: "document", objectId: "a".repeat(1025) },
+          permission: "view",
+          subject: { object: { objectType: "user", objectId: "alice" } },
+        }),
+      ),
+  ],
+  [
+    "check_overlong_object_id",
+    status.INVALID_ARGUMENT,
+    (target) =>
+      target.checkPermission(
+        CheckPermissionRequest.fromPartial({
+          resource: { objectType: "document", objectId: "a".repeat(1025) },
+          permission: "view",
+          subject: { object: { objectType: "user", objectId: "alice" } },
+        }),
+      ),
+  ],
+];
+
 interface Outcome {
   readonly code: number;
   readonly details: string;
+  /** The `google.rpc.ErrorInfo` in the status details (spiceport#46), when the error carries one. */
+  readonly errorInfo: ErrorInfo | undefined;
 }
 
 async function outcome(promise: Promise<unknown>): Promise<Outcome> {
   return promise.then(
-    () => ({ code: status.OK, details: "" }),
+    () => ({ code: status.OK, details: "", errorInfo: undefined }),
     (reason: unknown) => {
-      const error = reason as { code?: unknown; details?: unknown };
-      return { code: Number(error.code), details: String(error.details) };
+      const error = reason as { code?: unknown; details?: unknown; metadata?: unknown };
+      return {
+        code: Number(error.code),
+        details: asReceivedOverGrpcJs(String(error.details)),
+        errorInfo: errorInfoIn(error.metadata),
+      };
     },
   );
+}
+
+/**
+ * A status message as a grpc-js client receives it. Node's HTTP/2 layer drops a header field whose
+ * value starts or ends with whitespace (RFC 9113 section 8.2.1), so such a `grpc-message` trailer
+ * never arrives and grpc-js reports an empty detail. Observed against a running SpiceDB v1.49.2:
+ * its INTERNAL "missing handling of consistency case in " (trailing space) reaches a Go client
+ * whole and a grpc-js client as "". BeneDB's in-process error is the server's status, so it is
+ * compared as it would arrive over the same transport.
+ */
+function asReceivedOverGrpcJs(details: string): string {
+  return /^\s|\s$/u.test(details) ? "" : details;
+}
+
+/** Decodes the `ErrorInfo` from a `grpc-status-details-bin` trailer, as a client reads it. */
+function errorInfoIn(metadata: unknown): ErrorInfo | undefined {
+  if (!(metadata instanceof Metadata)) return undefined;
+  const trailer = metadata.get("grpc-status-details-bin")[0];
+  if (!(trailer instanceof Buffer)) return undefined;
+  const detail = Status.decode(trailer).details.find(
+    (d) => d.typeUrl === "type.googleapis.com/google.rpc.ErrorInfo",
+  );
+  return detail === undefined ? undefined : ErrorInfo.decode(detail.value);
 }
 
 describe.sequential("WriteRelationshipsSchemaValidationDifferentialTests", () => {
@@ -326,6 +456,37 @@ describe.sequential("WriteRelationshipsSchemaValidationDifferentialTests", () =>
         await spiceDbClient.writeSchema(WriteSchemaRequest.fromPartial({ schema: Schema }));
         spiceDb = await outcome(send(spiceDbClient));
         expect(spiceDb.code).toBe(status.INVALID_ARGUMENT);
+      } finally {
+        spiceDbClient.close();
+      }
+
+      const cluster = await MeshTestCluster.create(Schema);
+      try {
+        const service = new AuthzedPermissionsV1Service(
+          cluster.checker,
+          cluster.grainFactory,
+          cluster.reverseOps,
+          cluster.relationshipReads,
+          cluster.schemaProvider,
+        );
+        expect(await outcome(send(service))).toEqual(spiceDb);
+      } finally {
+        await cluster.dispose();
+      }
+    });
+  }
+
+  for (const [name, expected, send] of Ungrammatical) {
+    it(`Ungrammatical request agrees with SpiceDB [${name}]`, async (ctx) => {
+      ctx.skip(!spiceDbAvailable, spiceDbSkipReason);
+
+      let spiceDb: Outcome;
+      const spiceDbClient = new SpiceDbGrpcClient(fixture().address, fixture().preSharedKey);
+      try {
+        await resetSpiceDb(spiceDbClient);
+        await spiceDbClient.writeSchema(WriteSchemaRequest.fromPartial({ schema: Schema }));
+        spiceDb = await outcome(send(spiceDbClient));
+        expect(spiceDb.code).toBe(expected);
       } finally {
         spiceDbClient.close();
       }

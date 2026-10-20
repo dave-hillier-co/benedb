@@ -10,13 +10,15 @@ import {
 } from "@benedb/protos/authzed/api/v1/permission_service";
 import { describe, expect, it } from "vitest";
 
-import { validateDeleteRelationships, validateWriteRelationships } from "./request-limits";
+import { validateWriteRelationships } from "./request-limits";
+import { validateRequest } from "./request-validation";
 import { RpcError } from "./rpc-error";
 
 /**
  * Ported from Spiceport `tests/Spiceport.Grains.Tests/RequestLimitsTests.cs`.
  *
- * Pure request-shape tests for `request-limits.ts` (no cluster). An unset proto3 message field is
+ * Pure request-shape tests for missing required submessages, which `request-validation.ts` rejects
+ * ahead of the `request-limits.ts` handler checks (no cluster). An unset proto3 message field is
  * `undefined` under ts-proto (`null` in C#); SpiceDB rejects a missing required submessage with
  * INVALID_ARGUMENT in its request validation before any handler runs, so the boundary must too,
  * rather than letting a `TypeError` surface as an UNKNOWN status.
@@ -65,7 +67,7 @@ function assertInvalidArgument(validate: () => void, detail: string): void {
 describe("RequestLimitsTests", () => {
   it("ValidateWriteRelationships_update_without_relationship_is_invalid_argument", () => {
     assertInvalidArgument(
-      () => validateWriteRelationships(writeOf(undefined)),
+      () => validateRequest("WriteRelationshipsRequest", writeOf(undefined)),
       `invalid WriteRelationshipsRequest.Updates[0]: ${EMBEDDED}` +
         "invalid RelationshipUpdate.Relationship: value is required",
     );
@@ -74,7 +76,7 @@ describe("RequestLimitsTests", () => {
   it("ValidateWriteRelationships_relationship_without_resource_is_invalid_argument", () => {
     const rel = { ...validRelationship(), resource: undefined };
     assertInvalidArgument(
-      () => validateWriteRelationships(writeOf(rel)),
+      () => validateRequest("WriteRelationshipsRequest", writeOf(rel)),
       `invalid WriteRelationshipsRequest.Updates[0]: ${EMBEDDED}` +
         `invalid RelationshipUpdate.Relationship: ${EMBEDDED}` +
         "invalid Relationship.Resource: value is required",
@@ -84,7 +86,7 @@ describe("RequestLimitsTests", () => {
   it("ValidateWriteRelationships_relationship_without_subject_is_invalid_argument", () => {
     const rel = { ...validRelationship(), subject: undefined };
     assertInvalidArgument(
-      () => validateWriteRelationships(writeOf(rel)),
+      () => validateRequest("WriteRelationshipsRequest", writeOf(rel)),
       `invalid WriteRelationshipsRequest.Updates[0]: ${EMBEDDED}` +
         `invalid RelationshipUpdate.Relationship: ${EMBEDDED}` +
         "invalid Relationship.Subject: value is required",
@@ -94,7 +96,7 @@ describe("RequestLimitsTests", () => {
   it("ValidateWriteRelationships_subject_without_object_is_invalid_argument", () => {
     const rel = { ...validRelationship(), subject: { object: undefined, optionalRelation: "" } };
     assertInvalidArgument(
-      () => validateWriteRelationships(writeOf(rel)),
+      () => validateRequest("WriteRelationshipsRequest", writeOf(rel)),
       `invalid WriteRelationshipsRequest.Updates[0]: ${EMBEDDED}` +
         `invalid RelationshipUpdate.Relationship: ${EMBEDDED}` +
         `invalid Relationship.Subject: ${EMBEDDED}invalid SubjectReference.Object: value is required`,
@@ -105,7 +107,7 @@ describe("RequestLimitsTests", () => {
     // One embedded wrapper whose cause is the Relationship's own ValidateAll multi-error.
     const rel = { ...validRelationship(), resource: undefined, subject: undefined };
     assertInvalidArgument(
-      () => validateWriteRelationships(writeOf(rel)),
+      () => validateRequest("WriteRelationshipsRequest", writeOf(rel)),
       `invalid WriteRelationshipsRequest.Updates[0]: ${EMBEDDED}` +
         `invalid RelationshipUpdate.Relationship: ${EMBEDDED}` +
         "invalid Relationship.Resource: value is required; " +
@@ -120,7 +122,7 @@ describe("RequestLimitsTests", () => {
       relationship: undefined,
     });
     assertInvalidArgument(
-      () => validateWriteRelationships(request),
+      () => validateRequest("WriteRelationshipsRequest", request),
       `invalid WriteRelationshipsRequest.Updates[1]: ${EMBEDDED}` +
         "invalid RelationshipUpdate.Relationship: value is required",
     );
@@ -137,7 +139,7 @@ describe("RequestLimitsTests", () => {
       filter: undefined,
     });
     assertInvalidArgument(
-      () => validateWriteRelationships(request),
+      () => validateRequest("WriteRelationshipsRequest", request),
       `invalid WriteRelationshipsRequest.Updates[0]: ${EMBEDDED}` +
         "invalid RelationshipUpdate.Relationship: value is required; " +
         `invalid WriteRelationshipsRequest.Updates[1]: ${EMBEDDED}` +
@@ -154,7 +156,7 @@ describe("RequestLimitsTests", () => {
       filter: undefined,
     });
     assertInvalidArgument(
-      () => validateWriteRelationships(request),
+      () => validateRequest("WriteRelationshipsRequest", request),
       `invalid WriteRelationshipsRequest.OptionalPreconditions[0]: ${EMBEDDED}` +
         "invalid Precondition.Filter: value is required",
     );
@@ -172,12 +174,14 @@ describe("RequestLimitsTests", () => {
         optionalSubjectFilter: undefined,
       },
     });
+    validateRequest("WriteRelationshipsRequest", request);
     validateWriteRelationships(request);
   });
 
   it("ValidateDeleteRelationships_without_relationship_filter_is_invalid_argument", () => {
     assertInvalidArgument(
-      () => validateDeleteRelationships(DeleteRelationshipsRequest.fromPartial({})),
+      () =>
+        validateRequest("DeleteRelationshipsRequest", DeleteRelationshipsRequest.fromPartial({})),
       "invalid DeleteRelationshipsRequest.RelationshipFilter: value is required",
     );
   });
@@ -187,7 +191,7 @@ describe("RequestLimitsTests", () => {
       optionalPreconditions: [{ operation: Precondition_Operation.OPERATION_MUST_MATCH }],
     });
     assertInvalidArgument(
-      () => validateDeleteRelationships(request),
+      () => validateRequest("DeleteRelationshipsRequest", request),
       "invalid DeleteRelationshipsRequest.RelationshipFilter: value is required; " +
         `invalid DeleteRelationshipsRequest.OptionalPreconditions[0]: ${EMBEDDED}` +
         "invalid Precondition.Filter: value is required",
@@ -200,14 +204,15 @@ describe("RequestLimitsTests", () => {
       optionalPreconditions: [{ operation: Precondition_Operation.OPERATION_MUST_MATCH }],
     });
     assertInvalidArgument(
-      () => validateDeleteRelationships(request),
+      () => validateRequest("DeleteRelationshipsRequest", request),
       `invalid DeleteRelationshipsRequest.OptionalPreconditions[0]: ${EMBEDDED}` +
         "invalid Precondition.Filter: value is required",
     );
   });
 
   it("ValidateDeleteRelationships_accepts_a_well_formed_request", () => {
-    validateDeleteRelationships(
+    validateRequest(
+      "DeleteRelationshipsRequest",
       DeleteRelationshipsRequest.fromPartial({
         relationshipFilter: { resourceType: "document" },
         optionalPreconditions: [

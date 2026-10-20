@@ -23,15 +23,19 @@ export class RpcError extends Error implements Partial<ServiceError> {
   /** The status detail, as C# `RpcException.Status.Detail`. Also this error's `message`. */
   readonly details: string;
 
-  /** Trailing metadata. Spiceport never sets any; an empty instance keeps the `ServiceError` shape. */
+  /**
+   * Trailing metadata, as C# `RpcException.Trailers`: where a reasoned error carries its
+   * `grpc-status-details-bin` (see `rpc-errors.ts`). Empty otherwise, which keeps the
+   * `ServiceError` shape.
+   */
   readonly metadata: Metadata;
 
-  constructor(code: status, details: string) {
+  constructor(code: status, details: string, metadata: Metadata = new Metadata()) {
     super(details);
     this.name = "RpcError";
     this.code = code;
     this.details = details;
-    this.metadata = new Metadata();
+    this.metadata = metadata;
   }
 }
 

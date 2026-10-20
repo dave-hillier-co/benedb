@@ -208,7 +208,9 @@ describe("experimentalRegisterRelationshipCounter", () => {
     );
 
     expect(error.code).toBe(status.INVALID_ARGUMENT);
-    expect(error.details).toBe("relationship_filter is required");
+    expect(error.details).toBe(
+      "invalid ExperimentalRegisterRelationshipCounterRequest.RelationshipFilter: value is required",
+    );
     expect(h.grain.registerArgs).toEqual([]);
   });
 

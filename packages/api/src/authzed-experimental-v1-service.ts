@@ -26,6 +26,7 @@ import type {
   ExperimentalUnregisterRelationshipCounterRequest,
   ExperimentalUnregisterRelationshipCounterResponse,
 } from "@benedb/protos/authzed/api/v1/experimental_service";
+import { ErrorReason } from "@benedb/protos/authzed/api/v1/error_reason";
 import {
   ExperimentalComputablePermissionsResponse,
   ExperimentalDependentRelationsResponse,
@@ -53,7 +54,9 @@ import { mapAsyncStream } from "./mapped-async-stream-reader";
 import { MappedServerStreamWriter } from "./mapped-server-stream-writer";
 import { reshapeProto } from "./proto-reshape";
 import { MAX_EXPERIMENTAL_BULK_EXPORT_RELATIONSHIPS_LIMIT } from "./request-ceilings";
+import { validateRequest } from "./request-validation";
 import { RpcError } from "./rpc-error";
+import { rpcErrorWithReason } from "./rpc-errors";
 import type { ServerStreamWriter } from "./server-stream-writer";
 
 /**
@@ -84,8 +87,8 @@ import type { ServerStreamWriter } from "./server-stream-writer";
  *   * `IAsyncStreamReader<T>` is an `AsyncIterable<T>` and `IServerStreamWriter<T>` a
  *     {@link ServerStreamWriter}, so the C#'s mapping wrappers become `mapAsyncStream` and
  *     {@link MappedServerStreamWriter}.
- *   * `request.RelationshipFilter is null` is `=== undefined`: ts-proto renders an absent
- *     submessage as `undefined`.
+ *   * The C# reads `request.RelationshipFilter` knowing request validation has rejected an absent
+ *     one; ts-proto still types it optional, so it is asserted present once, after validation.
  *   * `RelationshipCount` is uint64. The grains DTO carries a `bigint` and ts-proto renders the
  *     field as a STRING (`forceLong=string`), so it is `String(reply.count)` - never a JS
  *     `number`, which would round past 2^53.
@@ -122,6 +125,8 @@ export class AuthzedExperimentalV1Service {
     request: BulkCheckPermissionRequest,
     signal?: AbortSignal | undefined,
   ): Promise<BulkCheckPermissionResponse> {
+    validateRequest("BulkCheckPermissionRequest", request);
+
     const converted: CheckBulkPermissionsRequest = {
       consistency: request.consistency,
       items: request.items.map((item) => ({
@@ -133,7 +138,7 @@ export class AuthzedExperimentalV1Service {
       withTracing: false,
     };
 
-    const result = await this.#permissions.checkBulkPermissions(converted, signal);
+    const result = await this.#permissions.checkBulkPermissionsCore(converted, signal);
 
     const response: BulkCheckPermissionResponse = { checkedAt: result.checkedAt, pairs: [] };
     for (const pair of result.pairs) {
@@ -171,8 +176,11 @@ export class AuthzedExperimentalV1Service {
     requestStream: AsyncIterable<BulkImportRelationshipsRequest>,
     signal?: AbortSignal | undefined,
   ): Promise<BulkImportRelationshipsResponse> {
-    const reply = await this.#permissions.importBulkRelationships(
-      mapAsyncStream(requestStream, (batch) => ({ relationships: batch.relationships })),
+    const reply = await this.#permissions.importBulk(
+      mapAsyncStream(requestStream, (batch) => {
+        validateRequest("BulkImportRelationshipsRequest", batch);
+        return { relationships: batch.relationships };
+      }),
       signal,
     );
 
@@ -180,11 +188,12 @@ export class AuthzedExperimentalV1Service {
   }
 
   /** Deprecated alias of ExportBulkRelationships, with the experimental server's ceiling. */
-  bulkExportRelationships(
+  async bulkExportRelationships(
     request: BulkExportRelationshipsRequest,
     responseStream: ServerStreamWriter<BulkExportRelationshipsResponse>,
     signal?: AbortSignal | undefined,
   ): Promise<void> {
+    validateRequest("BulkExportRelationshipsRequest", request);
     return this.#permissions.exportBulk(
       {
         consistency: request.consistency,
@@ -209,12 +218,14 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalReflectSchemaRequest,
     signal?: AbortSignal | undefined,
   ): Promise<ExperimentalReflectSchemaResponse> {
+    validateRequest("ExperimentalReflectSchemaRequest", request);
+
     const optionalFilters = request.optionalFilters.map((filter) =>
       reshapeProto(filter, ExpSchemaFilter, ReflectionSchemaFilter),
     );
 
     return reshapeProto(
-      await this.#schema.reflectSchema(
+      await this.#schema.reflectSchemaCore(
         { consistency: request.consistency, optionalFilters },
         signal,
       ),
@@ -228,8 +239,10 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalDiffSchemaRequest,
     signal?: AbortSignal | undefined,
   ): Promise<ExperimentalDiffSchemaResponse> {
+    validateRequest("ExperimentalDiffSchemaRequest", request);
+
     return reshapeProto(
-      await this.#schema.diffSchema(
+      await this.#schema.diffSchemaCore(
         { consistency: request.consistency, comparisonSchema: request.comparisonSchema },
         signal,
       ),
@@ -243,8 +256,10 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalComputablePermissionsRequest,
     signal?: AbortSignal | undefined,
   ): Promise<ExperimentalComputablePermissionsResponse> {
+    validateRequest("ExperimentalComputablePermissionsRequest", request);
+
     return reshapeProto(
-      await this.#schema.computablePermissions(
+      await this.#schema.computablePermissionsCore(
         {
           consistency: request.consistency,
           definitionName: request.definitionName,
@@ -263,8 +278,10 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalDependentRelationsRequest,
     signal?: AbortSignal | undefined,
   ): Promise<ExperimentalDependentRelationsResponse> {
+    validateRequest("ExperimentalDependentRelationsRequest", request);
+
     return reshapeProto(
-      await this.#schema.dependentRelations(
+      await this.#schema.dependentRelationsCore(
         {
           consistency: request.consistency,
           definitionName: request.definitionName,
@@ -282,18 +299,20 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalRegisterRelationshipCounterRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ExperimentalRegisterRelationshipCounterResponse> {
-    if (request.relationshipFilter === undefined) {
-      throw new RpcError(status.INVALID_ARGUMENT, "relationship_filter is required");
-    }
+    validateRequest("ExperimentalRegisterRelationshipCounterRequest", request);
+    requireName(request.name);
+
+    // The validation above rejects a request without its required relationship_filter.
+    const relationshipFilter = request.relationshipFilter as RelationshipFilter;
 
     try {
       await this.#relationships.registerRelationshipCounter({
         name: request.name,
-        filter: toWire(request.relationshipFilter),
+        filter: toWire(relationshipFilter),
       });
     } catch (error) {
       if (error instanceof CounterOperationException) {
-        throw toRpc(error);
+        throw toRpc(error, request.name, relationshipFilter);
       }
       if (error instanceof SequencerOverloadedException) {
         // The per-silo admission gate shed this commit - the sequencer is saturated. A deliberate,
@@ -311,11 +330,14 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalUnregisterRelationshipCounterRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ExperimentalUnregisterRelationshipCounterResponse> {
+    validateRequest("ExperimentalUnregisterRelationshipCounterRequest", request);
+    requireName(request.name);
+
     try {
       await this.#relationships.unregisterRelationshipCounter({ name: request.name });
     } catch (error) {
       if (error instanceof CounterOperationException) {
-        throw toRpc(error);
+        throw toRpc(error, request.name, undefined);
       }
       if (error instanceof SequencerOverloadedException) {
         // Sequencer overload shed by the admission gate: retryable RESOURCE_EXHAUSTED.
@@ -337,12 +359,15 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalCountRelationshipsRequest,
     _signal?: AbortSignal | undefined,
   ): Promise<ExperimentalCountRelationshipsResponse> {
+    validateRequest("ExperimentalCountRelationshipsRequest", request);
+    requireName(request.name);
+
     let reply;
     try {
       reply = await this.#relationships.countRelationships({ name: request.name });
     } catch (error) {
       if (error instanceof CounterOperationException) {
-        throw toRpc(error);
+        throw toRpc(error, request.name, undefined);
       }
       throw error;
     }
@@ -397,7 +422,51 @@ function isNullOrEmpty(value: string | undefined): value is undefined | "" {
   return value === undefined || value.length === 0;
 }
 
-/** Both counter failures map to FAILED_PRECONDITION, matching the SpiceDB reference. */
-function toRpc(ex: CounterOperationException): RpcError {
-  return new RpcError(status.FAILED_PRECONDITION, ex.message);
+/**
+ * Both counter failures map to FAILED_PRECONDITION, matching the SpiceDB reference, with the
+ * `ErrorInfo` `rewriteError` gives `CounterAlreadyRegisteredError` (the counter name and the NEW
+ * filter, every field present) and `CounterNotRegisteredError` (the counter name).
+ */
+function toRpc(
+  ex: CounterOperationException,
+  name: string,
+  filter: RelationshipFilter | undefined,
+): RpcError {
+  if (ex.kind !== "alreadyRegistered" || filter === undefined)
+    return rpcErrorWithReason(
+      status.FAILED_PRECONDITION,
+      ex.message,
+      ErrorReason.ERROR_REASON_COUNTER_NOT_REGISTERED,
+      [["counter_name", name]],
+    );
+
+  const subjectFilter = filter.optionalSubjectFilter;
+  return rpcErrorWithReason(
+    status.FAILED_PRECONDITION,
+    ex.message,
+    ErrorReason.ERROR_REASON_COUNTER_ALREADY_REGISTERED,
+    [
+      ["counter_name", name],
+      ["new_filter_resource_type", filter.resourceType],
+      ["new_filter_resource_id", filter.optionalResourceId],
+      ["new_filter_resource_id_prefix", filter.optionalResourceIdPrefix],
+      ["new_filter_relation", filter.optionalRelation],
+      ["new_filter_subject_type", subjectFilter?.subjectType ?? ""],
+      ["new_filter_subject_id", subjectFilter?.optionalSubjectId ?? ""],
+      ["new_filter_subject_relation", subjectFilter?.optionalRelation?.relation ?? ""],
+    ],
+  );
+}
+
+/**
+ * SpiceDB's counter handlers reject an empty name themselves (the name pattern admits the empty
+ * string): INVALID_ARGUMENT, "name must be provided", reason UNSPECIFIED.
+ */
+function requireName(name: string): void {
+  if (name === "")
+    throw rpcErrorWithReason(
+      status.INVALID_ARGUMENT,
+      "name must be provided",
+      ErrorReason.ERROR_REASON_UNSPECIFIED,
+    );
 }
