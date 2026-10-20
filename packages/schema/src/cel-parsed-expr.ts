@@ -65,9 +65,11 @@ const environment: CelEnv = createEnv("", createRegistry());
  * message and position, not ANTLR's; and its grammar is not cel-go's. It is lenient with escape
  * sequences (`"\q"` is accepted) and with a list of bare commas (`[,]`), and it does not accept the
  * optional syntax (`a.?b`, `a[?b]`, `[?a]`, `{?k: v}`, `Msg{?f: v}`), a `0X` hex prefix, an `rb`
- * bytes prefix, a triple-quoted string spanning lines, a space between repeated unary operators
- * (`! !a`), or a `//` comment ending the expression with no newline after it. Each is listed in
- * `docs/port-plan.md`.
+ * bytes prefix, a triple-quoted string spanning lines, or a space between repeated unary operators
+ * (`! !a`). Each is listed in `docs/port-plan.md`.
+ *
+ * `@bufbuild/cel` also cannot lex a `//` comment ending the input with no newline after it; that
+ * one is undone by parsing the expression with a newline appended.
  *
  * Ported from Spiceport `Engine/CelCheck/CelAstBuilder.cs`: the macro expansions and literal checks
  * below are its, verbatim; the parse it walks is `@bufbuild/cel`'s rather than an ANTLR tree.
@@ -75,7 +77,9 @@ const environment: CelEnv = createEnv("", createRegistry());
 export function parseCelExpr(expression: string, errors: CelIssues): CelExpr {
   let root: Expr | undefined;
   try {
-    root = environment.parse(expression).expr;
+    // `@bufbuild/cel` cannot lex a `//` comment that runs to the end of the input, which cel-go
+    // accepts; a newline ends any such comment and is otherwise whitespace.
+    root = environment.parse(`${expression}\n`).expr;
   } catch (error) {
     reportParseFailure(expression, error, errors);
     return unspecified(NO_LOCATION);
@@ -838,7 +842,9 @@ function reportParseFailure(expression: string, error: unknown, errors: CelIssue
     return;
   }
 
-  const before = Array.from(expression.slice(0, offset));
+  // An error at the end of input lies past the newline `parseCelExpr` appended; cel-go places it at
+  // the end of the expression itself.
+  const before = Array.from(expression.slice(0, Math.min(offset, expression.length)));
   const lastNewline = before.lastIndexOf("\n");
   const location: CelLocation = {
     line: before.filter((c) => c === "\n").length + 1,

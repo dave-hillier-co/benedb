@@ -25,6 +25,7 @@ import {
   CheckBulkPermissionsRequest,
   CheckPermissionRequest,
   CheckPermissionResponse_Permissionship,
+  type CheckPermissionResponse,
   DeleteRelationshipsRequest,
   DeleteRelationshipsResponse_DeletionProgress,
   ExpandPermissionTreeRequest,
@@ -47,6 +48,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
+import { AuthzedSchemaV1Service } from "./authzed-schema-v1-service";
 import { CollectingStreamWriter } from "./collecting-stream-writer";
 import {
   encodeReadRelationshipsCursor,
@@ -2935,4 +2937,63 @@ definition doc {
       }
     },
   );
+
+  it("CheckPermission caveat body ending in a line comment evaluates", async () => {
+    // BeneDB-only. The schema parser stores a caveat body trimmed, so a body whose last line is a
+    // `//` comment is stored ending in that comment, with no newline after it. Spiceport's CEL
+    // parser and cel-go both accept that text; it must evaluate here too, not just compile.
+    const cluster = await MeshTestCluster.create("");
+    try {
+      const schema = `definition user {}
+
+caveat c(b bool) {
+  b // note
+}
+
+definition document {
+    relation viewer: user with c
+    permission view = viewer
+}`;
+      const schemaService = new AuthzedSchemaV1Service(
+        cluster.grainFactory,
+        cluster.schemaProvider,
+      );
+      await schemaService.writeSchema({ schema });
+      expect((await schemaService.readSchema({})).schemaText).toContain("b // note\n}");
+
+      const svc = service(cluster);
+      await svc.writeRelationships(
+        writeOne(
+          RelationshipUpdate_Operation.OPERATION_TOUCH,
+          "document",
+          "readme",
+          "viewer",
+          "user",
+          "alice",
+          undefined,
+          "c",
+        ),
+      );
+
+      const check = (b: boolean): Promise<CheckPermissionResponse> =>
+        svc.checkPermission(
+          CheckPermissionRequest.fromPartial({
+            resource: { objectType: "document", objectId: "readme" },
+            permission: "view",
+            subject: userSubject("alice"),
+            context: { b },
+            consistency: { fullyConsistent: true },
+          }),
+        );
+
+      expect((await check(true)).permissionship).toBe(
+        CheckPermissionResponse_Permissionship.PERMISSIONSHIP_HAS_PERMISSION,
+      );
+      expect((await check(false)).permissionship).toBe(
+        CheckPermissionResponse_Permissionship.PERMISSIONSHIP_NO_PERMISSION,
+      );
+    } finally {
+      await cluster.dispose();
+    }
+  });
 });
