@@ -63,6 +63,12 @@ export interface DefinitionRemoved {
   readonly definition: NamespaceDefinition;
 }
 
+/** A kept definition's doc comments changed; carries the comparison schema's definition. */
+export interface DefinitionDocCommentChanged {
+  readonly kind: "definitionDocCommentChanged";
+  readonly definition: NamespaceDefinition;
+}
+
 /** A base relation was added to a kept definition. */
 export interface RelationAdded {
   readonly kind: "relationAdded";
@@ -73,6 +79,13 @@ export interface RelationAdded {
 /** A base relation was removed from a kept definition (or turned into a permission). */
 export interface RelationRemoved {
   readonly kind: "relationRemoved";
+  readonly definitionName: string;
+  readonly relation: Relation;
+}
+
+/** A kept relation's doc comments changed; carries the comparison schema's relation. */
+export interface RelationDocCommentChanged {
+  readonly kind: "relationDocCommentChanged";
   readonly definitionName: string;
   readonly relation: Relation;
 }
@@ -114,6 +127,13 @@ export interface PermissionExprChanged {
   readonly permission: Relation;
 }
 
+/** A kept permission's doc comments changed; carries the comparison schema's permission. */
+export interface PermissionDocCommentChanged {
+  readonly kind: "permissionDocCommentChanged";
+  readonly definitionName: string;
+  readonly permission: Relation;
+}
+
 /** A whole caveat was added. */
 export interface CaveatAdded {
   readonly kind: "caveatAdded";
@@ -129,6 +149,12 @@ export interface CaveatRemoved {
 /** A kept caveat's expression changed. */
 export interface CaveatExprChanged {
   readonly kind: "caveatExprChanged";
+  readonly caveat: CaveatDefinition;
+}
+
+/** A kept caveat's doc comments changed; carries the comparison schema's caveat. */
+export interface CaveatDocCommentChanged {
+  readonly kind: "caveatDocCommentChanged";
   readonly caveat: CaveatDefinition;
 }
 
@@ -160,23 +186,24 @@ export interface CaveatParameterTypeChanged {
 /**
  * A single structural difference between two compiled schemas. A closed discriminated union
  * mirroring the cases of the `authzed.api.v1.ReflectionSchemaDiff` proto `oneof`.
- *
- * Doc-comment-change variants are intentionally absent: the compiled Core model carries no comment
- * metadata (the lexer/AST drops comments), so they can never be detected.
  */
 export type SchemaDelta =
   | DefinitionAdded
   | DefinitionRemoved
+  | DefinitionDocCommentChanged
   | RelationAdded
   | RelationRemoved
+  | RelationDocCommentChanged
   | RelationSubjectTypeAdded
   | RelationSubjectTypeRemoved
   | PermissionAdded
   | PermissionRemoved
   | PermissionExprChanged
+  | PermissionDocCommentChanged
   | CaveatAdded
   | CaveatRemoved
   | CaveatExprChanged
+  | CaveatDocCommentChanged
   | CaveatParameterAdded
   | CaveatParameterRemoved
   | CaveatParameterTypeChanged;
@@ -238,6 +265,11 @@ function diffDefinitions(
     if (nextDef === undefined) {
       deltas.push({ kind: "definitionRemoved", definition: existingDef });
       continue;
+    }
+
+    // Comments first, as SpiceDB's pkg/diff/namespace DiffNamespaces checks them first.
+    if (!commentsEqual(existingDef.comments, nextDef.comments)) {
+      deltas.push({ kind: "definitionDocCommentChanged", definition: nextDef });
     }
 
     diffRelations(existingDef, nextDef, deltas);
@@ -305,7 +337,21 @@ function diffRelations(
           permission: nextRel,
         });
       }
+      if (!commentsEqual(existingRel.comments, nextRel.comments)) {
+        deltas.push({
+          kind: "permissionDocCommentChanged",
+          definitionName: nextDef.name,
+          permission: nextRel,
+        });
+      }
     } else {
+      if (!commentsEqual(existingRel.comments, nextRel.comments)) {
+        deltas.push({
+          kind: "relationDocCommentChanged",
+          definitionName: nextDef.name,
+          relation: nextRel,
+        });
+      }
       diffAllowedTypes(existingDef.name, existingRel, nextRel, deltas);
     }
   }
@@ -361,6 +407,10 @@ function diffCaveats(existing: CompiledSchema, next: CompiledSchema, deltas: Sch
       continue;
     }
 
+    if (!commentsEqual(existingCaveat.comments, nextCaveat.comments)) {
+      deltas.push({ kind: "caveatDocCommentChanged", caveat: nextCaveat });
+    }
+
     // `SerializedExpression.AsSpan().SequenceEqual(...)` - BYTE CONTENT equality, not reference.
     if (!bytesEqual(existingCaveat.serializedExpression, nextCaveat.serializedExpression)) {
       deltas.push({ kind: "caveatExprChanged", caveat: nextCaveat });
@@ -410,6 +460,19 @@ function diffCaveatParameters(
       });
     }
   }
+}
+
+/**
+ * `Comments.SequenceEqual(other, StringComparer.Ordinal)`. An absent list is an empty one: the C#
+ * list always exists, and only hand-built model objects here leave it out.
+ */
+function commentsEqual(
+  a: readonly string[] | undefined,
+  b: readonly string[] | undefined,
+): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  return left.length === right.length && left.every((comment, i) => comment === right[i]);
 }
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {

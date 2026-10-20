@@ -144,6 +144,49 @@ describe("ReferenceDatastore.watch", () => {
     expect(relationshipEquals(update.relationship, relationship)).toBe(true);
   });
 
+  // SpiceDB's `options.WithMetadata`: the transaction metadata is stored with the revision the
+  // transaction commits and returned on that revision's change (memdb `AddRevisionMetadata`), never on
+  // another revision's and never on a checkpoint; an empty metadata is not stored at all.
+  it("carries each transaction's metadata on its own revision only", async () => {
+    const ds = new ReferenceDatastore();
+    const head = await ds.headRevision();
+    const metadata = new Uint8Array([1, 2, 3]);
+    const viewer = (id: string): RelationshipUpdate =>
+      touch(rel("document", id, "viewer", "user", "x"));
+
+    const withMetadata = await ds.readWriteTx(
+      (tx) => tx.writeRelationships([viewer("a")]),
+      metadata,
+    );
+    const without = await ds.readWriteTx((tx) => tx.writeRelationships([viewer("b")]));
+    const empty = await ds.readWriteTx(
+      (tx) => tx.writeRelationships([viewer("c")]),
+      new Uint8Array(0),
+    );
+
+    const controller = new AbortController();
+    const changes: RevisionChange[] = [];
+    for await (const change of ds.watch(
+      head.revision,
+      { content: WatchContent.relationships | WatchContent.checkpoints },
+      controller.signal,
+    )) {
+      changes.push(change);
+      if (change.isCheckpoint === true) break;
+    }
+    controller.abort();
+
+    expect(changes).toHaveLength(4);
+    expect(changes[0]!.revision.equals(withMetadata)).toBe(true);
+    expect(changes[0]!.transactionMetadata).toEqual(metadata);
+    expect(changes[1]!.revision.equals(without)).toBe(true);
+    expect(changes[1]!.transactionMetadata).toBeUndefined();
+    expect(changes[2]!.revision.equals(empty)).toBe(true);
+    expect(changes[2]!.transactionMetadata).toBeUndefined();
+    expect(changes[3]!.isCheckpoint).toBe(true);
+    expect(changes[3]!.transactionMetadata).toBeUndefined();
+  });
+
   it("replays a committed write from an old cursor", async () => {
     const ds = new ReferenceDatastore();
     const head = await ds.headRevision();

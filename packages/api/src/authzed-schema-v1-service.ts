@@ -47,6 +47,7 @@ import {
   caveatTypeString,
   reflectionCaveat,
   reflectionCaveatParameter,
+  reflectionComment,
   reflectionDefinition,
   reflectionPermission,
   reflectionRelation,
@@ -172,7 +173,7 @@ export class AuthzedSchemaV1Service {
 
       const reflected: ReflectionDefinition = {
         name: def.name,
-        comment: "",
+        comment: reflectionComment(def.comments),
         relations: [],
         permissions: [],
       };
@@ -359,10 +360,16 @@ function mapDelta(delta: SchemaDelta): ReflectionSchemaDiff {
       return { definitionAdded: reflectionDefinition(delta.definition) };
     case "definitionRemoved":
       return { definitionRemoved: reflectionDefinition(delta.definition) };
+    case "definitionDocCommentChanged":
+      return { definitionDocCommentChanged: reflectionDefinition(delta.definition) };
     case "relationAdded":
       return { relationAdded: reflectionRelation(delta.definitionName, delta.relation) };
     case "relationRemoved":
       return { relationRemoved: reflectionRelation(delta.definitionName, delta.relation) };
+    case "relationDocCommentChanged":
+      return {
+        relationDocCommentChanged: reflectionRelation(delta.definitionName, delta.relation),
+      };
     case "relationSubjectTypeAdded":
       return {
         relationSubjectTypeAdded: {
@@ -385,12 +392,18 @@ function mapDelta(delta: SchemaDelta): ReflectionSchemaDiff {
       return {
         permissionExprChanged: reflectionPermission(delta.definitionName, delta.permission),
       };
+    case "permissionDocCommentChanged":
+      return {
+        permissionDocCommentChanged: reflectionPermission(delta.definitionName, delta.permission),
+      };
     case "caveatAdded":
       return { caveatAdded: reflectionCaveat(delta.caveat) };
     case "caveatRemoved":
       return { caveatRemoved: reflectionCaveat(delta.caveat) };
     case "caveatExprChanged":
       return { caveatExprChanged: reflectionCaveat(delta.caveat) };
+    case "caveatDocCommentChanged":
+      return { caveatDocCommentChanged: reflectionCaveat(delta.caveat) };
     case "caveatParameterAdded":
       return {
         caveatParameterAdded: reflectionCaveatParameter(

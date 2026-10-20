@@ -22,17 +22,19 @@ export interface SchemaFileNode {
   readonly caveats: readonly CaveatNode[];
 }
 
-/** A `definition` block containing relations and permissions. */
+/** A `definition` block containing relations and permissions, with its leading comments. */
 export interface DefinitionNode {
   readonly name: string;
   readonly relations: readonly RelationNode[];
   readonly permissions: readonly PermissionNode[];
+  readonly comments: readonly string[];
 }
 
-/** A `relation` declaration with its allowed subject types. */
+/** A `relation` declaration with its allowed subject types and leading comments. */
 export interface RelationNode {
   readonly name: string;
   readonly allowedTypes: readonly TypeRefNode[];
+  readonly comments: readonly string[];
 }
 
 /** One allowed subject type within a relation's type expression. */
@@ -49,17 +51,22 @@ export interface TypeRefNode {
   readonly requiresExpiration: boolean;
 }
 
-/** A `permission` declaration with its compute expression. */
+/** A `permission` declaration with its compute expression and leading comments. */
 export interface PermissionNode {
   readonly name: string;
   readonly expression: ExprNode;
+  readonly comments: readonly string[];
 }
 
-/** A `caveat` block: a name, typed parameters (in source order), and the raw CEL body text. */
+/**
+ * A `caveat` block: a name, typed parameters (in source order), the raw CEL body text, and its
+ * leading comments.
+ */
 export interface CaveatNode {
   readonly name: string;
   readonly parameters: readonly CaveatParameterNode[];
   readonly expression: string;
+  readonly comments: readonly string[];
 }
 
 /** One `name type` parameter inside a caveat parameter list. */

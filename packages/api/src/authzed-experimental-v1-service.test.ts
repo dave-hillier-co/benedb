@@ -3,7 +3,9 @@ import {
   IRelationshipsGrain as IRelationshipsGrainDefinition,
   RELATIONSHIPS_GRAIN_KEY,
 } from "@benedb/grains/i-relationships-grain";
+import type { IPermissionChecker } from "@benedb/grains/i-permission-checker";
 import { MutableSchemaProvider } from "@benedb/grains/i-schema-provider";
+import type { RelationshipReads } from "@benedb/grains/relationship-reads";
 import type {
   CountRelationshipsArgs,
   CountRelationshipsReply,
@@ -17,6 +19,7 @@ import {
   REGISTER_COUNTER_REPLY,
   UNREGISTER_COUNTER_REPLY,
 } from "@benedb/grains/relationships-dtos";
+import type { ReverseOps } from "@benedb/grains/reverse-ops";
 import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
 import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { GrainInterface } from "@thresh/core/grain-interface";
@@ -24,6 +27,8 @@ import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 import { describe, expect, it } from "vitest";
 
 import { AuthzedExperimentalV1Service } from "./authzed-experimental-v1-service";
+import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
+import { AuthzedSchemaV1Service } from "./authzed-schema-v1-service";
 import { RpcError } from "./rpc-error";
 
 /**
@@ -52,8 +57,9 @@ import { RpcError } from "./rpc-error";
  *     wraps the single `optional_resource_id` into a one-element list and likewise the single
  *     `optional_subject_id`, and reaches `optional_relation` through two levels of nesting. The C#
  *     maintains the two copies separately and so does the port.
- *   * `ISchemaProvider` is injected and STORED BUT NEVER USED (line 24), only to mirror the sibling
- *     constructor pattern. The parameter stays.
+ *   * The counter RPCs reach neither injected v1 service; those serve the deprecated aliases and
+ *     the Exp* schema tooling, which `authzed-experimental-v1-service-tests.test.ts` drives over a
+ *     live mesh.
  *
  * Port decisions this file also pins, because the C# construct has no TypeScript counterpart:
  *   * `RpcException(new Status(code, detail))` becomes {@link RpcError}.
@@ -123,6 +129,12 @@ class FakeGrainFactory implements GrainFactoryAccess {
   }
 }
 
+// The counter RPCs never reach the v1 permissions service's checker or in-process read helpers, so
+// the harness hands it inert placeholders rather than standing up the engine.
+const UNREACHED_CHECKER = {} as IPermissionChecker;
+const UNREACHED_REVERSE_OPS = {} as ReverseOps;
+const UNREACHED_RELATIONSHIP_READS = {} as RelationshipReads;
+
 interface Harness {
   readonly service: AuthzedExperimentalV1Service;
   readonly grain: FakeRelationshipsGrain;
@@ -134,7 +146,17 @@ function harness(): Harness {
   const grain = new FakeRelationshipsGrain();
   const grains = new FakeGrainFactory(grain);
   const schema = new MutableSchemaProvider(SCHEMA);
-  const service = new AuthzedExperimentalV1Service(grains, schema);
+  const service = new AuthzedExperimentalV1Service(
+    grains,
+    new AuthzedPermissionsV1Service(
+      UNREACHED_CHECKER,
+      grains,
+      UNREACHED_REVERSE_OPS,
+      UNREACHED_RELATIONSHIP_READS,
+      schema,
+    ),
+    new AuthzedSchemaV1Service(grains, schema),
+  );
   return { service, grain, grains, schema };
 }
 

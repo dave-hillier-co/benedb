@@ -473,6 +473,33 @@ describe("parser", () => {
     });
   });
 
+  describe("leading comments", () => {
+    it("hangs the comments of each declaration's opening keyword on its node, verbatim", () => {
+      const file = parse(`// cav
+caveat c(x int) { x > 1 }
+/* def */
+definition t {
+  // rel
+  relation r: user
+  // perm
+  permission p = r
+}`);
+
+      const definition = single(file.definitions);
+      expect(single(file.caveats).comments).toEqual(["// cav"]);
+      expect(definition.comments).toEqual(["/* def */"]);
+      expect(single(definition.relations).comments).toEqual(["// rel"]);
+      expect(single(definition.permissions).comments).toEqual(["// perm"]);
+    });
+
+    it("gives a declaration with no leading comments an empty list", () => {
+      const definition = single(parse("definition t { relation r: user }").definitions);
+
+      expect(definition.comments).toEqual([]);
+      expect(single(definition.relations).comments).toEqual([]);
+    });
+  });
+
   describe("errors", () => {
     it("throws with a line for a malformed schema", () => {
       const error = compileError("definition document { relation owner }");

@@ -91,11 +91,15 @@ export interface CommitRequest {
    */
   readonly expectedHead?: bigint | undefined;
   /**
-   * Optional caller-supplied transaction metadata to attach to the minted revision's `LogEvent`,
-   * carried through to Watch's `optional_transaction_metadata` / `full_revision_metadata`
-   * (mirroring SpiceDB's `WithMetadata` option). Absent means no metadata was supplied.
+   * The transaction metadata (SpiceDB `optional_transaction_metadata`, stored with the transaction
+   * by `options.WithMetadata`) as the serialized `google.protobuf.Struct` the API layer received -
+   * opaque bytes below it. An accepted commit journals it on the `LogEvent` of the revision it
+   * mints, on either path, so Watch returns it with that revision's changes; a rejected one
+   * journals nothing. Absent or empty journals none (SpiceDB stores nothing for an empty metadata).
+   * Every request in a group-commit batch mints its own revision and event, so each keeps its own
+   * metadata.
    */
-  readonly transactionMetadata?: ReadonlyMap<string, unknown> | undefined;
+  readonly transactionMetadata?: Uint8Array | undefined;
 }
 
 /**

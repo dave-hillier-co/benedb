@@ -156,10 +156,14 @@ export interface IDatastore {
   /**
    * Runs a read-write transaction; commits if the function completes without throwing.
    *
+   * @param transactionMetadata Metadata stored with the revision the transaction commits and
+   *   returned by `watch` on that revision's change (SpiceDB `options.WithMetadata`). Opaque bytes to
+   *   the datastore; absent or empty stores none, as SpiceDB stores nothing for an empty metadata.
    * @returns The committed revision.
    */
   readWriteTx(
     transaction: (tx: IReadWriteTransaction) => Promise<void>,
+    transactionMetadata?: Uint8Array | undefined,
     signal?: AbortSignal | undefined,
   ): Promise<IRevision>;
 

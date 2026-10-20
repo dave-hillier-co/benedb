@@ -33,6 +33,7 @@ import type {
   TypeRefNode,
 } from "./ast";
 import type { CompiledSchema } from "./compiled-schema";
+import { dotNetTrim } from "./dot-net-trim";
 import { parse } from "./parser";
 import { SchemaCompileException } from "./schema-compile-exception";
 
@@ -64,6 +65,10 @@ import { SchemaCompileException } from "./schema-compile-exception";
  *   * `CaveatDefinition.parameterTypes` is a `Map`, whose enumeration order is insertion order
  *     where the C# `ImmutableDictionary` enumerates in hash order. Nothing here may depend on
  *     either.
+ *   * The C# sets the `Comments` init-property with an object initializer (`with { ... }` for a
+ *     permission); here `comments` is spread into the object literal. It is always set, `[]` when
+ *     there are none, as the C# always holds a list. Each line is trimmed with `dotNetTrim`, the
+ *     C#'s `Trim()`.
  */
 
 /**
@@ -118,7 +123,12 @@ function compileCaveat(caveat: CaveatNode): CaveatDefinition {
   // The CEL expression is stored verbatim (UTF-8) rather than evaluated here.
   const serialized = new TextEncoder().encode(caveat.expression);
 
-  return { name: caveat.name, serializedExpression: serialized, parameterTypes };
+  return {
+    name: caveat.name,
+    serializedExpression: serialized,
+    parameterTypes,
+    comments: normalizeComments(caveat.comments),
+  };
 }
 
 function compileCaveatType(type: CaveatTypeRefNode): CaveatTypeReference {
@@ -139,12 +149,16 @@ function compileDefinition(def: DefinitionNode): NamespaceDefinition {
     relations.push(compilePermission(perm));
   }
 
-  return { name: def.name, relations };
+  return { name: def.name, relations, comments: normalizeComments(def.comments) };
 }
 
 function compileRelation(rel: RelationNode): Relation {
   const allowed = rel.allowedTypes.map(compileTypeRef);
-  return { name: rel.name, typeInformation: { allowedDirectRelations: allowed } };
+  return {
+    name: rel.name,
+    typeInformation: { allowedDirectRelations: allowed },
+    comments: normalizeComments(rel.comments),
+  };
 }
 
 function compileTypeRef(t: TypeRefNode): AllowedRelation {
@@ -167,7 +181,26 @@ function compilePermission(perm: PermissionNode): Relation {
   const operation: SetOperation =
     child.kind === "nestedRewrite" ? child.value.operation : setOperationUnion(child);
 
-  return permissionRelation(perm.name, { operation });
+  return {
+    ...permissionRelation(perm.name, { operation }),
+    comments: normalizeComments(perm.comments),
+  };
+}
+
+/**
+ * Port of SpiceDB's `addComments`/`normalizeComment` (pkg/schemadsl/compiler/translator.go): each
+ * comment becomes one doc comment, kept verbatim with its markers but with every line
+ * whitespace-trimmed. The comments are metadata; nothing semantic reads them.
+ */
+function normalizeComments(comments: readonly string[]): readonly string[] {
+  return comments.map(normalizeComment);
+}
+
+function normalizeComment(value: string): string {
+  return value
+    .split("\n")
+    .map((line) => dotNetTrim(line))
+    .join("\n");
 }
 
 function compileExpr(expr: ExprNode): SetOperationChild {

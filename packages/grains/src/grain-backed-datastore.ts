@@ -289,6 +289,7 @@ export class GrainBackedDatastore implements IDatastore {
   /** @inheritdoc */
   async readWriteTx(
     transaction: (tx: IReadWriteTransaction) => Promise<void>,
+    transactionMetadata?: Uint8Array | undefined,
     signal?: AbortSignal | undefined,
   ): Promise<IRevision> {
     if (transaction === undefined || transaction === null)
@@ -332,7 +333,10 @@ export class GrainBackedDatastore implements IDatastore {
       //    counter diff at this revision (reusing the single per-revision diff definition). The
       //    grain re-mints the revision and stamps it, so the request carries no final revision.
       const committed = tx.commit();
-      const request = commitFromState(committed, newRevision, expectedHead);
+      const request: CommitRequest = {
+        ...commitFromState(committed, newRevision, expectedHead),
+        transactionMetadata,
+      };
 
       // 5. Submit to the sequencer's commit with the compatibility CAS (expectedHead): applies only
       //    if the grain head still equals expectedHead. No preconditions ride along - the lambda
@@ -487,13 +491,15 @@ function buildChange(ev: LogEvent, options: WatchOptions): RevisionChange | unde
     includeRels && ev.relationshipChanges.length > 0 ? ev.relationshipChanges.map(toUpdate) : [];
   const schemaChanged = includeSchema && ev.schemaChange !== undefined;
 
+  // Metadata alone is not content: SpiceDB's Watch sends nothing for a revision carrying only
+  // metadata.
   if (relChanges.length === 0 && !schemaChanged) return undefined;
 
   return {
     revision: new TimestampRevision(ev.revision),
     relationshipChanges: relChanges,
     schemaChanged,
-    transactionMetadatas: ev.transactionMetadata !== undefined ? [ev.transactionMetadata] : [],
+    transactionMetadata: ev.transactionMetadata,
   };
 }
 

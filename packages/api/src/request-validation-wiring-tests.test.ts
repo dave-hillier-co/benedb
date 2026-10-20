@@ -63,7 +63,7 @@ const EMBEDDED = "embedded message failed validation | caused by: ";
 const NONE = undefined as never;
 const permissions = new AuthzedPermissionsV1Service(NONE, NONE, NONE, NONE, NONE);
 const schema = new AuthzedSchemaV1Service(NONE, NONE);
-const experimental = new AuthzedExperimentalV1Service(NONE, NONE);
+const experimental = new AuthzedExperimentalV1Service(NONE, permissions, schema);
 
 function badResource(): ObjectReference {
   return { objectType: BAD_TYPE, objectId: "doc1" };

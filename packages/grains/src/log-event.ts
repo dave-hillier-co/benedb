@@ -49,12 +49,12 @@ export interface LogEvent {
    */
   readonly gcFloor?: bigint | undefined;
   /**
-   * The optional transaction metadata supplied on the `CommitRequest` that produced this event, or
-   * absent when none was supplied. Always absent on a GC event. Carried through unfolded (it is not
-   * part of the datastore state) so Watch can echo it on the `RevisionChange` it derives from this
-   * event.
+   * The metadata the commit that minted this revision carried (`CommitRequest.transactionMetadata`),
+   * or absent for none and on a GC event. It is part of the log, not of the folded state: no fold
+   * reads it, and Watch returns it with this revision's changes. Added after the journal format was
+   * in use, so an event journaled before it reads back with none.
    */
-  readonly transactionMetadata?: ReadonlyMap<string, unknown> | undefined;
+  readonly transactionMetadata?: Uint8Array | undefined;
 }
 
 /** A bounded page of the event log, plus the head revision observed at read time. */

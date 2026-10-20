@@ -71,7 +71,11 @@ function permissions(
 }
 
 function experimental(cluster: MeshTestCluster): AuthzedExperimentalV1Service {
-  return new AuthzedExperimentalV1Service(cluster.grainFactory, cluster.schemaProvider);
+  return new AuthzedExperimentalV1Service(
+    cluster.grainFactory,
+    permissions(cluster),
+    schemaService(cluster),
+  );
 }
 
 function schemaService(cluster: MeshTestCluster): AuthzedSchemaV1Service {
@@ -457,7 +461,11 @@ describe("ErrorInfoServiceTests", () => {
   // UNSPECIFIED): the counter-name pattern admits the empty string, so the handlers reject it
   // themselves.
   it("A_counter_without_a_name_is_rejected_before_the_datastore", async () => {
-    const service = new AuthzedExperimentalV1Service(undefined as never, undefined as never);
+    const service = new AuthzedExperimentalV1Service(
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    );
     assertErrorInfo(
       await rejection(
         service.experimentalRegisterRelationshipCounter({
