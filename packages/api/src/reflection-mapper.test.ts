@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   caveatTypeString,
   reflectionCaveat,
+  reflectionComment,
   reflectionCaveatParameter,
   reflectionDefinition,
   reflectionPermission,
@@ -26,7 +27,9 @@ import {
  *
  *   * the three-way `typeref` oneof branch (lines 64-69) is ORDERED and EXCLUSIVE - wildcard wins,
  *     then a non-ellipsis relation name, else terminal - and an ellipsis subrelation is TERMINAL;
- *   * `comment` is always the empty string, never absent, on every message;
+ *   * `comment` is the declaration's doc comments joined by "\n" - SpiceDB's
+ *     `strings.Join(namespace.GetComments(metadata), "\n")` - and the empty string, never absent,
+ *     when there are none (including a hand-built model with no `comments` field);
  *   * caveat parameters are ordered by an ORDINAL comparison of the parameter name (line 94), which
  *     is not the same order `localeCompare` produces;
  *   * the caveat expression is a UTF-8 decode of the stored bytes (line 91), so non-ASCII CEL string
@@ -315,5 +318,34 @@ describe("caveatTypeString", () => {
         ],
       }),
     ).toBe("map<string, list<ipaddress>>");
+  });
+});
+
+describe("reflectionComment", () => {
+  it("joins doc comments with a newline, keeping their markers", () => {
+    expect(reflectionComment(["// one", "/* two\n* lines */"])).toBe("// one\n/* two\n* lines */");
+  });
+
+  it("is the empty string for no comments, absent or empty", () => {
+    expect(reflectionComment(undefined)).toBe("");
+    expect(reflectionComment([])).toBe("");
+  });
+
+  it("is what every reflection message carries", () => {
+    const comments = ["// doc"];
+    const def = { ...createNamespaceDefinition("user"), comments };
+    const rel = { ...baseRelation("viewer", allowedRelationDirect("user")), comments };
+    const perm = { ...permission("view", anyRewrite), comments };
+    const cav: CaveatDefinition = {
+      name: "c",
+      serializedExpression: new Uint8Array(),
+      parameterTypes: new Map(),
+      comments,
+    };
+
+    expect(reflectionDefinition(def).comment).toBe("// doc");
+    expect(reflectionRelation("user", rel).comment).toBe("// doc");
+    expect(reflectionPermission("user", perm).comment).toBe("// doc");
+    expect(reflectionCaveat(cav).comment).toBe("// doc");
   });
 });

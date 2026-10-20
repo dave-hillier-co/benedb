@@ -544,6 +544,89 @@ definition document {
     }
   });
 
+  const CommentedReflectSchema = `/** A user. */
+definition user {}
+
+// Caveat doc.
+caveat ip_match(allowed string, user_ip string) {
+    user_ip == allowed
+}
+
+// Document doc,
+// over two lines.
+definition document {
+    // Viewer doc.
+    relation viewer: user
+    relation editor: user // trailing, dropped as in SpiceDB
+    /*
+     * View doc.
+     */
+    permission view = viewer + editor
+}`;
+
+  it("ReflectSchema returns doc comments joined by newline", async () => {
+    const cluster = await MeshTestCluster.create(EmptySchema);
+    try {
+      const svc = service(cluster);
+      await svc.writeSchema({ schema: CommentedReflectSchema });
+
+      const resp = await svc.reflectSchema({ optionalFilters: [] });
+
+      const users = resp.definitions.filter((d) => d.name === "user");
+      expect(users).toHaveLength(1);
+      expect(users[0]!.comment).toBe("/** A user. */");
+      const docs = resp.definitions.filter((d) => d.name === "document");
+      expect(docs).toHaveLength(1);
+      const doc = docs[0]!;
+      expect(doc.comment).toBe("// Document doc,\n// over two lines.");
+      expect(doc.relations.filter((r) => r.name === "viewer").map((r) => r.comment)).toEqual([
+        "// Viewer doc.",
+      ]);
+      expect(doc.relations.filter((r) => r.name === "editor").map((r) => r.comment)).toEqual([""]);
+      expect(doc.permissions.map((p) => p.comment)).toEqual(["/*\n* View doc.\n*/"]);
+      expect(resp.caveats.map((c) => c.comment)).toEqual(["// Caveat doc."]);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
+  it("DiffSchema reports doc comment changes with the comparison comment", async () => {
+    const cluster = await MeshTestCluster.create(EmptySchema);
+    try {
+      const svc = service(cluster);
+      await svc.writeSchema({ schema: ReflectSchema });
+
+      const resp = await svc.diffSchema({ comparisonSchema: CommentedReflectSchema });
+
+      expect(
+        resp.diffs.some(
+          (d) =>
+            d.definitionDocCommentChanged?.name === "user" &&
+            d.definitionDocCommentChanged.comment === "/** A user. */",
+        ),
+      ).toBe(true);
+      expect(resp.diffs.some((d) => d.definitionDocCommentChanged?.name === "document")).toBe(true);
+      expect(
+        resp.diffs.some(
+          (d) =>
+            d.relationDocCommentChanged?.name === "viewer" &&
+            d.relationDocCommentChanged.comment === "// Viewer doc.",
+        ),
+      ).toBe(true);
+      expect(resp.diffs.some((d) => d.permissionDocCommentChanged?.name === "view")).toBe(true);
+      expect(
+        resp.diffs.some(
+          (d) =>
+            d.caveatDocCommentChanged?.name === "ip_match" &&
+            d.caveatDocCommentChanged.comment === "// Caveat doc.",
+        ),
+      ).toBe(true);
+      expect(resp.diffs).toHaveLength(5);
+    } finally {
+      await cluster.dispose();
+    }
+  });
+
   it("DiffSchema invalid comparison is invalid argument", async () => {
     const cluster = await MeshTestCluster.create(EmptySchema);
     try {

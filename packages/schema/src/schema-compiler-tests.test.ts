@@ -462,6 +462,27 @@ describe("SchemaCompiler", () => {
     expect(compileError(schema, compileSchema).message).toBe(expected);
   });
 
+  it("keeps a caveat's doc comments while slicing its body past comments", () => {
+    // SpiceDB's message for the same schema; the comments inside the body are not part of the CEL
+    // source, and the doc comment before `caveat` is the caveat's.
+    expect(
+      compileError("// doc\ncaveat c(x int) {\n  // lead\n  x == 1 || x // trail\n}", compileSchema)
+        .message,
+    ).toBe(
+      "schema error at line 4, column 3: invalid expression for caveat `c`: " +
+        "ERROR: c:4:13: expected type 'bool' but found 'int'",
+    );
+
+    const schema = "/** doc */\ncaveat c(x int) {\n  // lead\n  x == 1 // trail\n}";
+    for (const compiler of [compileSchema, compileStoredSchema]) {
+      const caveat = compiler(schema).caveats[0];
+      expect(caveat?.comments).toEqual(["/** doc */"]);
+      expect(new TextDecoder().decode(caveat?.serializedExpression)).toBe(
+        "// lead\n  x == 1 // trail",
+      );
+    }
+  });
+
   it.each([
     [
       "caveat c(x foo) { x }",

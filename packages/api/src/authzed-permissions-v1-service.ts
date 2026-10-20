@@ -97,6 +97,7 @@ import {
   Precondition_Operation,
 } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { Status as RpcStatus } from "@benedb/protos/google/rpc/status";
+import { Struct } from "@benedb/protos/google/protobuf/struct";
 import { isCancellationError } from "@thresh/core/errors";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
@@ -117,6 +118,7 @@ import {
   MAX_DELETE_RELATIONSHIPS_LIMIT,
   MAX_LOOKUP_RESOURCES_LIMIT,
   MAX_READ_RELATIONSHIPS_LIMIT,
+  validateCheckCount,
   validateLimit,
 } from "./request-ceilings";
 import { RpcError } from "./rpc-error";
@@ -307,12 +309,11 @@ export class AuthzedPermissionsV1Service {
 
     const updates = request.updates.map(toWireRelationshipUpdate);
     const preconditions = toWirePreconditions(request.optionalPreconditions);
-    const transactionMetadata = structToMap(request.optionalTransactionMetadata);
     try {
       const reply = await this.#relationships.writeRelationships({
         updates,
         preconditions,
-        transactionMetadata,
+        transactionMetadata: toWireTransactionMetadata(request.optionalTransactionMetadata),
       });
       return { writtenAt: { token: reply.writtenAtToken } };
     } catch (error) {
@@ -415,7 +416,7 @@ export class AuthzedPermissionsV1Service {
         optionalLimit: limit,
         preconditions: toWirePreconditions(request.optionalPreconditions),
         rejectOverLimit: limit !== undefined && !request.optionalAllowPartialDeletions,
-        transactionMetadata: structToMap(request.optionalTransactionMetadata),
+        transactionMetadata: toWireTransactionMetadata(request.optionalTransactionMetadata),
       });
 
       return {
@@ -734,6 +735,8 @@ export class AuthzedPermissionsV1Service {
     request: CheckBulkPermissionsRequest,
     signal?: AbortSignal | undefined,
   ): Promise<CheckBulkPermissionsResponse> {
+    validateCheckCount(request.items.length);
+
     const snapshot = this.#schema.current;
 
     // Validate each pair against the schema UP FRONT and PER PAIR. An unknown resource definition,
@@ -912,12 +915,29 @@ export class AuthzedPermissionsV1Service {
   }
 
   /** Streams the whole filtered relationship set back, batched per response message. */
-  async exportBulkRelationships(
+  exportBulkRelationships(
     request: ExportBulkRelationshipsRequest,
     responseStream: ServerStreamWriter<ExportBulkRelationshipsResponse>,
     signal?: AbortSignal | undefined,
   ): Promise<void> {
-    validateLimit(request.optionalLimit, MAX_BULK_EXPORT_RELATIONSHIPS_LIMIT);
+    return this.exportBulk(request, responseStream, signal, MAX_BULK_EXPORT_RELATIONSHIPS_LIMIT);
+  }
+
+  /**
+   * The ExportBulkRelationships body, parameterised by its `optional_limit` ceiling: SpiceDB's
+   * `ExportBulk`/`BulkExport` take the batch size from the calling server's configuration, which
+   * differs between PermissionsService and the deprecated ExperimentalService alias.
+   *
+   * `internal` in the C#; TypeScript has no assembly visibility, so it is public. It is not a
+   * method of the service definition, so the host wiring never exposes it as an RPC.
+   */
+  async exportBulk(
+    request: ExportBulkRelationshipsRequest,
+    responseStream: ServerStreamWriter<ExportBulkRelationshipsResponse>,
+    signal: AbortSignal | undefined,
+    maxLimit: number,
+  ): Promise<void> {
+    validateLimit(request.optionalLimit, maxLimit);
 
     const filter =
       request.optionalRelationshipFilter !== undefined
@@ -1342,6 +1362,19 @@ const EMPTY_RELATIONSHIP: ProtoRelationship = Object.freeze({ relation: "" });
  * result is a `Map` because the grains DTOs take a `ReadonlyMap` - and because a plain object would
  * collide with the `Map` branch of {@link objectToValue} and with prototype keys.
  */
+/**
+ * A request's `optional_transaction_metadata` as the opaque bytes the commit journals with its
+ * revision (the serialized `google.protobuf.Struct`, which Watch parses back). Absent stays absent.
+ *
+ * PORT NOTE: the C# overloads `ToWire`; TypeScript has no overloads, so it takes the
+ * `toWire<Thing>` name the file's other `ToWire` overloads already use.
+ */
+function toWireTransactionMetadata(
+  metadata: { [key: string]: unknown } | undefined,
+): Uint8Array | undefined {
+  return metadata === undefined ? undefined : Struct.encode(Struct.wrap(metadata)).finish();
+}
+
 function structToMap(
   s: { [key: string]: unknown } | undefined,
 ): ReadonlyMap<string, unknown> | undefined {

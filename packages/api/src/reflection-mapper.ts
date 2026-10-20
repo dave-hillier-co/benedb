@@ -20,25 +20,31 @@ import type {
  * Spiceport's `ReflectionMapper.cs`, itself a port of SpiceDB's `reflectionapi.go`
  * (`namespaceAPIRepr`/`relationAPIRepr`/`permissionAPIRepr`/`typeAPIRepr`/`caveatAPIRepr`).
  *
- * Honest gaps faithful to the compiled model: `comment` is always the empty string because the
- * Core model carries no doc-comment metadata (the lexer/AST drops comments). Caveat `expression`
- * is recovered from `CaveatDefinition.serializedExpression`, which stores the verbatim CEL body
- * text as UTF-8.
+ * `comment` is the declaration's doc comments joined by a newline, as SpiceDB renders
+ * `strings.Join(namespace.GetComments(metadata), "\n")`. Caveat `expression` is recovered from
+ * `CaveatDefinition.serializedExpression`, which stores the verbatim CEL body text as UTF-8.
  *
  * Port decisions:
  *   * The C# static class becomes free functions, one per member, prefixed `reflection*` so the
  *     names do not collide with the proto message types they build. `TypeString` becomes
  *     `caveatTypeString` for the same reason.
+ *   * `Comment` becomes `reflectionComment`, and takes an absent list (a hand-built model object)
+ *     as an empty one.
  *   * `OrderBy(p => p.Key, StringComparer.Ordinal)` becomes an explicit ordinal comparison of the
  *     parameter names. NEVER `localeCompare`, which reorders case and accents and would silently
  *     change the emitted proto. The keys of a map are distinct, so the sort's stability is moot.
  */
 
+/** Renders a declaration's doc comments as the reflection `comment` string. */
+export function reflectionComment(comments: readonly string[] | undefined): string {
+  return (comments ?? []).join("\n");
+}
+
 /** Builds the `ReflectionDefinition` for a namespace, splitting relations vs permissions. */
 export function reflectionDefinition(def: NamespaceDefinition): ReflectionDefinition {
   const result: ReflectionDefinition = {
     name: def.name,
-    comment: "",
+    comment: reflectionComment(def.comments),
     relations: [],
     permissions: [],
   };
@@ -56,7 +62,7 @@ export function reflectionRelation(
 ): ReflectionRelation {
   const result: ReflectionRelation = {
     name: relation.name,
-    comment: "",
+    comment: reflectionComment(relation.comments),
     parentDefinitionName,
     subjectTypes: [],
   };
@@ -94,14 +100,18 @@ export function reflectionPermission(
   parentDefinitionName: string,
   permission: Relation,
 ): ReflectionPermission {
-  return { name: permission.name, comment: "", parentDefinitionName };
+  return {
+    name: permission.name,
+    comment: reflectionComment(permission.comments),
+    parentDefinitionName,
+  };
 }
 
 /** Builds the `ReflectionCaveat` for a caveat (parameters sorted by name). */
 export function reflectionCaveat(caveat: CaveatDefinition): ReflectionCaveat {
   const result: ReflectionCaveat = {
     name: caveat.name,
-    comment: "",
+    comment: reflectionComment(caveat.comments),
     parameters: [],
     // serializedExpression holds the verbatim CEL body text (UTF-8), captured at compile time.
     expression: new TextDecoder().decode(caveat.serializedExpression),

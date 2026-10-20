@@ -29,10 +29,13 @@ import { computeSchemaDiff, rewriteEquals, sameAllowedType, type SchemaDelta } f
  * The order the C# fixes:
  *   Compute            -> DiffDefinitions, then DiffCaveats.
  *   DiffDefinitions    -> every DefinitionAdded (iterating next.Namespaces), then per existing
- *                         definition either DefinitionRemoved or DiffRelations.
- *   DiffRelations      -> every added (iterating nextDef.Relations), then the per-existing pass.
+ *                         definition either DefinitionRemoved, or (DefinitionDocCommentChanged
+ *                         then DiffRelations).
+ *   DiffRelations      -> every added (iterating nextDef.Relations), then the per-existing pass:
+ *                         a permission's PermissionExprChanged then PermissionDocCommentChanged,
+ *                         a relation's RelationDocCommentChanged then its subject types.
  *   DiffCaveats        -> every CaveatAdded, then per existing caveat CaveatRemoved, or
- *                         (CaveatExprChanged then DiffCaveatParameters).
+ *                         (CaveatDocCommentChanged, CaveatExprChanged, DiffCaveatParameters).
  *   DiffCaveatParams   -> every added, then removed / type-changed.
  * There is NO sorting anywhere in the file: order is source/collection order, and `ToDictionary`
  * is only a membership index - the iteration is always over the LIST.
@@ -160,6 +163,96 @@ describe("computeSchemaDiff on identical schemas", () => {
       );
 
     expect(computeSchemaDiff(build(), build())).toEqual([]);
+  });
+});
+
+describe("computeSchemaDiff doc comments", () => {
+  // The doc-comment cases of Spiceport's `SchemaDiffTests.cs`. SpiceDB's pkg/diff/namespace and
+  // pkg/diff/caveats compare GetComments on kept definitions, relations, permissions and caveats,
+  // and DiffSchema surfaces each as a *DocCommentChanged case carrying the comparison side.
+  const uncommented = `caveat ip_match(allowed string) {
+  allowed == "x"
+}
+definition user {}
+definition document {
+  relation viewer: user
+  permission view = viewer
+}`;
+
+  const commented = `// caveat doc
+caveat ip_match(allowed string) {
+  allowed == "x"
+}
+definition user {}
+// document doc
+definition document {
+  // viewer doc
+  relation viewer: user
+  // view doc
+  permission view = viewer
+}`;
+
+  it("DocCommentChangesAreReportedPerDeclarationAgainstTheComparisonSchema", () => {
+    const existing = compileSchema(uncommented);
+    const next = compileSchema(commented);
+
+    const deltas = computeSchemaDiff(existing, next);
+
+    // Whole list, in order: the definition's comments before its relations (DiffNamespaces checks
+    // them first), a relation's before its subject types, a permission's after its expression,
+    // and a caveat's before its expression and parameters.
+    expect(deltas.map((d) => d.kind)).toEqual([
+      "definitionDocCommentChanged",
+      "relationDocCommentChanged",
+      "permissionDocCommentChanged",
+      "caveatDocCommentChanged",
+    ]);
+    expect(deltas[0]).toEqual({
+      kind: "definitionDocCommentChanged",
+      definition: next.namespaces[1],
+    });
+    expect(next.namespaces[1]?.comments).toEqual(["// document doc"]);
+    expect(deltas[1]).toMatchObject({
+      kind: "relationDocCommentChanged",
+      definitionName: "document",
+      relation: { name: "viewer", comments: ["// viewer doc"] },
+    });
+    expect(deltas[2]).toMatchObject({
+      kind: "permissionDocCommentChanged",
+      definitionName: "document",
+      permission: { name: "view", comments: ["// view doc"] },
+    });
+    expect(deltas[3]).toMatchObject({
+      kind: "caveatDocCommentChanged",
+      caveat: { name: "ip_match", comments: ["// caveat doc"] },
+    });
+  });
+
+  it("UnchangedDocCommentsYieldNoDeltas", () => {
+    expect(computeSchemaDiff(compileSchema(commented), compileSchema(commented))).toEqual([]);
+  });
+
+  it("DocCommentChangesNeverReachTheOrphanCheckRemovalSubset", () => {
+    const deltas = computeSchemaDiff(compileSchema(commented), compileSchema(uncommented));
+
+    expect(deltas).toHaveLength(4);
+    for (const d of deltas) {
+      expect([
+        "definitionDocCommentChanged",
+        "relationDocCommentChanged",
+        "permissionDocCommentChanged",
+        "caveatDocCommentChanged",
+      ]).toContain(d.kind);
+    }
+  });
+
+  it("treats an absent comment list as an empty one", () => {
+    // Hand-built model objects carry no `comments` field; the compiler always sets one.
+    const handBuilt = schema([ns("user")]);
+    const compiled = compileSchema("definition user {}");
+
+    expect(computeSchemaDiff(handBuilt, compiled)).toEqual([]);
+    expect(computeSchemaDiff(compiled, handBuilt)).toEqual([]);
   });
 });
 

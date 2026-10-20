@@ -20,6 +20,7 @@ import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permissio
 import { RelationshipFilter as RelationshipFilterMessage } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { WatchRequest, WatchResponse } from "@benedb/protos/authzed/api/v1/watch_service";
 import { WatchKind } from "@benedb/protos/authzed/api/v1/watch_service";
+import { Struct } from "@benedb/protos/google/protobuf/struct";
 import { GrainTaskCanceledError } from "@thresh/core/errors";
 import { describe, expect, it } from "vitest";
 
@@ -953,9 +954,12 @@ describe("transaction metadata", () => {
     expect(h.writer.collected[0]?.fullRevisionMetadata).toEqual([]);
   });
 
-  it("populates optional_transaction_metadata when EXACTLY ONE blob is present", async () => {
-    const metadata = new Map<string, unknown>([["requestId", "abc-123"]]);
-    const h = harness([changeStep(change({ transactionMetadatas: [metadata] }))]);
+  // The change's metadata is the serialized `google.protobuf.Struct` the write supplied. A revision
+  // is one transaction, so SpiceDB's ambiguous several-metadata case cannot arise here.
+  const metadata = Struct.encode(Struct.wrap({ requestId: "abc-123" })).finish();
+
+  it("populates both metadata fields from the change's transaction metadata", async () => {
+    const h = harness([changeStep(change({ transactionMetadata: metadata }))]);
 
     await h.service.watch(request(), h.writer);
 
@@ -963,23 +967,8 @@ describe("transaction metadata", () => {
     expect(h.writer.collected[0]?.fullRevisionMetadata).toEqual([{ requestId: "abc-123" }]);
   });
 
-  it("leaves optional_transaction_metadata UNSET when multiple blobs merge at one revision", async () => {
-    const first = new Map<string, unknown>([["a", 1]]);
-    const second = new Map<string, unknown>([["b", 2]]);
-    const h = harness([changeStep(change({ transactionMetadatas: [first, second] }))]);
-
-    await h.service.watch(request(), h.writer);
-
-    // Ambiguous which one to return - the field stays absent, but the full list still carries both.
-    expect(h.writer.collected[0]?.optionalTransactionMetadata).toBeUndefined();
-    expect(h.writer.collected[0]?.fullRevisionMetadata).toEqual([{ a: 1 }, { b: 2 }]);
-  });
-
   it("carries metadata through on a checkpoint response too", async () => {
-    const metadata = new Map<string, unknown>([["requestId", "abc-123"]]);
-    const h = harness([
-      changeStep(change({ isCheckpoint: true, transactionMetadatas: [metadata] })),
-    ]);
+    const h = harness([changeStep(change({ isCheckpoint: true, transactionMetadata: metadata }))]);
 
     await h.service.watch(request(), h.writer);
 

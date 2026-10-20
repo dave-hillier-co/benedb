@@ -580,6 +580,68 @@ describe("DatastoreInterleavedReadTests", () => {
   });
 
   /**
+   * Group commit keeps each request's transaction metadata with its own revision: a batch of commits
+   * carrying different metadata (one none, one rejected) appends one event per accepted commit, each
+   * holding exactly the metadata its request carried, and the rejected request's metadata appears
+   * nowhere.
+   */
+  it("A_batch_keeps_each_commits_metadata_on_its_own_event", async () => {
+    await withCluster(async ({ cluster }) => {
+      const target = grain(cluster);
+      expect((await target.commit(updateCommit("create", "taken", "zoe"))).failure).toBeUndefined();
+      const oldHead = (await target.getHead()).head;
+      const appendsBefore = gate.journalAppends;
+      const metadata = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+      gate.headWriteBlock = deferred();
+      gate.headWriteParked = deferred();
+      const first = target.commit({
+        ...updateCommit("touch", "first", "alice"),
+        transactionMetadata: metadata("first"),
+      });
+      let batched: Promise<CommitReply>[];
+      try {
+        await waitAsync(gate.headWriteParked.promise, "the journal append to park");
+        gate.headWriteParked = undefined;
+        batched = [
+          target.commit({
+            ...updateCommit("touch", "b0", "bob"),
+            transactionMetadata: metadata("b0"),
+          }),
+          target.commit(updateCommit("touch", "b1", "bob")),
+          target.commit({
+            ...updateCommit("create", "taken", "zoe"),
+            transactionMetadata: metadata("rejected"),
+          }),
+          target.commit({
+            ...updateCommit("touch", "b3", "bob"),
+            transactionMetadata: metadata("b3"),
+          }),
+        ];
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } finally {
+        const block = gate.headWriteBlock;
+        gate.headWriteBlock = undefined;
+        block?.resolve();
+      }
+
+      const firstReply = await waitAsync(first, "the parked commit");
+      const replies = await waitAsync(Promise.all(batched), "the batched commits");
+      expect(gate.journalAppends).toBe(appendsBefore + 2); // the four shared one write
+      expect(replies[2]!.failure?.kind).toBe("createAlreadyExists");
+
+      const byRevision = new Map(
+        (await target.readFrom(oldHead, -1)).events.map((e) => [e.revision, e] as const),
+      );
+      expect(byRevision.size).toBe(4);
+      expect(byRevision.get(firstReply.revision!)!.transactionMetadata).toEqual(metadata("first"));
+      expect(byRevision.get(replies[0]!.revision!)!.transactionMetadata).toEqual(metadata("b0"));
+      expect(byRevision.get(replies[1]!.revision!)!.transactionMetadata).toBeUndefined();
+      expect(byRevision.get(replies[3]!.revision!)!.transactionMetadata).toEqual(metadata("b3"));
+    });
+  });
+
+  /**
    * A commit evaluated later in a batch sees the commits before it in the same batch: two creates of
    * one relationship batched together still conflict, exactly one winning.
    */

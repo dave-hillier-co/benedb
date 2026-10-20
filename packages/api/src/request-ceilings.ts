@@ -32,6 +32,18 @@ export const MAX_LOOKUP_RESOURCES_LIMIT = 1_000;
 export const MAX_BULK_EXPORT_RELATIONSHIPS_LIMIT = 10_000;
 
 /**
+ * Maximum `optional_limit` for the deprecated ExperimentalService BulkExportRelationships (SpiceDB
+ * `ExperimentalServerOptions.MaxExportBatchSize` default).
+ */
+export const MAX_EXPERIMENTAL_BULK_EXPORT_RELATIONSHIPS_LIMIT = 100_000;
+
+/**
+ * Maximum number of items in one CheckBulkPermissions (or the deprecated BulkCheckPermission)
+ * request (SpiceDB `maxBulkCheckCount`).
+ */
+export const MAX_BULK_CHECK_COUNT = 10_000;
+
+/**
  * Rejects a non-zero `providedLimit` above `maxLimit` (SpiceDB `NewExceedsMaximumLimitErr`). Zero
  * means "no limit" and always passes. Both are proto `uint32`s, which ts-proto renders as plain
  * non-negative numbers, so the comparison is exact.
@@ -41,6 +53,19 @@ export function validateLimit(providedLimit: number, maxLimit: number): void {
     throw new RpcError(
       status.INVALID_ARGUMENT,
       `provided limit ${providedLimit} is greater than maximum allowed of ${maxLimit}`,
+    );
+  }
+}
+
+/**
+ * Rejects a bulk check of more than {@link MAX_BULK_CHECK_COUNT} items (SpiceDB
+ * `NewExceedsMaximumChecksErr`).
+ */
+export function validateCheckCount(checkCount: number): void {
+  if (checkCount > MAX_BULK_CHECK_COUNT) {
+    throw new RpcError(
+      status.INVALID_ARGUMENT,
+      `check count of ${checkCount} is greater than maximum allowed of ${MAX_BULK_CHECK_COUNT}`,
     );
   }
 }

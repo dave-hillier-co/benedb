@@ -17,6 +17,12 @@ export interface NamespaceDefinition {
    * compiler's responsibility; this type performs no check of its own.
    */
   readonly relations: readonly Relation[];
+  /**
+   * The doc comments that preceded the definition, each verbatim with its `//` or block-comment
+   * markers and every line trimmed (SpiceDB's `DocComment` metadata). Metadata, not semantics.
+   * Absent means none.
+   */
+  readonly comments?: readonly string[] | undefined;
 }
 
 /** Creates a namespace definition from a name and relations. */

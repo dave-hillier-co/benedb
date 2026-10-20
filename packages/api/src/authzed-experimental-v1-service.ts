@@ -4,74 +4,277 @@ import {
   IRelationshipsGrain as IRelationshipsGrainDefinition,
   RELATIONSHIPS_GRAIN_KEY,
 } from "@benedb/grains/i-relationships-grain";
-import type { ISchemaProvider } from "@benedb/grains/i-schema-provider";
 import type { RelationshipsFilterWire } from "@benedb/grains/relationships-dtos";
 import { CounterOperationException } from "@benedb/grains/relationships-dtos";
 import { SequencerOverloadedException } from "@benedb/grains/sequencer-overloaded-exception";
 import type {
+  BulkCheckPermissionPair,
+  BulkCheckPermissionRequest,
+  BulkCheckPermissionResponse,
+  BulkExportRelationshipsRequest,
+  BulkExportRelationshipsResponse,
+  BulkImportRelationshipsRequest,
+  BulkImportRelationshipsResponse,
+  ExperimentalComputablePermissionsRequest,
   ExperimentalCountRelationshipsRequest,
   ExperimentalCountRelationshipsResponse,
+  ExperimentalDependentRelationsRequest,
+  ExperimentalDiffSchemaRequest,
+  ExperimentalReflectSchemaRequest,
   ExperimentalRegisterRelationshipCounterRequest,
   ExperimentalRegisterRelationshipCounterResponse,
   ExperimentalUnregisterRelationshipCounterRequest,
   ExperimentalUnregisterRelationshipCounterResponse,
 } from "@benedb/protos/authzed/api/v1/experimental_service";
-import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
+import {
+  ExperimentalComputablePermissionsResponse,
+  ExperimentalDependentRelationsResponse,
+  ExperimentalDiffSchemaResponse,
+  ExperimentalReflectSchemaResponse,
+  ExpSchemaFilter,
+} from "@benedb/protos/authzed/api/v1/experimental_service";
+import type {
+  CheckBulkPermissionsRequest,
+  ExportBulkRelationshipsResponse,
+  RelationshipFilter,
+} from "@benedb/protos/authzed/api/v1/permission_service";
+import {
+  ComputablePermissionsResponse,
+  DependentRelationsResponse,
+  DiffSchemaResponse,
+  ReflectionSchemaFilter,
+  ReflectSchemaResponse,
+} from "@benedb/protos/authzed/api/v1/schema_service";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
+import type { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
+import type { AuthzedSchemaV1Service } from "./authzed-schema-v1-service";
+import { mapAsyncStream } from "./mapped-async-stream-reader";
+import { MappedServerStreamWriter } from "./mapped-server-stream-writer";
+import { reshapeProto } from "./proto-reshape";
+import { MAX_EXPERIMENTAL_BULK_EXPORT_RELATIONSHIPS_LIMIT } from "./request-ceilings";
 import { RpcError } from "./rpc-error";
+import type { ServerStreamWriter } from "./server-stream-writer";
 
 /**
  * Port of Spiceport `src/Spiceport.Api/AuthzedExperimentalV1Service.cs`: the gRPC front door for
- * `authzed.api.v1.ExperimentalService`. Only the relationship-counter RPCs are implemented; they
- * are pure data-plane operations delegated to the `IRelationshipsGrain`. Counts are computed on
- * demand (resolve a revision, look up the registered filter, count matching relationships at that
- * snapshot, mint a `read_at` ZedToken) - there is no async precomputation, so the response always
- * carries the `read_counter_value` arm and never `counter_still_calculating`.
+ * `authzed.api.v1.ExperimentalService`. The relationship-counter RPCs are pure data-plane
+ * operations delegated to the `IRelationshipsGrain`. Counts are computed on demand (resolve a
+ * revision, look up the registered filter, count matching relationships at that snapshot, mint a
+ * `read_at` ZedToken) - there is no async precomputation, so the response always carries the
+ * `read_counter_value` arm and never `counter_still_calculating`.
  *
- * Error mapping follows the SpiceDB reference (`internal/services/shared/errors.go`), which maps
- * BOTH `CounterAlreadyRegistered` and `CounterNotRegistered` to `FAILED_PRECONDITION`; the kind
- * discriminator the ported `CounterOperationException` carries is deliberately NOT used to split
- * them.
+ * The remaining RPCs are, upstream (`internal/services/v1/experimental.go`), the same code paths as
+ * their v1 replacements under older message names, so each is translated onto the v1 service:
+ * BulkCheckPermission onto `AuthzedPermissionsV1Service.checkBulkPermissions`
+ * (`toCheckBulkPermissionsRequest`/`toBulkCheckPermissionResponse`); BulkImportRelationships /
+ * BulkExportRelationships onto Import/ExportBulkRelationships, the export with the experimental
+ * server's larger `optional_limit` ceiling; and the `Experimental*` schema-tooling RPCs onto
+ * `AuthzedSchemaV1Service`, re-typing its `Reflection*` messages as the wire-identical `Exp*` ones.
+ *
+ * Counter error mapping follows the SpiceDB reference (`internal/services/shared/errors.go`), which
+ * maps BOTH `CounterAlreadyRegistered` and `CounterNotRegistered` to `FAILED_PRECONDITION`; the
+ * kind discriminator the ported `CounterOperationException` carries is deliberately NOT used to
+ * split them.
  *
  * Port decisions (the C# constructs with no TypeScript counterpart):
- *   * THE REMAINING RPCs. The C# inherits `ExperimentalService.ExperimentalServiceBase`, whose
- *     generated members answer UNIMPLEMENTED for everything this class does not override.
- *     `@grpc/grpc-js` has no such base: it is handed an `UntypedServiceImplementation` map, and a
- *     method with no handler is answered UNIMPLEMENTED by the server itself. So the port registers
- *     ONLY these three methods in the host wiring and relies on grpc-js's own UNIMPLEMENTED for
- *     the rest, rather than writing throw-stubs the C# does not have. This class therefore carries
- *     the three methods and nothing else, exactly as the C# body does.
  *   * `RpcException(new Status(code, detail))` becomes {@link RpcError}.
- *   * `ServerCallContext` becomes a trailing `signal?: AbortSignal`; the C# reads nothing off it
- *     here, so nothing is passed on.
+ *   * `ServerCallContext` becomes a trailing `signal?: AbortSignal`, passed on to the v1 service
+ *     wherever the C# passes `context` on.
+ *   * `IAsyncStreamReader<T>` is an `AsyncIterable<T>` and `IServerStreamWriter<T>` a
+ *     {@link ServerStreamWriter}, so the C#'s mapping wrappers become `mapAsyncStream` and
+ *     {@link MappedServerStreamWriter}.
  *   * `request.RelationshipFilter is null` is `=== undefined`: ts-proto renders an absent
  *     submessage as `undefined`.
  *   * `RelationshipCount` is uint64. The grains DTO carries a `bigint` and ts-proto renders the
  *     field as a STRING (`forceLong=string`), so it is `String(reply.count)` - never a JS
  *     `number`, which would round past 2^53.
  *   * The empty Register/Unregister responses are `{}`, ts-proto's `create()` for an empty message.
+ *   * The C#'s `switch (pair.ResponseCase)` becomes two `!== undefined` tests: ts-proto renders
+ *     the oneof as two optional fields, not a case enum. Its `default: throw` (Go: `panic`) is the
+ *     final `else`.
  *   * {@link toWire} stays a LOCAL function. Its namesake in `authzed-permissions-v1-service.ts`
  *     differs (this one wraps a single `optional_resource_id` and a single `optional_subject_id`
  *     into one-element lists), and the C# maintains the two copies separately.
  */
 export class AuthzedExperimentalV1Service {
   readonly #grains: GrainFactoryAccess;
+  readonly #permissions: AuthzedPermissionsV1Service;
+  readonly #schema: AuthzedSchemaV1Service;
 
-  // `private readonly ISchemaProvider _schema = schema;` (line 24): accepted to mirror the sibling
-  // v1 service constructor pattern, but counters need only the grain, so it is never read. The C#'s
-  // own justification stands in for a lint suppression rather than dropping the parameter.
-  // eslint-disable-next-line no-unused-private-class-members
-  readonly #schema: ISchemaProvider;
-
-  constructor(grains: GrainFactoryAccess, schema: ISchemaProvider) {
+  constructor(
+    grains: GrainFactoryAccess,
+    permissions: AuthzedPermissionsV1Service,
+    schema: AuthzedSchemaV1Service,
+  ) {
     this.#grains = grains;
+    this.#permissions = permissions;
     this.#schema = schema;
   }
 
   /** `private IRelationshipsGrain Relationships => grains.GetGrain<...>(Key)` - a getter, as the C# is. */
   get #relationships(): IRelationshipsGrain {
     return this.#grains.getGrain(IRelationshipsGrainDefinition, RELATIONSHIPS_GRAIN_KEY);
+  }
+
+  /** Deprecated alias of CheckBulkPermissions: the same check under the older message names. */
+  async bulkCheckPermission(
+    request: BulkCheckPermissionRequest,
+    signal?: AbortSignal | undefined,
+  ): Promise<BulkCheckPermissionResponse> {
+    const converted: CheckBulkPermissionsRequest = {
+      consistency: request.consistency,
+      items: request.items.map((item) => ({
+        resource: item.resource,
+        permission: item.permission,
+        subject: item.subject,
+        context: item.context,
+      })),
+      withTracing: false,
+    };
+
+    const result = await this.#permissions.checkBulkPermissions(converted, signal);
+
+    const response: BulkCheckPermissionResponse = { checkedAt: result.checkedAt, pairs: [] };
+    for (const pair of result.pairs) {
+      const mapped: BulkCheckPermissionPair = {
+        request:
+          pair.request === undefined
+            ? undefined
+            : {
+                resource: pair.request.resource,
+                permission: pair.request.permission,
+                subject: pair.request.subject,
+                context: pair.request.context,
+              },
+      };
+
+      if (pair.item !== undefined) {
+        mapped.item = {
+          permissionship: pair.item.permissionship,
+          partialCaveatInfo: pair.item.partialCaveatInfo,
+        };
+      } else if (pair.error !== undefined) {
+        mapped.error = pair.error;
+      } else {
+        throw new Error("unknown CheckBulkPermissionsPair response: neither item nor error is set");
+      }
+
+      response.pairs.push(mapped);
+    }
+
+    return response;
+  }
+
+  /** Deprecated alias of ImportBulkRelationships. */
+  async bulkImportRelationships(
+    requestStream: AsyncIterable<BulkImportRelationshipsRequest>,
+    signal?: AbortSignal | undefined,
+  ): Promise<BulkImportRelationshipsResponse> {
+    const reply = await this.#permissions.importBulkRelationships(
+      mapAsyncStream(requestStream, (batch) => ({ relationships: batch.relationships })),
+      signal,
+    );
+
+    return { numLoaded: reply.numLoaded };
+  }
+
+  /** Deprecated alias of ExportBulkRelationships, with the experimental server's ceiling. */
+  bulkExportRelationships(
+    request: BulkExportRelationshipsRequest,
+    responseStream: ServerStreamWriter<BulkExportRelationshipsResponse>,
+    signal?: AbortSignal | undefined,
+  ): Promise<void> {
+    return this.#permissions.exportBulk(
+      {
+        consistency: request.consistency,
+        optionalLimit: request.optionalLimit,
+        optionalCursor: request.optionalCursor,
+        optionalRelationshipFilter: request.optionalRelationshipFilter,
+      },
+      new MappedServerStreamWriter<
+        ExportBulkRelationshipsResponse,
+        BulkExportRelationshipsResponse
+      >(responseStream, (page) => ({
+        afterResultCursor: page.afterResultCursor,
+        relationships: page.relationships,
+      })),
+      signal,
+      MAX_EXPERIMENTAL_BULK_EXPORT_RELATIONSHIPS_LIMIT,
+    );
+  }
+
+  /** `ReflectSchema` under the `Exp*` message names. */
+  async experimentalReflectSchema(
+    request: ExperimentalReflectSchemaRequest,
+    signal?: AbortSignal | undefined,
+  ): Promise<ExperimentalReflectSchemaResponse> {
+    const optionalFilters = request.optionalFilters.map((filter) =>
+      reshapeProto(filter, ExpSchemaFilter, ReflectionSchemaFilter),
+    );
+
+    return reshapeProto(
+      await this.#schema.reflectSchema(
+        { consistency: request.consistency, optionalFilters },
+        signal,
+      ),
+      ReflectSchemaResponse,
+      ExperimentalReflectSchemaResponse,
+    );
+  }
+
+  /** `DiffSchema` under the `Exp*` message names. */
+  async experimentalDiffSchema(
+    request: ExperimentalDiffSchemaRequest,
+    signal?: AbortSignal | undefined,
+  ): Promise<ExperimentalDiffSchemaResponse> {
+    return reshapeProto(
+      await this.#schema.diffSchema(
+        { consistency: request.consistency, comparisonSchema: request.comparisonSchema },
+        signal,
+      ),
+      DiffSchemaResponse,
+      ExperimentalDiffSchemaResponse,
+    );
+  }
+
+  /** `ComputablePermissions` under the `Exp*` message names. */
+  async experimentalComputablePermissions(
+    request: ExperimentalComputablePermissionsRequest,
+    signal?: AbortSignal | undefined,
+  ): Promise<ExperimentalComputablePermissionsResponse> {
+    return reshapeProto(
+      await this.#schema.computablePermissions(
+        {
+          consistency: request.consistency,
+          definitionName: request.definitionName,
+          relationName: request.relationName,
+          optionalDefinitionNameFilter: request.optionalDefinitionNameFilter,
+        },
+        signal,
+      ),
+      ComputablePermissionsResponse,
+      ExperimentalComputablePermissionsResponse,
+    );
+  }
+
+  /** `DependentRelations` under the `Exp*` message names. */
+  async experimentalDependentRelations(
+    request: ExperimentalDependentRelationsRequest,
+    signal?: AbortSignal | undefined,
+  ): Promise<ExperimentalDependentRelationsResponse> {
+    return reshapeProto(
+      await this.#schema.dependentRelations(
+        {
+          consistency: request.consistency,
+          definitionName: request.definitionName,
+          permissionName: request.permissionName,
+        },
+        signal,
+      ),
+      DependentRelationsResponse,
+      ExperimentalDependentRelationsResponse,
+    );
   }
 
   /** Registers a named relationship counter over the given filter. */

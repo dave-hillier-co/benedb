@@ -26,6 +26,7 @@ import { RelationshipUpdate_Operation } from "@benedb/protos/authzed/api/v1/core
 import type { RelationshipFilter } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { WatchRequest, WatchResponse } from "@benedb/protos/authzed/api/v1/watch_service";
 import { WatchKind } from "@benedb/protos/authzed/api/v1/watch_service";
+import { Struct } from "@benedb/protos/google/protobuf/struct";
 import { isCancellationError } from "@thresh/core/errors";
 
 import { RpcError } from "./rpc-error";
@@ -217,17 +218,25 @@ export class AuthzedWatchV1Service {
       this.#schemaProvider.current.schemaHash,
       datastoreId,
     );
-    const metadatas = change.transactionMetadatas ?? [];
     const response: WatchResponse = {
       updates: [],
       changesThrough: { token: token.token },
       schemaUpdated: change.schemaChanged ?? false,
       isCheckpoint: change.isCheckpoint ?? false,
-      // Ambiguity rule (SpiceDB watch.go): exactly one blob resolves `optional_transaction_metadata`;
-      // zero or more than one leaves it unset (absent, or ambiguous which one to return).
-      optionalTransactionMetadata: metadatas.length === 1 ? mapToStruct(metadatas[0]) : undefined,
-      fullRevisionMetadata: metadatas.map((m) => mapToStruct(m) ?? {}),
+      optionalTransactionMetadata: undefined,
+      fullRevisionMetadata: [],
     };
+
+    // SpiceDB (internal/services/v1/watch.go) puts the change's transaction metadata on every
+    // response it sends for the change: the whole list as full_revision_metadata, and
+    // optional_transaction_metadata when the list has exactly one entry. A revision here is one
+    // transaction, so the list is that transaction's metadata or empty; a checkpoint change, here as
+    // there, carries none.
+    if (change.transactionMetadata !== undefined) {
+      const parsed = Struct.unwrap(Struct.decode(change.transactionMetadata));
+      response.optionalTransactionMetadata = parsed;
+      response.fullRevisionMetadata.push(parsed);
+    }
 
     // A checkpoint carries no content, only the revision - the updates list stays EMPTY even when
     // the change carries relationship changes.
