@@ -71,11 +71,11 @@ export interface RevisionChange {
    */
   readonly isCheckpoint?: boolean | undefined;
   /**
-   * The optional transaction metadata blob(s) committed alongside this revision, mirroring
-   * SpiceDB's `RevisionChanges.Metadatas`: most datastores commit one transaction per revision, so
-   * this is usually zero or one entries, but some (e.g. CockroachDB) can merge concurrent
-   * transactions into a single revision, hence the list. Absent or empty means no metadata was
-   * supplied for this revision.
+   * The metadata the transaction that committed at `revision` was given (see
+   * `IDatastore.readWriteTx`), or absent when it was given none. Opaque to the datastore. SpiceDB's
+   * `RevisionChanges.Metadatas` is a list because some of its datastores merge concurrent
+   * transactions into one revision; every revision here is exactly one transaction, so it holds at
+   * most one. A checkpoint never carries it.
    */
-  readonly transactionMetadatas?: readonly ReadonlyMap<string, unknown>[] | undefined;
+  readonly transactionMetadata?: Uint8Array | undefined;
 }

@@ -722,10 +722,9 @@ export class DatastoreGrain
     if (request.expectedHead !== undefined && request.counterChanges.length > 0)
       ev = { ...ev, counterChanges: request.counterChanges };
 
-    // The caller's optional transaction metadata is not part of the datastore state - `eventFromState`
-    // derives only the state diff - so it rides the event directly, exactly like the compatibility
-    // path's counter deltas above.
-    if (request.transactionMetadata !== undefined)
+    // The request's transaction metadata belongs to the revision it mints, on either path; an empty
+    // one is stored as none (SpiceDB common.Changes.AddRevisionMetadata skips an empty metadata).
+    if (request.transactionMetadata !== undefined && request.transactionMetadata.length > 0)
       ev = { ...ev, transactionMetadata: request.transactionMetadata };
 
     return {

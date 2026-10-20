@@ -10,7 +10,8 @@ import { toCoreFilter, toWriteUpdate } from "./wire-convert";
  * the sequencer's order: preconditions against the state before the commit (mustMatch needs a
  * matching row, mustNotMatch none), then the updates, then the delete-by-filter. A rejection applies
  * nothing. Covers what the fault harness generates: preconditions, relationship updates and
- * delete-by-filter, not schema or counter changes.
+ * delete-by-filter, not schema or counter changes. The request's transaction metadata is stored
+ * with the revision the reference commits, as the sequencer journals it with its event.
  */
 export async function applyReferenceCommit(
   reference: ReferenceDatastore,
@@ -40,7 +41,7 @@ export async function applyReferenceCommit(
         deleted = result.count;
         reachedLimit = result.reachedLimit;
       }
-    });
+    }, request.transactionMetadata);
     return { reply: { revision: 0n, deletedCount: deleted, reachedLimit }, revision };
   } catch (error) {
     if (error instanceof Rejected) return { reply: failed(error.kind), revision: undefined };

@@ -97,6 +97,7 @@ import {
   Precondition_Operation,
 } from "@benedb/protos/authzed/api/v1/permission_service";
 import type { Status as RpcStatus } from "@benedb/protos/google/rpc/status";
+import { Struct } from "@benedb/protos/google/protobuf/struct";
 import { isCancellationError } from "@thresh/core/errors";
 import type { GrainFactoryAccess } from "@thresh/hosting/silo-builder";
 
@@ -308,12 +309,11 @@ export class AuthzedPermissionsV1Service {
 
     const updates = request.updates.map(toWireRelationshipUpdate);
     const preconditions = toWirePreconditions(request.optionalPreconditions);
-    const transactionMetadata = structToMap(request.optionalTransactionMetadata);
     try {
       const reply = await this.#relationships.writeRelationships({
         updates,
         preconditions,
-        transactionMetadata,
+        transactionMetadata: toWireTransactionMetadata(request.optionalTransactionMetadata),
       });
       return { writtenAt: { token: reply.writtenAtToken } };
     } catch (error) {
@@ -416,7 +416,7 @@ export class AuthzedPermissionsV1Service {
         optionalLimit: limit,
         preconditions: toWirePreconditions(request.optionalPreconditions),
         rejectOverLimit: limit !== undefined && !request.optionalAllowPartialDeletions,
-        transactionMetadata: structToMap(request.optionalTransactionMetadata),
+        transactionMetadata: toWireTransactionMetadata(request.optionalTransactionMetadata),
       });
 
       return {
@@ -1362,6 +1362,19 @@ const EMPTY_RELATIONSHIP: ProtoRelationship = Object.freeze({ relation: "" });
  * result is a `Map` because the grains DTOs take a `ReadonlyMap` - and because a plain object would
  * collide with the `Map` branch of {@link objectToValue} and with prototype keys.
  */
+/**
+ * A request's `optional_transaction_metadata` as the opaque bytes the commit journals with its
+ * revision (the serialized `google.protobuf.Struct`, which Watch parses back). Absent stays absent.
+ *
+ * PORT NOTE: the C# overloads `ToWire`; TypeScript has no overloads, so it takes the
+ * `toWire<Thing>` name the file's other `ToWire` overloads already use.
+ */
+function toWireTransactionMetadata(
+  metadata: { [key: string]: unknown } | undefined,
+): Uint8Array | undefined {
+  return metadata === undefined ? undefined : Struct.encode(Struct.wrap(metadata)).finish();
+}
+
 function structToMap(
   s: { [key: string]: unknown } | undefined,
 ): ReadonlyMap<string, unknown> | undefined {

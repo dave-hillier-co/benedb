@@ -4,6 +4,7 @@ import type { ObjectAndRelation } from "@benedb/core/object-and-relation";
 import { createRelationship, type Relationship } from "@benedb/core/relationship";
 import { TimestampRevision } from "@benedb/core/timestamp-revision";
 import { formatRelationship } from "@benedb/core/tuple-strings";
+import { RevisionNotFoundException } from "@benedb/datastore/datastore-exceptions";
 import type { IDatastoreReader } from "@benedb/datastore/i-datastore";
 import { ReferenceDatastore } from "@benedb/datastore/reference-datastore";
 import type { RelationshipsFilter } from "@benedb/datastore/relationships-filter";
@@ -30,6 +31,7 @@ import {
 } from "./fault-injecting-storage";
 import { GrainBackedDatastore } from "./grain-backed-datastore";
 import { DATASTORE_GRAIN_KEY, IDatastoreGrain } from "./i-datastore-grain";
+import type { LogSegment } from "./log-event";
 import { applyReferenceCommit } from "./reference-commit";
 import type { RelationshipUpdateWire } from "./relationships-dtos";
 import {
@@ -170,6 +172,8 @@ class Run {
   readonly #reference = new ReferenceDatastore();
   readonly #revisions: bigint[] = [];
   readonly #referenceAt = new Map<bigint, IRevision>();
+  readonly #metadataAt = new Map<bigint, Uint8Array | undefined>();
+  #commitsGenerated = 0;
   #gcFloor = 0n;
 
   constructor(options: FaultHarnessOptions, cluster: TestCluster, primary: SpiceportGrainServices) {
@@ -236,6 +240,7 @@ class Run {
       storageFaults.failSequencerWrites = 0;
       storageFaults.failShardWrites = 0;
       await this.spotCheck();
+      await this.checkLogMetadata();
     }
 
     // A shard-projection failure that certainly fires: one more commit leaves events pending, so the
@@ -377,7 +382,10 @@ class Run {
             `reference ${outcome(expected.reply)}`,
         );
       }
-      if (reply.revision !== undefined) this.record(reply.revision, expected.revision!);
+      if (reply.revision !== undefined) {
+        this.record(reply.revision, expected.revision!);
+        this.#metadataAt.set(reply.revision, commit.request.transactionMetadata);
+      }
     }
 
     // Trace in generation order, so concurrent completion order never shows.
@@ -393,6 +401,61 @@ class Run {
       this.#rng.next(this.#revisions.length),
       DOCS[this.#rng.next(DOCS.length)]!,
     );
+  }
+
+  /**
+   * The log's retained tail must carry, on every commit's event, exactly the transaction metadata
+   * that commit submitted - whatever faults, flushes and reactivations came before. The oldest
+   * servable cursor (the projection boundary or the GC floor, whichever is higher) is found by
+   * bisecting the committed revisions, since servability is monotone in the cursor.
+   */
+  private async checkLogMetadata(): Promise<void> {
+    const tryRead = async (cursor: bigint): Promise<LogSegment | undefined> => {
+      try {
+        return await this.call(this.sequencer.readFrom(cursor, -1));
+      } catch (error) {
+        if (error instanceof RevisionNotFoundException) return undefined;
+        throw error;
+      }
+    };
+
+    const last = await tryRead(this.#revisions[this.#revisions.length - 1]!);
+    if (last === undefined) return; // projected or collected through the newest commit
+    let lo = 0;
+    let hi = this.#revisions.length - 1;
+    let segment = last;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const read = await tryRead(this.#revisions[mid]!);
+      if (read !== undefined) {
+        hi = mid;
+        segment = read;
+      } else {
+        lo = mid + 1;
+      }
+    }
+
+    const show = (metadata: Uint8Array | undefined): string =>
+      metadata === undefined ? "none" : new TextDecoder().decode(metadata);
+    for (const ev of segment.events) {
+      if (ev.gcFloor !== undefined) continue;
+      if (!this.#metadataAt.has(ev.revision))
+        this.diverge(
+          `the log holds a commit event at ${ev.revision} that no commit was told it minted`,
+        );
+      const expected = this.#metadataAt.get(ev.revision);
+      const actual = ev.transactionMetadata;
+      const matches =
+        expected === undefined
+          ? actual === undefined
+          : actual !== undefined && Buffer.from(actual).equals(Buffer.from(expected));
+      if (!matches) {
+        this.diverge(
+          `the log's event at ${ev.revision} carries transaction metadata [${show(actual)}], ` +
+            `its commit submitted [${show(expected)}]`,
+        );
+      }
+    }
   }
 
   private checkResource(revisionIndex: number, doc: string): Promise<void> {
@@ -434,6 +497,17 @@ class Run {
   }
 
   private nextCommit(doc: string): HarnessCommit {
+    // Every third commit carries no transaction metadata; the rest a label unique to the commit.
+    // Derived from a counter, not the seeded generator, so the workload and fault schedule a seed
+    // draws are unchanged by it.
+    const generated = this.#commitsGenerated++;
+    const metadata =
+      generated % 3 === 0 ? undefined : new TextEncoder().encode(`commit-${generated}`);
+    const commit = this.nextCommitShape(doc);
+    return { ...commit, request: { ...commit.request, transactionMetadata: metadata } };
+  }
+
+  private nextCommitShape(doc: string): HarnessCommit {
     const kind = this.#rng.nextDouble();
     if (kind < 0.2) {
       const filter = docFilter(

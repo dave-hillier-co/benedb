@@ -767,7 +767,7 @@ describe("RelationshipsGrain", () => {
     it("threads optional transaction metadata through to the commit request", async () => {
       const f = await start();
       script.replies = [ok(4_000n)];
-      const metadata = new Map<string, unknown>([["requestId", "abc-123"]]);
+      const metadata = new TextEncoder().encode('{"requestId":"abc-123"}');
 
       await target(f).writeRelationships({
         updates: [{ operation: "touch", relationship: rel("readme", "alice") }],
@@ -1133,7 +1133,7 @@ describe("RelationshipsGrain", () => {
     it("threads optional transaction metadata through to the commit request", async () => {
       const f = await start();
       script.replies = [ok(7_000n)];
-      const metadata = new Map<string, unknown>([["requestId", "abc-123"]]);
+      const metadata = new TextEncoder().encode('{"requestId":"abc-123"}');
 
       await target(f).deleteRelationships({
         filter: { resourceType: "document" },
