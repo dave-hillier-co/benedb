@@ -52,6 +52,7 @@ import {
   encodeReadRelationshipsCursor,
   readRelationshipsRequestHash,
 } from "./read-relationships-cursor";
+import { assertErrorInfo } from "./error-info-assertions";
 import { RpcError } from "./rpc-error";
 
 /**
@@ -523,6 +524,14 @@ describe("AuthzedPermissionsV1ServiceTests", () => {
 
       expect(error.code).toBe(status.INVALID_ARGUMENT);
       expect(error.details).toBe("check count of 10001 is greater than maximum allowed of 10000");
+      // ExceedsMaximumChecksError attaches ErrorInfo with reason UNSPECIFIED and the counts.
+      assertErrorInfo(
+        error,
+        status.INVALID_ARGUMENT,
+        "ERROR_REASON_UNSPECIFIED",
+        ["check_count", "10001"],
+        ["maximum_checks_allowed", "10000"],
+      );
     } finally {
       await cluster.dispose();
     }
