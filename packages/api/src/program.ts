@@ -78,8 +78,8 @@ import { WatchGrpcService } from "./watch-grpc-service";
  *     C# does not override still answers UNIMPLEMENTED; grpc-js does not, and a missing handler
  *     key would answer UNIMPLEMENTED at call time with no registration-time signal. So
  *     {@link createServiceRegistrations} builds one handler for EVERY method of every definition,
- *     synthesizing the UNIMPLEMENTED answer for the methods no ported service implements (the
- *     seven `ExperimentalService` methods Spiceport leaves to its base class).
+ *     synthesizing the UNIMPLEMENTED answer for any method no ported service implements (a method
+ *     the C# would leave to its generated base class).
  *  3. THE CALL SEAM IS ADAPTED HERE, NOT IN THE SERVICES. The ported services take
  *     `(request, [stream], signal?)` - see `server-stream-writer.ts`. This file is the only place
  *     that knows about `ServerWritableStream`/`ServerReadableStream`: it turns the call's
@@ -401,6 +401,18 @@ export function createServiceRegistrations(
   const { checker, grains, reverseOps, relationshipReads, datastore, schemaProvider } =
     dependencies;
 
+  // The ExperimentalService's deprecated aliases and Exp* schema tooling are translated onto the v1
+  // services. The C# resolves those from DI as transients; they hold no per-call state, so one
+  // instance of each serves both its own registration and the experimental one.
+  const permissionsV1 = new AuthzedPermissionsV1Service(
+    checker,
+    grains,
+    reverseOps,
+    relationshipReads,
+    schemaProvider,
+  );
+  const schemaV1 = new AuthzedSchemaV1Service(grains, schemaProvider);
+
   const pairs: ReadonlyArray<readonly [ServiceDefinition, object]> = [
     [
       PermissionsServiceService,
@@ -408,19 +420,10 @@ export function createServiceRegistrations(
     ],
     [WatchServiceService, new WatchGrpcService(datastore, schemaProvider)],
     [BulkServiceService, new BulkGrpcService(grains, relationshipReads)],
-    [
-      AuthzedPermissionsServiceService,
-      new AuthzedPermissionsV1Service(
-        checker,
-        grains,
-        reverseOps,
-        relationshipReads,
-        schemaProvider,
-      ),
-    ],
-    [SchemaServiceService, new AuthzedSchemaV1Service(grains, schemaProvider)],
+    [AuthzedPermissionsServiceService, permissionsV1],
+    [SchemaServiceService, schemaV1],
     [AuthzedWatchServiceService, new AuthzedWatchV1Service(datastore, schemaProvider)],
-    [ExperimentalServiceService, new AuthzedExperimentalV1Service(grains, schemaProvider)],
+    [ExperimentalServiceService, new AuthzedExperimentalV1Service(grains, permissionsV1, schemaV1)],
   ];
 
   return pairs.map(([definition, service]) => ({
