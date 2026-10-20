@@ -2,7 +2,7 @@ import type { IRevision } from "@benedb/core/i-revision";
 import { InvalidArgumentError } from "@benedb/core/invalid-argument-error";
 import type { IDatastoreReader } from "@benedb/datastore/i-datastore";
 import { computeSchemaHash } from "@benedb/engine/schema-hash";
-import { compileSchema } from "@benedb/schema/schema-compiler";
+import { compileStoredSchema } from "@benedb/schema/schema-compiler";
 
 import { SchemaSnapshot } from "./i-schema-provider";
 import type { ISchemaSource } from "./i-schema-source";
@@ -184,7 +184,7 @@ export class SchemaResolver {
 
 function compile(schemaHash: string, schemaBytes: Uint8Array): SchemaSnapshot {
   const text = new TextDecoder().decode(schemaBytes);
-  const compiled = compileSchema(text);
+  const compiled = compileStoredSchema(text);
   // The persisted hash is authoritative (computed and validated at write time); reuse it VERBATIM
   // so a resolved snapshot's hash matches the grain key that selected it, rather than recomputing.
   return new SchemaSnapshot(compiled, schemaHash, text, 0);

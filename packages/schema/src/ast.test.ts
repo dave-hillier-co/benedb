@@ -187,13 +187,20 @@ describe("schema ast", () => {
     const caveat: CaveatNode = {
       name: "ip_allowlist",
       parameters: [
-        { name: "user_ip", type: { name: "ipaddress", childTypes: [] } },
+        { name: "user_ip", type: { name: "ipaddress", childTypes: [] }, line: 1, column: 21 },
         {
           name: "allowed_ips",
           type: { name: "list", childTypes: [{ name: "string", childTypes: [] }] },
+          line: 1,
+          column: 40,
         },
       ],
       expression: "user_ip in allowed_ips",
+      line: 1,
+      column: 1,
+      celSource: "user_ip in allowed_ips",
+      celStartLine: 0,
+      celStartColumn: 67,
       comments: [],
     };
 

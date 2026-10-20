@@ -238,6 +238,12 @@ importers:
       '@benedb/core':
         specifier: workspace:*
         version: link:../core
+      '@bufbuild/cel':
+        specifier: ^0.2.0
+        version: 0.2.0(@bufbuild/protobuf@2.14.0)
+      '@bufbuild/protobuf':
+        specifier: ^2.14.0
+        version: 2.14.0
 
   packages/silo:
     dependencies:

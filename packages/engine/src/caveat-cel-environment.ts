@@ -11,8 +11,8 @@ import {
 import { createRegistry } from "@bufbuild/protobuf";
 
 /**
- * Builds the shared CEL environment used for both compiling (parse-validating at schema write) and
- * evaluating SpiceDB-style caveats. Registers the SpiceDB custom functions/types:
+ * Builds the CEL environment SpiceDB-style caveats are evaluated in (schema-write compilation is the
+ * static checker's, `@benedb/schema/caveat-compiler`). Registers the SpiceDB custom functions/types:
  * `ipaddress(string)` with `.in_cidr(string)`, and a map `.isSubtreeOf(map)` structural-subtree
  * check. `timestamp`/`duration` are provided by the underlying CEL implementation.
  *
