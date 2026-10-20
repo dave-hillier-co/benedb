@@ -19,6 +19,15 @@ import { SchemaCompileException } from "./schema-compile-exception";
  *   * `Advance()` indexes `_input[_pos]` unguarded and throws in C# at end of input; JS would
  *     silently yield `undefined`, so the port keeps the same AtEnd invariant and reads a
  *     defaulted character.
+ *
+ * Comments are skipped as trivia but kept, verbatim with their markers, on the next token
+ * (`Token.comments`) - SpiceDB's parser does the same in `consumeToken`
+ * (pkg/schemadsl/parser/parser_impl.go). SpiceDB's lexer turns a newline that follows an
+ * identifier, keyword, `}`, `)` or `*` into a synthetic semicolon token
+ * (pkg/schemadsl/lexer/lex_def.go `syntheticPredecessors`), and the comments before it attach to
+ * that semicolon rather than to the next statement; this lexer emits no semicolon there, so it
+ * drops the pending comments instead, with the same result: a trailing comment on a statement
+ * line is nobody's doc comment.
  */
 
 /** The kinds of tokens produced by the schema DSL lexer. */
@@ -55,13 +64,18 @@ export type TokenType =
    */
   | "unknown";
 
-/** A single lexeme: its kind, text, 1-based source position, and absolute character offset. */
+/**
+ * A single lexeme: its kind, text, 1-based source position, absolute character offset, and the
+ * comments lexed since the previous token that SpiceDB's parser would attach to it (absent when
+ * there are none, the C#'s null).
+ */
 export interface Token {
   readonly type: TokenType;
   readonly text: string;
   readonly line: number;
   readonly column: number;
   readonly offset: number;
+  readonly comments?: readonly string[] | undefined;
 }
 
 const KEYWORDS: ReadonlySet<string> = new Set([
@@ -100,6 +114,12 @@ class Lexer {
   private pos = 0;
   private line = 1;
   private column = 1;
+
+  /**
+   * True while the last token lexed is one after which SpiceDB emits a synthetic semicolon at the
+   * next newline. Cleared by that newline (a second newline is an ordinary one).
+   */
+  private newlineEndsStatement = false;
 
   constructor(input: string) {
     this.input = input;
@@ -142,8 +162,18 @@ class Lexer {
   }
 
   private next(): Token {
-    this.skipTrivia();
+    const comments = this.skipTrivia();
+    const token = this.lexToken();
+    this.newlineEndsStatement =
+      token.type === "identifier" ||
+      token.type === "keyword" ||
+      token.type === "rightBrace" ||
+      token.type === "rightParen" ||
+      token.type === "star";
+    return comments === undefined ? token : { ...token, comments };
+  }
 
+  private lexToken(): Token {
     if (this.atEnd()) {
       return { type: "eof", text: "", line: this.line, column: this.column, offset: this.pos };
     }
@@ -231,19 +261,37 @@ class Lexer {
     return { type: "unknown", text: c, line, column: col, offset: off };
   }
 
-  private skipTrivia(): void {
+  /**
+   * Skips whitespace and comments, returning the comments (verbatim, markers included) that are
+   * still pending for the next token, or undefined when there are none.
+   */
+  private skipTrivia(): string[] | undefined {
+    let comments: string[] | undefined;
     while (!this.atEnd()) {
       const c = this.current();
-      if (c === " " || c === "\t" || c === "\r" || c === "\n") {
+      if (c === " " || c === "\t") {
         this.advance();
         continue;
       }
 
+      if (c === "\r" || c === "\n") {
+        if (this.newlineEndsStatement) {
+          // SpiceDB lexes this newline as a synthetic semicolon, which takes the comments.
+          comments?.splice(0);
+          this.newlineEndsStatement = false;
+        }
+
+        this.advance();
+        continue;
+      }
+
+      const start = this.pos;
       if (c === "/" && this.peek() === "/") {
-        while (!this.atEnd() && this.current() !== "\n") {
+        while (!this.atEnd() && this.current() !== "\n" && this.current() !== "\r") {
           this.advance();
         }
 
+        (comments ??= []).push(this.input.slice(start, this.pos));
         continue;
       }
 
@@ -259,11 +307,14 @@ class Lexer {
           this.advance();
         }
 
+        (comments ??= []).push(this.input.slice(start, this.pos));
         continue;
       }
 
-      return;
+      break;
     }
+
+    return comments !== undefined && comments.length > 0 ? comments : undefined;
   }
 
   private lexIdentifierOrKeyword(line: number, col: number, off: number): Token {

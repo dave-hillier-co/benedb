@@ -165,15 +165,18 @@ describe("schema ast", () => {
           requiresExpiration: false,
         },
       ],
+      comments: [],
     };
     const read: PermissionNode = {
       name: "read",
       expression: { kind: "reference", name: "owner" },
+      comments: [],
     };
     const document: DefinitionNode = {
       name: "document",
       relations: [owner],
       permissions: [read],
+      comments: [],
     };
 
     expect(document.relations.map((r) => r.name)).toEqual(["owner"]);
@@ -191,6 +194,7 @@ describe("schema ast", () => {
         },
       ],
       expression: "user_ip in allowed_ips",
+      comments: [],
     };
 
     expect(caveat.parameters.map((p) => p.name)).toEqual(["user_ip", "allowed_ips"]);

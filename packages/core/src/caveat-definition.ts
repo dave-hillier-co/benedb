@@ -15,6 +15,9 @@ import { bytesEqual } from "./structural-equality";
  *   * `ParameterTypes` is an `ImmutableDictionary` in C#, enumerated in HASH order. A `Map`
  *     preserves insertion order instead. That divergence is harmless only while nothing
  *     serializes or hashes the parameter list in enumeration order.
+ *   * The C# `Comments` is an `ImmutableList<string>` init-property defaulting to empty. Here it
+ *     is optional, and absent means none: hand-built model objects leave it out, the DSL compiler
+ *     always sets it.
  */
 
 /**
@@ -39,6 +42,12 @@ export interface CaveatDefinition {
   readonly serializedExpression: Uint8Array;
   /** The caveat parameters keyed by name. */
   readonly parameterTypes: ReadonlyMap<string, CaveatTypeReference>;
+  /**
+   * The doc comments that preceded the caveat, each verbatim with its `//` or block-comment markers
+   * and every line trimmed (SpiceDB's `DocComment` metadata). Metadata, not semantics: it takes no
+   * part in equality. Absent means none.
+   */
+  readonly comments?: readonly string[] | undefined;
 }
 
 /** Deep structural equality over two type references, child list order included. */
@@ -60,7 +69,7 @@ export function caveatTypeReferenceEquals(a: CaveatTypeReference, b: CaveatTypeR
 
 /**
  * Value equality, comparing the expression bytes and the parameter map by content rather than by
- * array and map reference.
+ * array and map reference. `comments` is metadata and is not compared.
  */
 export function caveatDefinitionEquals(a: CaveatDefinition, b: CaveatDefinition): boolean {
   if (a === b) return true;

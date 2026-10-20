@@ -85,4 +85,20 @@ describe("SchemaHashTests", () => {
 
     expect(a).toBe(b);
   });
+
+  it("Doc_comment_edit_does_not_change_hash", () => {
+    // Comments are metadata, not semantics: a comment-only edit must not rotate the dispatch keyspace.
+    const plain = hashOf(schemaWithCaveat("x int", "x > 1"));
+    const commentedText =
+      "// caveat doc\n" +
+      schemaWithCaveat("x int", "x > 1")
+        .replace("definition document {", "// document doc\ndefinition document {\n  // viewer doc")
+        .replace("permission view", "/* view doc */ permission view");
+    const compiled = compileSchema(commentedText);
+    expect(compiled.namespaces.filter((n) => n.name === "document")[0]?.comments).toEqual([
+      "// document doc",
+    ]);
+
+    expect(hashOf(commentedText)).toBe(plain);
+  });
 });
