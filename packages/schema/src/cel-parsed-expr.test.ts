@@ -130,6 +130,29 @@ describe("parseCelExpr", () => {
     expect(issues.errors[0]?.message).toMatch(/^Syntax error: /);
   });
 
+  it("parses an expression ending in a line comment, as cel-go does", () => {
+    // `@bufbuild/cel` cannot lex a `//` comment that runs to the end of the input.
+    const issues = new CelIssues();
+    parseCelExpr("b // note", issues);
+    expect(issues.errors).toEqual([]);
+  });
+
+  it("places an error after an expression ending in a line comment as cel-go does", () => {
+    expect(rejection("s string", "s + 1 == s // note")).toBe(
+      "ERROR: c:1:3: found no matching overload for '_+_' applied to '(string, int)'\n" +
+        " | s + 1 == s // note\n | ..^",
+    );
+  });
+
+  it.each([
+    ["(x", { line: 1, column: 2 }],
+    ["(x\n", { line: 2, column: 0 }],
+  ])("reports a syntax error at the end of input where cel-go does: %j", (expression, location) => {
+    const issues = new CelIssues();
+    parseCelExpr(expression, issues);
+    expect(issues.errors.map((e) => e.location)).toEqual([location]);
+  });
+
   it("reports a reserved identifier as cel-go does", () => {
     expect(rejection("b bool", "b && while")).toBe(
       "ERROR: c:1:6: reserved identifier: while\n | b && while\n | .....^",

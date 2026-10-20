@@ -147,6 +147,22 @@ describe("caveat evaluator", () => {
     expect((error as Error).message).toContain("could not evaluate caveat `c`");
   });
 
+  it.each(["b // note", "b\n// note", "b //"])(
+    "evaluates a stored expression ending in a line comment: %j",
+    (expression) => {
+      // BeneDB-only. The schema stores a caveat body trimmed, so its last line can be a `//`
+      // comment with no newline after it; Spiceport's CEL parser and cel-go both accept that.
+      const evaluate = evaluator(caveat("c", expression, ["b", "bool"]));
+
+      expect(evaluate.evaluate("c", undefined, context(["b", true])).outcome).toBe(
+        "definitelyTrue",
+      );
+      expect(evaluate.evaluate("c", undefined, context(["b", false])).outcome).toBe(
+        "definitelyFalse",
+      );
+    },
+  );
+
   it("throws unknownCaveat for an unknown caveat name", () => {
     const evaluate = evaluator(caveat("c", "true"));
 

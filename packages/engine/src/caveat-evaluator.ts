@@ -170,7 +170,10 @@ export class CaveatEvaluator {
       env.set(name, toCelContextValue(value));
     }
 
-    const result = env.run(expression);
+    // The stored body is trimmed, so it can end in a `//` comment with no newline after it, which
+    // `@bufbuild/cel` cannot lex (Spiceport's parser and cel-go can). A newline ends any such
+    // comment and is otherwise whitespace.
+    const result = env.run(`${expression}\n`);
 
     if (result instanceof CelError || result instanceof CelUnknown) {
       if (isMissingReferenceResult(result)) {

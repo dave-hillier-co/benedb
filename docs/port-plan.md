@@ -62,7 +62,10 @@ Four things in the source have no mechanical translation and must be built delib
   that parse into the tree cel-go's parser builds: `@bufbuild/cel` keeps no source positions
   through its public API (they are recovered by walking the tree over the expression's tokens),
   folds `!(!x)` and `-(-x)` to `x`, parses `&&`/`||` chains as one call, drops a leading dot from
-  a name, and expands macros differently, and each of those is undone. What is not undone is the
+  a name, and expands macros differently, and each of those is undone. Its lexer also cannot end
+  the input inside a `//` comment, which matters because a caveat body is stored trimmed and so
+  can end in one; both the schema-write compile and evaluation parse the text with a newline
+  appended, which ends the comment and is otherwise whitespace. What is not undone is the
   grammar itself, and these are deliberate divergences from SpiceDB:
   - A syntax error carries `@bufbuild/cel`'s message and position (for `x > > 0`, "found > but
     expecting end of input" at the first `>`), not cel-go's ANTLR wording. A reserved
@@ -72,10 +75,9 @@ Four things in the source have no mechanical translation and must be built delib
     it. It also accepts a list of bare commas (`[,]`).
   - `@bufbuild/cel` rejects some expressions cel-go parses: the optional syntax (`a.?b`,
     `a[?b]`, `[?a]`, `{?k: v}`, `Msg{?f: v}`), a `0X` hex prefix, an `rb` bytes prefix, a
-    triple-quoted string spanning lines, repeated unary operators separated by a space (`! !a`),
-    and a `//` comment that ends the expression with no newline after it. Each is a syntax error
-    at schema write here, and a type-checked caveat in SpiceDB. The optional functions
-    (`optional.of`, `hasValue`, `orValue`, `optMap`, ...) are unaffected.
+    triple-quoted string spanning lines, and repeated unary operators separated by a space
+    (`! !a`). Each is a syntax error at schema write here, and a type-checked caveat in SpiceDB.
+    The optional functions (`optional.of`, `hasValue`, `orValue`, `optMap`, ...) are unaffected.
 
 - **The gRPC surface.** `@grpc/grpc-js` with `ts-proto` bindings generated from the vendored
   `authzed.api.v1` protos. Spiceport's `Authzed*V1Service` classes are pure translation over

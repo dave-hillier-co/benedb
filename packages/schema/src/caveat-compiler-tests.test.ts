@@ -69,6 +69,9 @@ describe("CaveatCompilerTests", () => {
     ["i int", "optional.of(i).optMap(x, x + 1).value() == 2"],
     ["i int", "google.protobuf.Int64Value{value: 1} == i"],
     ["b bool", "b // a comment\n && true"],
+    ["b bool", "b // a trailing comment"],
+    ["b bool", "b\n// a comment on the last line"],
+    ["b bool", "b //"],
   ])("accepts well typed boolean expressions: (%s) %s", (parameters, expression) => {
     compile(parameters, expression);
   });
@@ -271,15 +274,10 @@ describe("CaveatCompilerTests", () => {
       "m.?a.hasValue()",
       "ERROR: c:1:2: Syntax error: found . but expecting end of input\n | m.?a.hasValue()\n | .^",
     ],
-    [
-      "b bool",
-      "b // a trailing comment",
-      "ERROR: c:1:3: Syntax error: found / but expecting end of input\n | b // a trailing comment\n | ..^",
-    ],
   ])(
     "rejects what cel-go parses but @bufbuild/cel does not: (%s) %s",
     (parameters, expression, expected) => {
-      // SpiceDB accepts both: the optional syntax, and a comment ending the expression.
+      // SpiceDB accepts the optional syntax.
       expect(rejection(parameters, expression)).toBe(expected);
     },
   );
