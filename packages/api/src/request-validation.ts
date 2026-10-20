@@ -53,6 +53,13 @@ export type RequestTypeName =
   | "DiffSchemaRequest"
   | "ComputablePermissionsRequest"
   | "DependentRelationsRequest"
+  | "BulkCheckPermissionRequest"
+  | "BulkImportRelationshipsRequest"
+  | "BulkExportRelationshipsRequest"
+  | "ExperimentalReflectSchemaRequest"
+  | "ExperimentalDiffSchemaRequest"
+  | "ExperimentalComputablePermissionsRequest"
+  | "ExperimentalDependentRelationsRequest"
   | "ExperimentalRegisterRelationshipCounterRequest"
   | "ExperimentalUnregisterRelationshipCounterRequest"
   | "ExperimentalCountRelationshipsRequest"
@@ -154,6 +161,12 @@ const HAS_CONSISTENCY: ReadonlySet<RequestTypeName> = new Set<RequestTypeName>([
   "DiffSchemaRequest",
   "ComputablePermissionsRequest",
   "DependentRelationsRequest",
+  "BulkCheckPermissionRequest",
+  "BulkExportRelationshipsRequest",
+  "ExperimentalReflectSchemaRequest",
+  "ExperimentalDiffSchemaRequest",
+  "ExperimentalComputablePermissionsRequest",
+  "ExperimentalDependentRelationsRequest",
 ]);
 
 /** Of those, the types whose `optional_cursor` supplies the revision when present. */
@@ -162,6 +175,7 @@ const HAS_OPTIONAL_CURSOR: ReadonlySet<RequestTypeName> = new Set<RequestTypeNam
   "LookupResourcesRequest",
   "LookupSubjectsRequest",
   "ExportBulkRelationshipsRequest",
+  "BulkExportRelationshipsRequest",
 ]);
 
 /**

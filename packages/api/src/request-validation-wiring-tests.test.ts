@@ -22,7 +22,14 @@ import {
   WriteSchemaRequest,
 } from "@benedb/protos/authzed/api/v1/schema_service";
 import {
+  BulkCheckPermissionRequest,
+  BulkExportRelationshipsRequest,
+  BulkImportRelationshipsRequest,
+  ExperimentalComputablePermissionsRequest,
   ExperimentalCountRelationshipsRequest,
+  ExperimentalDependentRelationsRequest,
+  ExperimentalDiffSchemaRequest,
+  ExperimentalReflectSchemaRequest,
   ExperimentalRegisterRelationshipCounterRequest,
   ExperimentalUnregisterRelationshipCounterRequest,
 } from "@benedb/protos/authzed/api/v1/experimental_service";
@@ -293,4 +300,75 @@ describe("RequestValidationWiringTests", () => {
         ),
       `invalid ExperimentalCountRelationshipsRequest.Name: ${NAME_VIOLATION}`,
     ));
+
+  // The ExperimentalService aliases validate their OWN request type before sharing the v1 code
+  // path, so a violation names the experimental message, as SpiceDB's interceptors report it.
+  it("BulkCheckPermission_names_its_own_request_type", () =>
+    assertRejected(
+      () =>
+        experimental.bulkCheckPermission(
+          BulkCheckPermissionRequest.fromPartial({
+            items: [{ resource: badResource(), permission: "view", subject: alice() }],
+          }),
+        ),
+      `invalid BulkCheckPermissionRequest.Items[0]: ${EMBEDDED}invalid BulkCheckPermissionRequestItem.Resource: ${EMBEDDED}${TYPE_VIOLATION}`,
+    ));
+
+  it("BulkImportRelationships_validates_each_message_as_its_own_type", () =>
+    assertRejected(
+      () =>
+        experimental.bulkImportRelationships(
+          stream(
+            BulkImportRelationshipsRequest.fromPartial({
+              relationships: [{ resource: badResource(), relation: "viewer", subject: alice() }],
+            }),
+          ),
+        ),
+      `invalid BulkImportRelationshipsRequest.Relationships[0]: ${EMBEDDED}invalid Relationship.Resource: ${EMBEDDED}${TYPE_VIOLATION}`,
+    ));
+
+  it("BulkExportRelationships_names_its_own_request_type", () =>
+    assertRejected(
+      () =>
+        experimental.bulkExportRelationships(
+          BulkExportRelationshipsRequest.fromPartial({ optionalRelationshipFilter: badFilter() }),
+          discarding(),
+        ),
+      `invalid BulkExportRelationshipsRequest.OptionalRelationshipFilter: ${EMBEDDED}${OPTIONAL_TYPE_VIOLATION}`,
+    ));
+
+  it("Experimental_schema_aliases_run_the_consistency_check_first", async () => {
+    await assertRejected(
+      () =>
+        experimental.experimentalReflectSchema(
+          ExperimentalReflectSchemaRequest.fromPartial({ consistency: {} }),
+        ),
+      UNHANDLED_CONSISTENCY,
+      status.INTERNAL,
+    );
+    await assertRejected(
+      () =>
+        experimental.experimentalDiffSchema(
+          ExperimentalDiffSchemaRequest.fromPartial({ consistency: {} }),
+        ),
+      UNHANDLED_CONSISTENCY,
+      status.INTERNAL,
+    );
+    await assertRejected(
+      () =>
+        experimental.experimentalComputablePermissions(
+          ExperimentalComputablePermissionsRequest.fromPartial({ consistency: {} }),
+        ),
+      UNHANDLED_CONSISTENCY,
+      status.INTERNAL,
+    );
+    await assertRejected(
+      () =>
+        experimental.experimentalDependentRelations(
+          ExperimentalDependentRelationsRequest.fromPartial({ consistency: {} }),
+        ),
+      UNHANDLED_CONSISTENCY,
+      status.INTERNAL,
+    );
+  });
 });

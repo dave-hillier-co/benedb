@@ -159,10 +159,21 @@ export class AuthzedSchemaV1Service {
    */
   async reflectSchema(
     request: ReflectSchemaRequest,
-    _signal?: AbortSignal | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<ReflectSchemaResponse> {
     validateRequest("ReflectSchemaRequest", request);
+    return this.reflectSchemaCore(request, signal);
+  }
 
+  /**
+   * The ReflectSchema body without the request validation: the ExperimentalService alias validates its
+   * own request type (as SpiceDB's interceptors do) and then shares this code path, as upstream's
+   * handlers do. `internal` in the C#; it is not a method of the service definition.
+   */
+  async reflectSchemaCore(
+    request: ReflectSchemaRequest,
+    _signal?: AbortSignal | undefined,
+  ): Promise<ReflectSchemaResponse> {
     const snapshot = this.#schema.current;
     const filters = schemaFiltersFromRequest(request.optionalFilters);
 
@@ -200,10 +211,21 @@ export class AuthzedSchemaV1Service {
   /** Diffs the LIVE schema against a supplied comparison schema. */
   async diffSchema(
     request: DiffSchemaRequest,
-    _signal?: AbortSignal | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<DiffSchemaResponse> {
     validateRequest("DiffSchemaRequest", request);
+    return this.diffSchemaCore(request, signal);
+  }
 
+  /**
+   * The DiffSchema body without the request validation: the ExperimentalService alias validates its
+   * own request type (as SpiceDB's interceptors do) and then shares this code path, as upstream's
+   * handlers do. `internal` in the C#; it is not a method of the service definition.
+   */
+  async diffSchemaCore(
+    request: DiffSchemaRequest,
+    _signal?: AbortSignal | undefined,
+  ): Promise<DiffSchemaResponse> {
     let comparison: CompiledSchema;
     try {
       comparison = compileSchema(request.comparisonSchema);
@@ -233,10 +255,21 @@ export class AuthzedSchemaV1Service {
   /** The permissions computable from a relation, per the reachability graph. */
   async computablePermissions(
     request: ComputablePermissionsRequest,
-    _signal?: AbortSignal | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<ComputablePermissionsResponse> {
     validateRequest("ComputablePermissionsRequest", request);
+    return this.computablePermissionsCore(request, signal);
+  }
 
+  /**
+   * The ComputablePermissions body without the request validation: the ExperimentalService alias validates its
+   * own request type (as SpiceDB's interceptors do) and then shares this code path, as upstream's
+   * handlers do. `internal` in the C#; it is not a method of the service definition.
+   */
+  async computablePermissionsCore(
+    request: ComputablePermissionsRequest,
+    _signal?: AbortSignal | undefined,
+  ): Promise<ComputablePermissionsResponse> {
     const snapshot = this.#schema.current;
     const namespaces = namespacesByName(snapshot.namespaces);
 
@@ -266,10 +299,21 @@ export class AuthzedSchemaV1Service {
   /** The relations a permission depends on. */
   async dependentRelations(
     request: DependentRelationsRequest,
-    _signal?: AbortSignal | undefined,
+    signal?: AbortSignal | undefined,
   ): Promise<DependentRelationsResponse> {
     validateRequest("DependentRelationsRequest", request);
+    return this.dependentRelationsCore(request, signal);
+  }
 
+  /**
+   * The DependentRelations body without the request validation: the ExperimentalService alias validates its
+   * own request type (as SpiceDB's interceptors do) and then shares this code path, as upstream's
+   * handlers do. `internal` in the C#; it is not a method of the service definition.
+   */
+  async dependentRelationsCore(
+    request: DependentRelationsRequest,
+    _signal?: AbortSignal | undefined,
+  ): Promise<DependentRelationsResponse> {
     const namespaces = namespacesByName(this.#schema.current.namespaces);
 
     let dependents: readonly RelationReference[];

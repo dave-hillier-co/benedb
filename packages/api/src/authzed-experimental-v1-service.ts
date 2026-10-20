@@ -125,6 +125,8 @@ export class AuthzedExperimentalV1Service {
     request: BulkCheckPermissionRequest,
     signal?: AbortSignal | undefined,
   ): Promise<BulkCheckPermissionResponse> {
+    validateRequest("BulkCheckPermissionRequest", request);
+
     const converted: CheckBulkPermissionsRequest = {
       consistency: request.consistency,
       items: request.items.map((item) => ({
@@ -136,7 +138,7 @@ export class AuthzedExperimentalV1Service {
       withTracing: false,
     };
 
-    const result = await this.#permissions.checkBulkPermissions(converted, signal);
+    const result = await this.#permissions.checkBulkPermissionsCore(converted, signal);
 
     const response: BulkCheckPermissionResponse = { checkedAt: result.checkedAt, pairs: [] };
     for (const pair of result.pairs) {
@@ -174,8 +176,11 @@ export class AuthzedExperimentalV1Service {
     requestStream: AsyncIterable<BulkImportRelationshipsRequest>,
     signal?: AbortSignal | undefined,
   ): Promise<BulkImportRelationshipsResponse> {
-    const reply = await this.#permissions.importBulkRelationships(
-      mapAsyncStream(requestStream, (batch) => ({ relationships: batch.relationships })),
+    const reply = await this.#permissions.importBulk(
+      mapAsyncStream(requestStream, (batch) => {
+        validateRequest("BulkImportRelationshipsRequest", batch);
+        return { relationships: batch.relationships };
+      }),
       signal,
     );
 
@@ -183,11 +188,12 @@ export class AuthzedExperimentalV1Service {
   }
 
   /** Deprecated alias of ExportBulkRelationships, with the experimental server's ceiling. */
-  bulkExportRelationships(
+  async bulkExportRelationships(
     request: BulkExportRelationshipsRequest,
     responseStream: ServerStreamWriter<BulkExportRelationshipsResponse>,
     signal?: AbortSignal | undefined,
   ): Promise<void> {
+    validateRequest("BulkExportRelationshipsRequest", request);
     return this.#permissions.exportBulk(
       {
         consistency: request.consistency,
@@ -212,12 +218,14 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalReflectSchemaRequest,
     signal?: AbortSignal | undefined,
   ): Promise<ExperimentalReflectSchemaResponse> {
+    validateRequest("ExperimentalReflectSchemaRequest", request);
+
     const optionalFilters = request.optionalFilters.map((filter) =>
       reshapeProto(filter, ExpSchemaFilter, ReflectionSchemaFilter),
     );
 
     return reshapeProto(
-      await this.#schema.reflectSchema(
+      await this.#schema.reflectSchemaCore(
         { consistency: request.consistency, optionalFilters },
         signal,
       ),
@@ -231,8 +239,10 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalDiffSchemaRequest,
     signal?: AbortSignal | undefined,
   ): Promise<ExperimentalDiffSchemaResponse> {
+    validateRequest("ExperimentalDiffSchemaRequest", request);
+
     return reshapeProto(
-      await this.#schema.diffSchema(
+      await this.#schema.diffSchemaCore(
         { consistency: request.consistency, comparisonSchema: request.comparisonSchema },
         signal,
       ),
@@ -246,8 +256,10 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalComputablePermissionsRequest,
     signal?: AbortSignal | undefined,
   ): Promise<ExperimentalComputablePermissionsResponse> {
+    validateRequest("ExperimentalComputablePermissionsRequest", request);
+
     return reshapeProto(
-      await this.#schema.computablePermissions(
+      await this.#schema.computablePermissionsCore(
         {
           consistency: request.consistency,
           definitionName: request.definitionName,
@@ -266,8 +278,10 @@ export class AuthzedExperimentalV1Service {
     request: ExperimentalDependentRelationsRequest,
     signal?: AbortSignal | undefined,
   ): Promise<ExperimentalDependentRelationsResponse> {
+    validateRequest("ExperimentalDependentRelationsRequest", request);
+
     return reshapeProto(
-      await this.#schema.dependentRelations(
+      await this.#schema.dependentRelationsCore(
         {
           consistency: request.consistency,
           definitionName: request.definitionName,

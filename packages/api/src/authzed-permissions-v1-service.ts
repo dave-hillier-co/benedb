@@ -123,6 +123,7 @@ import {
   validateCheckCount,
   validateLimit,
 } from "./request-ceilings";
+import { mapAsyncStream } from "./mapped-async-stream-reader";
 import { RpcError } from "./rpc-error";
 import {
   checkNamespaceAndRelations,
@@ -755,6 +756,18 @@ export class AuthzedPermissionsV1Service {
     signal?: AbortSignal | undefined,
   ): Promise<CheckBulkPermissionsResponse> {
     validateRequest("CheckBulkPermissionsRequest", request);
+    return this.checkBulkPermissionsCore(request, signal);
+  }
+
+  /**
+   * The CheckBulkPermissions body without the request validation: the ExperimentalService alias validates its
+   * own request type (as SpiceDB's interceptors do) and then shares this code path, as upstream's
+   * handlers do. `internal` in the C#; it is not a method of the service definition.
+   */
+  async checkBulkPermissionsCore(
+    request: CheckBulkPermissionsRequest,
+    signal?: AbortSignal | undefined,
+  ): Promise<CheckBulkPermissionsResponse> {
     validateCheckCount(request.items.length);
 
     const snapshot = this.#schema.current;
@@ -883,7 +896,26 @@ export class AuthzedPermissionsV1Service {
   }
 
   /** Buffers the whole client stream and loads it in ONE grain commit. */
-  async importBulkRelationships(
+  importBulkRelationships(
+    requestStream: AsyncIterable<ImportBulkRelationshipsRequest>,
+    signal?: AbortSignal | undefined,
+  ): Promise<ImportBulkRelationshipsResponse> {
+    // SpiceDB's stream interceptors validate each message as the handler receives it.
+    return this.importBulk(
+      mapAsyncStream(requestStream, (message) => {
+        validateRequest("ImportBulkRelationshipsRequest", message);
+        return message;
+      }),
+      signal,
+    );
+  }
+
+  /**
+   * The ImportBulkRelationships body over an already-validated stream: the ExperimentalService alias
+   * validates each message as its own request type and then shares this code path. `internal` in
+   * the C#; it is not a method of the service definition.
+   */
+  async importBulk(
     requestStream: AsyncIterable<ImportBulkRelationshipsRequest>,
     signal?: AbortSignal | undefined,
   ): Promise<ImportBulkRelationshipsResponse> {
@@ -904,8 +936,6 @@ export class AuthzedPermissionsV1Service {
     signal?.throwIfAborted();
     for await (const message of requestStream) {
       signal?.throwIfAborted();
-      // SpiceDB's stream interceptors validate each message as the handler receives it.
-      validateRequest("ImportBulkRelationshipsRequest", message);
       for (const relationship of message.relationships) {
         relationships.push(toWireRelationship(relationship));
       }
@@ -937,7 +967,7 @@ export class AuthzedPermissionsV1Service {
   }
 
   /** Streams the whole filtered relationship set back, batched per response message. */
-  exportBulkRelationships(
+  async exportBulkRelationships(
     request: ExportBulkRelationshipsRequest,
     responseStream: ServerStreamWriter<ExportBulkRelationshipsResponse>,
     signal?: AbortSignal | undefined,
