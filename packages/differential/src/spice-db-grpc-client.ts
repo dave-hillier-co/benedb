@@ -23,6 +23,11 @@ import {
   type WriteSchemaRequest,
   type WriteSchemaResponse,
 } from "@benedb/protos/authzed/api/v1/schema_service";
+import {
+  WatchServiceClient,
+  type WatchRequest,
+  type WatchResponse,
+} from "@benedb/protos/authzed/api/v1/watch_service";
 
 /**
  * Ported from Spiceport `tests/Spiceport.Differential.Tests/SpiceDbGrpcClient.cs`.
@@ -66,12 +71,14 @@ import {
 export class SpiceDbGrpcClient {
   readonly #schema: SchemaServiceClient;
   readonly #permissions: PermissionsServiceClient;
+  readonly #watch: WatchServiceClient;
   readonly #preSharedKey: string;
 
   constructor(address: string, preSharedKey: string) {
     const credentials = ChannelCredentials.createInsecure();
     this.#schema = new SchemaServiceClient(address, credentials);
     this.#permissions = new PermissionsServiceClient(address, credentials);
+    this.#watch = new WatchServiceClient(address, credentials);
     this.#preSharedKey = preSharedKey;
   }
 
@@ -147,12 +154,42 @@ export class SpiceDbGrpcClient {
     });
   }
 
-  /** The C#'s `Dispose()`: closes both clients, unconditionally. */
+  /**
+   * BeneDB-only: opens a Watch and settles on its first event - the first response (the stream is
+   * then cancelled) or the error that ends it. A Watch that is accepted streams until cancelled, so
+   * the call carries a deadline and an accepted request that sends nothing rejects with
+   * DEADLINE_EXCEEDED.
+   */
+  watchFirst(request: WatchRequest, deadlineMs = 10_000): Promise<WatchResponse> {
+    return new Promise((resolve, reject) => {
+      const call = this.#watch.watch(request, this.#metadata(), {
+        deadline: Date.now() + deadlineMs,
+      });
+      let settled = false;
+      call.on("data", (response: WatchResponse) => {
+        if (settled) return;
+        settled = true;
+        resolve(response);
+        call.cancel();
+      });
+      call.on("error", (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      });
+    });
+  }
+
+  /** The C#'s `Dispose()`: closes every client, unconditionally. */
   close(): void {
     try {
       this.#schema.close();
     } finally {
-      this.#permissions.close();
+      try {
+        this.#permissions.close();
+      } finally {
+        this.#watch.close();
+      }
     }
   }
 }

@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 import { AuthzedPermissionsV1Service } from "./authzed-permissions-v1-service";
 import { AuthzedWatchV1Service } from "./authzed-watch-v1-service";
 import { CollectingStreamWriter } from "./collecting-stream-writer";
+import { assertErrorInfo } from "./error-info-assertions";
 import { RpcError } from "./rpc-error";
 
 /**
@@ -245,6 +246,145 @@ function touchViewer(
     })),
   });
 }
+
+const ObjectTypePattern = '"^([a-z][a-z0-9_]{1,62}[a-z0-9]/)*[a-z][a-z0-9_]{1,62}[a-z0-9]$"';
+
+/** `Request(objectTypes, filters, startCursor, kinds)`. */
+function malformed(
+  objectTypes: string[] = [],
+  filters: RelationshipFilter[] = [],
+  startCursor?: string,
+  kinds: WatchKind[] = [],
+): WatchRequest {
+  return watchRequest({
+    optionalObjectTypes: objectTypes,
+    optionalRelationshipFilters: filters,
+    optionalUpdateKinds: kinds,
+    ...(startCursor === undefined ? {} : { optionalStartCursor: { token: startCursor } }),
+  });
+}
+
+/**
+ * `MalformedRequests()`: malformed requests and the status SpiceDB v1.49.2 answers each with,
+ * observed from a running `spicedb serve` over memdb: the protoc-gen-validate interceptor
+ * (`ValidateAll`) first, then the handler's own checks in order (object types with relationship
+ * filters, the start cursor, each filter against the schema).
+ */
+const malformedRequests: ReadonlyArray<readonly [string, WatchRequest, status, string]> = [
+  [
+    "object type breaks its pattern",
+    malformed(["Doc"]),
+    status.INVALID_ARGUMENT,
+    `invalid WatchRequest.OptionalObjectTypes[0]: value does not match regex pattern ${ObjectTypePattern}`,
+  ],
+  [
+    "every bad object type is reported",
+    malformed(["Doc", "x"]),
+    status.INVALID_ARGUMENT,
+    `invalid WatchRequest.OptionalObjectTypes[0]: value does not match regex pattern ${ObjectTypePattern}; ` +
+      `invalid WatchRequest.OptionalObjectTypes[1]: value does not match regex pattern ${ObjectTypePattern}`,
+  ],
+  [
+    "object type too long",
+    malformed(["a".repeat(129)]),
+    status.INVALID_ARGUMENT,
+    "invalid WatchRequest.OptionalObjectTypes[0]: value length must be at most 128 bytes; " +
+      `invalid WatchRequest.OptionalObjectTypes[0]: value does not match regex pattern ${ObjectTypePattern}`,
+  ],
+  [
+    "filter resource type breaks its pattern",
+    malformed([], [relFilter({ resourceType: "Doc" })]),
+    status.INVALID_ARGUMENT,
+    "invalid WatchRequest.OptionalRelationshipFilters[0]: embedded message failed validation | caused by: " +
+      "invalid RelationshipFilter.ResourceType: value does not match regex pattern " +
+      '"^(([a-z][a-z0-9_]{1,61}[a-z0-9]/)*[a-z][a-z0-9_]{1,62}[a-z0-9])?$"',
+  ],
+  [
+    "filter resource id is a wildcard",
+    malformed([], [relFilter({ resourceType: "document", optionalResourceId: "*" })]),
+    status.INVALID_ARGUMENT,
+    "invalid WatchRequest.OptionalRelationshipFilters[0]: embedded message failed validation | caused by: " +
+      "invalid RelationshipFilter.OptionalResourceId: value does not match regex pattern " +
+      '"^([a-zA-Z0-9/_|\\\\-=+]{1,})?$"',
+  ],
+  [
+    "field validation precedes the object types and filters check",
+    malformed(["Doc"], [relFilter({ resourceType: "document" })]),
+    status.INVALID_ARGUMENT,
+    `invalid WatchRequest.OptionalObjectTypes[0]: value does not match regex pattern ${ObjectTypePattern}`,
+  ],
+  [
+    "object types and filters precede schema validation of the filters",
+    malformed(["document"], [relFilter({ resourceType: "nope" })]),
+    status.INVALID_ARGUMENT,
+    "cannot specify both object types and relationship filters",
+  ],
+  [
+    "object types and filters together are allowed when relationships are not watched",
+    malformed(["document"], [relFilter({ resourceType: "nope" })], undefined, [
+      WatchKind.WATCH_KIND_INCLUDE_SCHEMA_UPDATES,
+    ]),
+    status.FAILED_PRECONDITION,
+    "object definition `nope` not found",
+  ],
+  [
+    "empty start cursor fails field validation",
+    malformed([], [], ""),
+    status.INVALID_ARGUMENT,
+    "invalid WatchRequest.OptionalStartCursor: embedded message failed validation | caused by: " +
+      "invalid ZedToken.Token: value length must be at least 1 bytes",
+  ],
+  [
+    "field violations are all reported",
+    malformed(["Doc"], [], ""),
+    status.INVALID_ARGUMENT,
+    `invalid WatchRequest.OptionalObjectTypes[0]: value does not match regex pattern ${ObjectTypePattern}; ` +
+      "invalid WatchRequest.OptionalStartCursor: embedded message failed validation | caused by: " +
+      "invalid ZedToken.Token: value length must be at least 1 bytes",
+  ],
+  [
+    "start cursor that is not base64",
+    malformed([], [], "garbage"),
+    status.INVALID_ARGUMENT,
+    "failed to decode start revision: error decoding zedtoken: illegal base64 data at input byte 4",
+  ],
+  [
+    "field validation precedes the start cursor",
+    malformed(["Doc"], [], "garbage"),
+    status.INVALID_ARGUMENT,
+    `invalid WatchRequest.OptionalObjectTypes[0]: value does not match regex pattern ${ObjectTypePattern}`,
+  ],
+  [
+    "object types and filters precede the start cursor",
+    malformed(["document"], [relFilter({ resourceType: "document" })], "garbage"),
+    status.INVALID_ARGUMENT,
+    "cannot specify both object types and relationship filters",
+  ],
+  [
+    "the start cursor precedes schema validation of the filters",
+    malformed([], [relFilter({ resourceType: "nope" })], "garbage"),
+    status.INVALID_ARGUMENT,
+    "failed to decode start revision: error decoding zedtoken: illegal base64 data at input byte 4",
+  ],
+  [
+    "a wildcard subject filter with a relation is not rejected by handwritten validation",
+    malformed(
+      [],
+      [
+        relFilter({
+          resourceType: "document",
+          optionalSubjectFilter: {
+            subjectType: "user",
+            optionalSubjectId: "*",
+            optionalRelation: { relation: "viewer" },
+          },
+        }),
+      ],
+    ),
+    status.FAILED_PRECONDITION,
+    "relation/permission `viewer` not found under definition `user`",
+  ],
+];
 
 describe("AuthzedWatchV1ServiceTests", () => {
   it("Watch_from_head_sees_subsequent_write_with_token", async () => {
@@ -835,6 +975,123 @@ describe("AuthzedWatchV1ServiceTests", () => {
         expect(checkpoint.optionalTransactionMetadata).toBeUndefined();
         expect(checkpoint.fullRevisionMetadata).toEqual([]);
       }
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  it.each(malformedRequests)(
+    "Watch_rejects_a_malformed_request_as_SpiceDB_does (%s)",
+    async (_because, request, expectedCode, expectedDetail) => {
+      const cluster = await MeshTestCluster.create(SchemaText);
+      try {
+        const svc = service(cluster);
+        const controller = new AbortController();
+        const writer = new CollectingStreamWriter<WatchResponse>();
+
+        const error = await rpcErrorFrom(svc.watch(request, writer, controller.signal));
+
+        expect(error.code).toBe(expectedCode);
+        expect(error.details).toBe(expectedDetail);
+        expect(writer.collected).toEqual([]);
+      } finally {
+        await cluster.dispose();
+      }
+    },
+    60_000,
+  );
+
+  it("Watch_rejects_a_start_cursor_from_another_datastore", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+      const head = await cluster.datastore.headRevision();
+      const foreign = zedTokenFromRevision(head.revision, head.schemaHash, "another-datastore");
+
+      const error = await rpcErrorFrom(
+        svc.watch(
+          watchRequest({ optionalStartCursor: { token: foreign.token } }),
+          new CollectingStreamWriter<WatchResponse>(),
+          new AbortController().signal,
+        ),
+      );
+
+      expect(error.code).toBe(status.INVALID_ARGUMENT);
+      expect(error.details).toBe("start revision was generated by a different datastore instance");
+    } finally {
+      await cluster.dispose();
+    }
+  }, 60_000);
+
+  /**
+   * SpiceDB's `InvalidFilterError` carries ERROR_REASON_INVALID_FILTER with the filter's prototext as
+   * `filter`; the schema errors carry their definition (and relation) names.
+   */
+  it("Watch_filter_errors_carry_SpiceDBs_error_info", async () => {
+    const cluster = await MeshTestCluster.create(SchemaText);
+    try {
+      const svc = service(cluster);
+      const rejected = (filter: RelationshipFilter): Promise<RpcError> =>
+        rpcErrorFrom(
+          svc.watch(
+            watchRequest({ optionalRelationshipFilters: [filter] }),
+            new CollectingStreamWriter<WatchResponse>(),
+            new AbortController().signal,
+          ),
+        );
+
+      assertErrorInfo(
+        await rejected(relFilter({})),
+        status.INVALID_ARGUMENT,
+        "ERROR_REASON_INVALID_FILTER",
+        ["filter", ""],
+      );
+      assertErrorInfo(
+        await rejected(
+          relFilter({
+            resourceType: "document",
+            optionalResourceId: "a",
+            optionalResourceIdPrefix: "b",
+          }),
+        ),
+        status.INVALID_ARGUMENT,
+        "ERROR_REASON_INVALID_FILTER",
+        [
+          "filter",
+          'resource_type:"document" optional_resource_id:"a" optional_resource_id_prefix:"b"',
+        ],
+      );
+      assertErrorInfo(
+        await rejected(
+          relFilter({
+            resourceType: "document",
+            optionalResourceId: "a",
+            optionalResourceIdPrefix: "b",
+            optionalRelation: "viewer",
+            optionalSubjectFilter: { subjectType: "user", optionalRelation: {} },
+          }),
+        ),
+        status.INVALID_ARGUMENT,
+        "ERROR_REASON_INVALID_FILTER",
+        [
+          "filter",
+          'resource_type:"document" optional_resource_id:"a" optional_resource_id_prefix:"b" ' +
+            'optional_relation:"viewer" optional_subject_filter:{subject_type:"user" optional_relation:{}}',
+        ],
+      );
+      assertErrorInfo(
+        await rejected(relFilter({ resourceType: "nope" })),
+        status.FAILED_PRECONDITION,
+        "ERROR_REASON_UNKNOWN_DEFINITION",
+        ["definition_name", "nope"],
+      );
+      assertErrorInfo(
+        await rejected(relFilter({ resourceType: "document", optionalRelation: "nope" })),
+        status.FAILED_PRECONDITION,
+        "ERROR_REASON_UNKNOWN_RELATION_OR_PERMISSION",
+        ["definition_name", "document"],
+        ["relation_or_permission_name", "nope"],
+      );
     } finally {
       await cluster.dispose();
     }

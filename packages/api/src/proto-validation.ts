@@ -154,7 +154,11 @@ function theRegistry(): Registry {
   return registry;
 }
 
-function messageDescriptor(typeName: string): DescMessage {
+/**
+ * The descriptor of the fully qualified `typeName` from the embedded descriptor set, which other
+ * Go-text renderings (`go-prototext.ts`) walk as this module does.
+ */
+export function messageDescriptor(typeName: string): DescMessage {
   const found = theRegistry().files.getMessage(typeName);
   if (found === undefined) throw new Error(`unknown message type ${typeName}`);
   return found;
