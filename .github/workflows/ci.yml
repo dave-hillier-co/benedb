@@ -15,7 +15,8 @@ concurrency:
 
 jobs:
   gate:
-    runs-on: self-hosted
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: benedb
@@ -32,11 +33,11 @@ jobs:
       # (see docs/packaging.md): BeneDB exists to surface Thresh bugs, and a
       # Thresh change that breaks BeneDB must fail here, not sit behind a pin
       # waiting to be noticed.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: benedb
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: dave-hillier-co/thresh
           path: thresh
@@ -51,7 +52,7 @@ jobs:
 
       # Node comes from the tool cache rather than whatever the runner happens
       # to have installed, so CI runs the version the repository is developed on.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
@@ -59,7 +60,7 @@ jobs:
       # needs the binary (the ts-proto plugin itself comes from node_modules). Taking
       # it from the action rather than asking the runner to have it keeps the job
       # self-describing — nothing has to be provisioned by hand for a new runner.
-      - uses: arduino/setup-protoc@v3
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
