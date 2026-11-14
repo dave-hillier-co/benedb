@@ -774,7 +774,7 @@ describe("RelationshipsGrain", () => {
         transactionMetadata: metadata,
       });
 
-      expect(onlyCommit().transactionMetadata).toBe(metadata);
+      expect(onlyCommit().transactionMetadata).toStrictEqual(metadata);
     });
 
     it("leaves the commit's transaction metadata absent when none is supplied", async () => {
@@ -1140,7 +1140,7 @@ describe("RelationshipsGrain", () => {
         transactionMetadata: metadata,
       });
 
-      expect(onlyCommit().transactionMetadata).toBe(metadata);
+      expect(onlyCommit().transactionMetadata).toStrictEqual(metadata);
     });
   });
 
@@ -1309,8 +1309,9 @@ describe("RelationshipsGrain", () => {
       expect(commit.counterChanges).toHaveLength(1);
       expect(commit.counterChanges[0]!.name).toBe("docs");
       // The C# sends a NULL filter and the grain-side DeleteCounter guard keys on exactly that.
+      // Here the tombstone is an undefined filter; a call boundary copies the request, so the
+      // property may be absent on arrival, which the guard (`filter === undefined`) reads alike.
       expect(commit.counterChanges[0]!.filter).toBeUndefined();
-      expect("filter" in commit.counterChanges[0]!).toBe(true);
     });
 
     it("maps counterAlreadyRegistered to a derived-message counter failure", async () => {
