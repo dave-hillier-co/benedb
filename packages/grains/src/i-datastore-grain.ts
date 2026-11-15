@@ -156,6 +156,7 @@ export interface IDatastoreGrain extends GrainWithIntegerKey, IDatastoreLog {
  * past the non-read-only `commit`.
  */
 export const IDatastoreGrain = defineGrainInterface<IDatastoreGrain>("IDatastoreGrain", {
+  key: "integer",
   options: {
     readState: { alwaysInterleave: true },
     getHead: { alwaysInterleave: true },

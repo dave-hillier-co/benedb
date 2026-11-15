@@ -93,4 +93,9 @@ export interface IRelationshipsGrain extends GrainWithIntegerKey {
  * The runtime value for `IRelationshipsGrain`. No method on the C# interface carries an interleave
  * attribute, so the options map is empty.
  */
-export const IRelationshipsGrain = defineGrainInterface<IRelationshipsGrain>("IRelationshipsGrain");
+export const IRelationshipsGrain = defineGrainInterface<IRelationshipsGrain>(
+  "IRelationshipsGrain",
+  {
+    key: "integer",
+  },
+);
